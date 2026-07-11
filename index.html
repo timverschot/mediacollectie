@@ -119,6 +119,34 @@
     color: #C9A227;
   }
 
+  /* Verwijderknop linksboven op de poster, enkel zichtbaar bij hover/focus */
+  .delete-btn {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 9999px;
+    background: rgba(20,20,26,0.85);
+    color: #F2F0EA;
+    border: 1px solid rgba(242,240,234,0.15);
+    font-size: 1.1rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.15s ease;
+  }
+  .case-card:hover .delete-btn,
+  .case-card:focus-within .delete-btn {
+    opacity: 1;
+  }
+  .delete-btn:hover {
+    background: #b91c1c;
+    border-color: #b91c1c;
+  }
+
   .case-card:focus-visible {
     outline: 2px solid #C9A227;
     outline-offset: 3px;
@@ -156,6 +184,25 @@
   .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
   .nav-link.active { color: #C9A227; }
   .nav-link:not(.active) { color: #8B8A92; }
+
+  /* Stijlen voor de '+ Titel toevoegen'-modal (formuliervelden, zoekresultaten) —
+     bewust beperkt tot #add-title-modal zodat de bestaande filter-/sorteerbalk
+     hierboven niet meeverandert. */
+  #add-title-modal input[type="text"], #add-title-modal input[type="number"],
+  #add-title-modal input[type="search"], #add-title-modal select, #add-title-modal textarea {
+    background: #1E1E26; border: 1px solid rgba(242,240,234,0.15); border-radius: 0.4rem;
+    padding: 0.5rem 0.75rem; color: #F2F0EA; font-size: 0.9rem; width: 100%;
+  }
+  #add-title-modal input:focus, #add-title-modal select:focus, #add-title-modal textarea:focus {
+    outline: none; box-shadow: 0 0 0 2px rgba(201,162,39,0.5);
+  }
+  #add-title-modal label { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; text-transform: uppercase; color: #8B8A92; letter-spacing: 0.03em; }
+  .btn { padding: 0.55rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+  .btn-primary { background: #C9A227; color: #14141A; }
+  .btn-primary:hover { background: #d9b13a; }
+  .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
+  .result-card { cursor: pointer; border: 1px solid rgba(242,240,234,0.1); border-radius: 0.5rem; padding: 0.5rem; transition: border-color 0.15s; }
+  .result-card:hover, .result-card.selected { border-color: #C9A227; }
 </style>
 </head>
 <body class="font-body text-ink min-h-screen">
@@ -175,6 +222,7 @@
           <a href="beheer.html" class="nav-link">Beheer</a>
         </nav>
         <p id="result-count" class="font-mono text-sm text-muted"></p>
+        <button id="open-add-title-btn" type="button" class="btn btn-primary !py-1.5 !px-3 text-xs shrink-0">+ Titel toevoegen</button>
       </div>
     </div>
   </header>
@@ -184,9 +232,9 @@
     <div class="max-w-7xl mx-auto px-6 py-4 space-y-3">
       <div class="flex flex-wrap gap-3 items-center">
         <input
-          id="search-input"
+          id="filter-search"
           type="search"
-          placeholder="Zoek op titel…"
+          placeholder="Zoek op titel of acteur…"
           class="flex-1 min-w-[200px] bg-surface border border-white/10 rounded-md px-4 py-2 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-gold/50"
         >
         <select id="sort-select" class="bg-surface border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-gold/50">
@@ -275,8 +323,88 @@
             <p class="text-muted font-mono uppercase text-xs mb-2">Seizoenen</p>
             <div data-field="seasons-list" class="space-y-1"></div>
           </div>
+          <div class="pt-3 border-t border-white/10">
+            <button type="button" data-delete-full class="text-xs text-muted hover:text-red-400 underline">Volledige titel verwijderen uit collectie</button>
+          </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- '+ Titel toevoegen'-modal: zelfde flow als Beheer, rechtstreeks vanaf de collectiepagina -->
+  <div id="add-title-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div class="bg-surface rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display text-2xl tracking-wide">Titel toevoegen</h2>
+        <button id="close-add-title-btn" aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+      </div>
+
+      <div class="flex gap-3 mb-4">
+        <input type="search" id="search-input" placeholder="Zoek titel op TMDb…">
+        <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
+      </div>
+
+      <div id="search-results" class="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-6"></div>
+
+      <form id="add-form" class="hidden bg-bg rounded-lg p-4 space-y-4">
+        <div class="flex gap-4">
+          <img id="form-poster" class="w-20 rounded shrink-0" alt="">
+          <div>
+            <p id="form-title" class="font-display text-xl tracking-wide"></p>
+            <p id="form-year" class="text-sm text-muted font-mono"></p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div>
+            <label>Content-type</label>
+            <select id="form-content-type">
+              <option value="movie">Film</option>
+              <option value="tv">TV-reeks</option>
+              <option value="animation">Animatie</option>
+            </select>
+          </div>
+          <div>
+            <label>Formaat</label>
+            <select id="form-format">
+              <option value="4k">4K UHD</option>
+              <option value="bluray" selected>Blu-ray</option>
+              <option value="dvd">DVD</option>
+            </select>
+          </div>
+          <div class="flex items-end gap-2 pb-1">
+            <input type="checkbox" id="form-watched" class="w-4 h-4">
+            <label class="!normal-case !text-sm text-ink">Al bekeken</label>
+          </div>
+        </div>
+
+        <div id="seasons-section" class="hidden">
+          <div class="flex items-center justify-between mb-1">
+            <label>Seizoenen</label>
+            <span class="text-xs text-muted normal-case">Vink aan welke je bezit</span>
+          </div>
+          <div id="seasons-list" class="bg-surface rounded-md p-3 space-y-0.5 max-h-52 overflow-y-auto"></div>
+        </div>
+
+        <div>
+          <label>Opmerkingen</label>
+          <input type="text" id="form-notes" placeholder="Bv. Steelbook editie">
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label>Voorkant hoesfoto (optioneel)</label>
+            <input type="file" id="form-front" accept="image/*" class="!p-1">
+          </div>
+          <div>
+            <label>Achterkant hoesfoto (optioneel)</label>
+            <input type="file" id="form-back" accept="image/*" class="!p-1">
+          </div>
+        </div>
+
+        <button type="submit" id="submit-btn" class="btn btn-primary w-full">Toevoegen aan collectie</button>
+        <p id="form-status" class="text-sm font-mono"></p>
+      </form>
     </div>
   </div>
 
@@ -292,6 +420,8 @@
   </div>
 
   <script src="assets/drive.js"></script>
+  <script src="assets/admin.js"></script>
+  <script src="assets/add-title.js"></script>
   <script src="assets/app.js"></script>
   <script>
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
@@ -311,6 +441,23 @@
           const { movies } = await driveLoadMovies();
           return movies;
         },
+      });
+
+      // '+ Titel toevoegen'-modal
+      const addModal = document.getElementById('add-title-modal');
+      document.getElementById('open-add-title-btn').addEventListener('click', () => {
+        addModal.classList.remove('hidden');
+      });
+      document.getElementById('close-add-title-btn').addEventListener('click', () => {
+        addModal.classList.add('hidden');
+      });
+      addModal.addEventListener('click', (e) => {
+        if (e.target === addModal) addModal.classList.add('hidden');
+      });
+
+      initAddTitleUI(() => {
+        addModal.classList.add('hidden');
+        if (window.__collectionReload) window.__collectionReload();
       });
     };
   </script>
