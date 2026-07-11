@@ -1,6 +1,115 @@
 [
   {
-    "id": "armageddon-1998",
+    "id": "matrix-1999",
+    "tmdb_id": 603,
+    "content_type": "movie",
+    "format": "4k",
+    "date_added": "2026-01-12",
+    "watched": true,
+    "notes": "Steelbook editie, met bonusdisc",
+    "custom_front_cover": "",
+    "custom_back_cover": "",
+    "title": "The Matrix",
+    "release_year": 1999,
+    "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    "genres": [
+      "Actie",
+      "Science Fiction"
+    ],
+    "director": "Lana Wachowski, Lilly Wachowski",
+    "cast": [
+      "Keanu Reeves",
+      "Laurence Fishburne",
+      "Carrie-Anne Moss"
+    ],
+    "runtime": 136,
+    "rating": 8.2,
+    "overview": "Een computerprogrammeur ontdekt dat de wereld om hem heen een gesimuleerde realiteit is, gecreëerd door machines om de mensheid onder controle te houden."
+  },
+  {
+    "id": "spirited-away-2001",
+    "tmdb_id": 129,
+    "content_type": "animation",
+    "format": "bluray",
+    "date_added": "2026-02-03",
+    "watched": true,
+    "notes": "",
+    "custom_front_cover": "",
+    "custom_back_cover": "",
+    "title": "Spirited Away",
+    "release_year": 2001,
+    "poster_path": "/39wmItIWsg5sZMyRUHLkWBcuVCM.jpg",
+    "genres": [
+      "Animatie",
+      "Familie",
+      "Fantasy"
+    ],
+    "director": "Hayao Miyazaki",
+    "cast": [
+      "Rumi Hiiragi",
+      "Miyu Irino",
+      "Mari Natsuki"
+    ],
+    "runtime": 125,
+    "rating": 8.5,
+    "overview": "Een tienjarig meisje belandt in een betoverde wereld vol geesten en moet een weg terug naar huis vinden nadat haar ouders in varkens veranderen."
+  },
+  {
+    "id": "dune-2021",
+    "tmdb_id": 438631,
+    "content_type": "movie",
+    "format": "4k",
+    "date_added": "2026-03-20",
+    "watched": false,
+    "notes": "Wachten op deel 2 om samen te kijken",
+    "custom_front_cover": "",
+    "custom_back_cover": "",
+    "title": "Dune",
+    "release_year": 2021,
+    "poster_path": "/d5NXSklXo0qyIYkgV94XAgMIckC.jpg",
+    "genres": [
+      "Science Fiction",
+      "Avontuur"
+    ],
+    "director": "Denis Villeneuve",
+    "cast": [
+      "Timothée Chalamet",
+      "Rebecca Ferguson",
+      "Oscar Isaac"
+    ],
+    "runtime": 155,
+    "rating": 8.0,
+    "overview": "De zoon van een adellijke familie moet de gevaarlijkste planeet van het universum beschermen om de toekomst van zijn volk veilig te stellen."
+  },
+  {
+    "id": "breaking-bad-2008",
+    "tmdb_id": 1396,
+    "content_type": "tv",
+    "format": "bluray",
+    "date_added": "2026-04-11",
+    "watched": true,
+    "notes": "Volledige box set, 6 seizoenen",
+    "custom_front_cover": "",
+    "custom_back_cover": "",
+    "title": "Breaking Bad",
+    "release_year": 2008,
+    "poster_path": "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+    "genres": [
+      "Drama",
+      "Misdaad"
+    ],
+    "director": "Vince Gilligan (bedenker)",
+    "cast": [
+      "Bryan Cranston",
+      "Aaron Paul",
+      "Anna Gunn"
+    ],
+    "runtime": 45,
+    "rating": 8.9,
+    "overview": "Een scheikundeleraar met kanker begint methamfetamine te produceren om de toekomst van zijn gezin financieel veilig te stellen."
+  },
+  {
+    "id": "the-mask-1994",
     "content_type": "movie",
     "format": "dvd",
     "date_added": "2026-07-11",
@@ -8,25 +117,26 @@
     "notes": "",
     "custom_front_cover": "",
     "custom_back_cover": "",
-    "tmdb_id": 95,
-    "title": "Armageddon",
-    "release_year": 1998,
-    "poster_path": "/eTM3qtGhDU8cvjpoa6KEt5E2auU.jpg",
+    "tmdb_id": 854,
+    "title": "The Mask",
+    "release_year": 1994,
+    "poster_path": "/jPC2eYub74zwf2tPGVtzSlBW6Oy.jpg",
     "genres": [
-      "Actie",
-      "Sciencefiction",
-      "Avontuur"
+      "Komedie",
+      "Fantasie",
+      "Misdaad",
+      "Romantiek"
     ],
-    "director": "Michael Bay",
+    "director": "Chuck Russell",
     "cast": [
-      "Bruce Willis",
-      "Billy Bob Thornton",
-      "Ben Affleck",
-      "Liv Tyler",
-      "Will Patton"
+      "Jim Carrey",
+      "Peter Riegert",
+      "Peter Greene",
+      "Amy Yasbeck",
+      "Richard Jeni"
     ],
-    "runtime": 151,
-    "rating": 6.835,
-    "overview": "Een gigantische meteoriet zal over 18 dagen inslaan op aarde. NASA roept de hulp in van Harry Stamper, een boor-expert, om de astronauten te trainen. Harry denkt echter dat de astronauten niet op tijd getraind kunnen zijn, en besluit zelf met z'n crew de klus te gaan klaren."
+    "runtime": 97,
+    "rating": 6.993,
+    "overview": "Stanley Ipkiss is een bankmedewerker die constant wordt vernederd bij confrontaties, en niet voor zichzelf durft op te komen. Na één van de ergste dagen uit z'n leven vindt hij een masker. Wanneer hij het masker opzet komt zijn binnenste ik boven: een cartoon-achtige, romantische en wilde man. Een misdaadbaas gaat achter Ipkiss aan, nadat een vriend van hem dankzij hem de dood vindt."
   }
 ]

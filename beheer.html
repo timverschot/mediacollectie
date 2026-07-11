@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beheer — Mijn Mediacollectie</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: { bg: '#14141A', surface: '#1E1E26', gold: '#C9A227', teal: '#2FA4A9', ink: '#F2F0EA', muted: '#8B8A92' },
+        fontFamily: {
+          display: ['"Bebas Neue"', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background-color: #14141A; }
+  .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .nav-link.active { color: #C9A227; }
+  .nav-link:not(.active) { color: #8B8A92; }
+  input[type="text"], input[type="number"], input[type="search"], select, textarea {
+    background: #1E1E26; border: 1px solid rgba(242,240,234,0.15); border-radius: 0.4rem;
+    padding: 0.5rem 0.75rem; color: #F2F0EA; font-size: 0.9rem; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(201,162,39,0.5); }
+  label { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; text-transform: uppercase; color: #8B8A92; letter-spacing: 0.03em; }
+  .btn { padding: 0.55rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+  .btn-primary { background: #C9A227; color: #14141A; }
+  .btn-primary:hover { background: #d9b13a; }
+  .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
+  .result-card { cursor: pointer; border: 1px solid rgba(242,240,234,0.1); border-radius: 0.5rem; padding: 0.5rem; transition: border-color 0.15s; }
+  .result-card:hover, .result-card.selected { border-color: #C9A227; }
+</style>
+</head>
+<body class="font-body text-ink min-h-screen">
+
+  <header class="border-b border-white/5">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
+      <h1 class="font-display text-4xl tracking-wide text-ink">Beheer</h1>
+      <nav class="flex gap-6 items-center">
+        <a href="index.html" class="nav-link">Collectie</a>
+        <a href="prijzen.html" class="nav-link">Prijzen</a>
+        <a href="beheer.html" class="nav-link active">Beheer</a>
+        <button id="settings-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">⚙ Instellingen</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-8">
+
+    <div id="config-warning" class="hidden bg-surface border border-gold/30 rounded-lg p-4 mb-6 text-sm">
+      Vul eerst je TMDb-key en GitHub-gegevens in via <button id="open-settings-link" class="text-gold underline">Instellingen</button> voor je titels kan toevoegen.
+    </div>
+
+    <div class="flex gap-4 mb-6 border-b border-white/5">
+      <button data-tab="single" class="tab-btn pb-3 px-1 border-b-2 border-gold text-ink font-mono text-sm uppercase">Eén titel</button>
+      <button data-tab="bulk" class="tab-btn pb-3 px-1 border-b-2 border-transparent text-muted font-mono text-sm uppercase">Bulk (lijst)</button>
+    </div>
+
+    <!-- ENKELE TITEL -->
+    <section id="tab-single">
+      <div class="flex gap-3 mb-4">
+        <input type="search" id="search-input" placeholder="Zoek titel op TMDb…">
+        <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
+      </div>
+
+      <div id="search-results" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6"></div>
+
+      <form id="add-form" class="hidden bg-surface rounded-lg p-6 space-y-4">
+        <div class="flex gap-4">
+          <img id="form-poster" class="w-24 rounded shrink-0" alt="">
+          <div>
+            <p id="form-title" class="font-display text-2xl tracking-wide"></p>
+            <p id="form-year" class="text-sm text-muted font-mono"></p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div>
+            <label>Content-type</label>
+            <select id="form-content-type">
+              <option value="movie">Film</option>
+              <option value="tv">TV-reeks</option>
+              <option value="animation">Animatie</option>
+            </select>
+          </div>
+          <div>
+            <label>Formaat</label>
+            <select id="form-format">
+              <option value="4k">4K UHD</option>
+              <option value="bluray" selected>Blu-ray</option>
+              <option value="dvd">DVD</option>
+            </select>
+          </div>
+          <div class="flex items-end gap-2 pb-1">
+            <input type="checkbox" id="form-watched" class="w-4 h-4">
+            <label class="!normal-case !text-sm text-ink">Al bekeken</label>
+          </div>
+        </div>
+
+        <div>
+          <label>Opmerkingen</label>
+          <input type="text" id="form-notes" placeholder="Bv. Steelbook editie">
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label>Voorkant hoesfoto (optioneel)</label>
+            <input type="file" id="form-front" accept="image/*" class="!p-1">
+          </div>
+          <div>
+            <label>Achterkant hoesfoto (optioneel)</label>
+            <input type="file" id="form-back" accept="image/*" class="!p-1">
+          </div>
+        </div>
+
+        <button type="submit" id="submit-btn" class="btn btn-primary w-full">Toevoegen aan collectie</button>
+        <p id="form-status" class="text-sm font-mono"></p>
+      </form>
+    </section>
+
+    <!-- BULK -->
+    <section id="tab-bulk" class="hidden">
+      <p class="text-sm text-muted mb-3">
+        Eén titel per regel, formaat: <code class="font-mono text-xs">Titel | Jaar | formaat | content-type</code>
+        (jaar/formaat/content-type mogen leeg blijven, standaard is <code class="font-mono text-xs">bluray</code> / <code class="font-mono text-xs">movie</code>).<br>
+        Voorbeeld: <code class="font-mono text-xs">The Matrix | 1999 | 4k</code>
+      </p>
+      <textarea id="bulk-input" rows="10" placeholder="The Matrix | 1999 | 4k
+Spirited Away | 2001 | bluray
+Breaking Bad | 2008 | bluray | tv"></textarea>
+      <button id="bulk-submit" class="btn btn-primary mt-3">Bulk toevoegen</button>
+      <div id="bulk-log" class="mt-4 font-mono text-xs space-y-1"></div>
+    </section>
+  </main>
+
+  <!-- INSTELLINGEN MODAL -->
+  <div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div class="bg-surface rounded-xl max-w-md w-full p-6 space-y-4 ring-1 ring-white/10">
+      <h2 class="font-display text-2xl tracking-wide">Instellingen</h2>
+      <p class="text-xs text-muted">
+        Deze gegevens worden enkel lokaal in je browser bewaard (localStorage) en nooit ergens anders naartoe gestuurd
+        dan naar TMDb en GitHub zelf. Gebruik dit niet op een gedeelde/publieke computer.
+      </p>
+      <div>
+        <label>TMDb API-key</label>
+        <input type="text" id="cfg-tmdb-key">
+      </div>
+      <div>
+        <label>GitHub Personal Access Token</label>
+        <input type="text" id="cfg-token" placeholder="ghp_...">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label>GitHub-gebruikersnaam</label>
+          <input type="text" id="cfg-owner">
+        </div>
+        <div>
+          <label>Repo-naam</label>
+          <input type="text" id="cfg-repo">
+        </div>
+      </div>
+      <div>
+        <label>Branch</label>
+        <input type="text" id="cfg-branch" value="main">
+      </div>
+      <p id="settings-status" class="text-sm font-mono"></p>
+      <div class="flex gap-3">
+        <button id="test-connection-btn" class="btn btn-secondary flex-1">Test verbinding</button>
+        <button id="save-settings-btn" class="btn btn-primary flex-1">Opslaan</button>
+      </div>
+      <button id="close-settings-btn" class="text-xs text-muted underline w-full text-center">Sluiten</button>
+    </div>
+  </div>
+
+  <script src="assets/admin.js"></script>
+  <script>
+    let selectedResult = null;
+    let selectedDetails = null;
+
+    function cfg() { return getConfig(); }
+    function cfgReady(c) { return c.tmdbKey && c.token && c.owner && c.repo && c.branch; }
+
+    function refreshWarning() {
+      document.getElementById('config-warning').classList.toggle('hidden', cfgReady(cfg()));
+    }
+    refreshWarning();
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => {
+          b.classList.remove('border-gold', 'text-ink');
+          b.classList.add('border-transparent', 'text-muted');
+        });
+        btn.classList.add('border-gold', 'text-ink');
+        btn.classList.remove('border-transparent', 'text-muted');
+        document.getElementById('tab-single').classList.toggle('hidden', btn.dataset.tab !== 'single');
+        document.getElementById('tab-bulk').classList.toggle('hidden', btn.dataset.tab !== 'bulk');
+      });
+    });
+
+    // Settings modal
+    const modal = document.getElementById('settings-modal');
+    function openSettings() {
+      const c = cfg();
+      document.getElementById('cfg-tmdb-key').value = c.tmdbKey || '';
+      document.getElementById('cfg-token').value = c.token || '';
+      document.getElementById('cfg-owner').value = c.owner || '';
+      document.getElementById('cfg-repo').value = c.repo || '';
+      document.getElementById('cfg-branch').value = c.branch || 'main';
+      modal.classList.remove('hidden');
+    }
+    document.getElementById('settings-btn').addEventListener('click', openSettings);
+    document.getElementById('open-settings-link').addEventListener('click', openSettings);
+    document.getElementById('close-settings-btn').addEventListener('click', () => modal.classList.add('hidden'));
+
+    document.getElementById('save-settings-btn').addEventListener('click', () => {
+      saveConfig({
+        tmdbKey: document.getElementById('cfg-tmdb-key').value.trim(),
+        token: document.getElementById('cfg-token').value.trim(),
+        owner: document.getElementById('cfg-owner').value.trim(),
+        repo: document.getElementById('cfg-repo').value.trim(),
+        branch: document.getElementById('cfg-branch').value.trim() || 'main',
+      });
+      document.getElementById('settings-status').textContent = '✓ Opgeslagen';
+      document.getElementById('settings-status').className = 'text-sm font-mono text-teal';
+      refreshWarning();
+    });
+
+    document.getElementById('test-connection-btn').addEventListener('click', async () => {
+      const statusEl = document.getElementById('settings-status');
+      statusEl.textContent = 'Bezig met testen...';
+      statusEl.className = 'text-sm font-mono text-muted';
+      try {
+        const testCfg = {
+          token: document.getElementById('cfg-token').value.trim(),
+          owner: document.getElementById('cfg-owner').value.trim(),
+          repo: document.getElementById('cfg-repo').value.trim(),
+        };
+        await testConnection(testCfg);
+        statusEl.textContent = '✓ Verbinding gelukt!';
+        statusEl.className = 'text-sm font-mono text-teal';
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+        statusEl.className = 'text-sm font-mono text-red-400';
+      }
+    });
+
+    // Zoeken
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSearch();
+    });
+
+    async function doSearch() {
+      const c = cfg();
+      if (!cfgReady(c)) { openSettings(); return; }
+      const query = document.getElementById('search-input').value.trim();
+      if (!query) return;
+
+      const resultsEl = document.getElementById('search-results');
+      resultsEl.innerHTML = '<p class="col-span-full text-muted text-sm">Zoeken...</p>';
+      try {
+        const results = await tmdbSearch(query, c.tmdbKey);
+        if (!results.length) {
+          resultsEl.innerHTML = '<p class="col-span-full text-muted text-sm">Geen resultaten.</p>';
+          return;
+        }
+        resultsEl.innerHTML = '';
+        results.slice(0, 8).forEach((r) => {
+          const title = r.title || r.name;
+          const date = r.release_date || r.first_air_date || '';
+          const div = document.createElement('div');
+          div.className = 'result-card';
+          div.innerHTML = `
+            ${r.poster_path ? `<img src="${TMDB_IMG_BASE}${r.poster_path}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
+            <p class="text-xs truncate">${title}</p>
+            <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
+          `;
+          div.addEventListener('click', () => selectResult(r));
+          resultsEl.appendChild(div);
+        });
+      } catch (err) {
+        resultsEl.innerHTML = `<p class="col-span-full text-red-400 text-sm">${err.message}</p>`;
+      }
+    }
+
+    async function selectResult(r) {
+      const c = cfg();
+      selectedResult = r;
+      selectedDetails = await tmdbDetails(r.id, r.media_type, c.tmdbKey);
+
+      document.getElementById('form-poster').src = selectedDetails.poster_path ? TMDB_IMG_BASE + selectedDetails.poster_path : '';
+      document.getElementById('form-title').textContent = selectedDetails.title;
+      document.getElementById('form-year').textContent = selectedDetails.release_year || '';
+      document.getElementById('form-content-type').value = r.media_type === 'tv' ? 'tv' : 'movie';
+      document.getElementById('add-form').classList.remove('hidden');
+      document.getElementById('form-status').textContent = '';
+    }
+
+    document.getElementById('add-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const c = cfg();
+      const statusEl = document.getElementById('form-status');
+      const submitBtn = document.getElementById('submit-btn');
+      submitBtn.disabled = true;
+      statusEl.textContent = 'Bezig met opslaan naar GitHub...';
+      statusEl.className = 'text-sm font-mono text-muted';
+
+      try {
+        const slug = slugify(selectedDetails.title, selectedDetails.release_year);
+        let frontPath = '', backPath = '';
+
+        const frontFile = document.getElementById('form-front').files[0];
+        const backFile = document.getElementById('form-back').files[0];
+        if (frontFile) {
+          statusEl.textContent = 'Voorkant-hoes uploaden...';
+          const b64 = await resizeImageFile(frontFile, 1200);
+          frontPath = await uploadCover(c, slug, 'front', b64);
+        }
+        if (backFile) {
+          statusEl.textContent = 'Achterkant-hoes uploaden...';
+          const b64 = await resizeImageFile(backFile, 1200);
+          backPath = await uploadCover(c, slug, 'back', b64);
+        }
+
+        const entry = {
+          id: slug,
+          content_type: document.getElementById('form-content-type').value,
+          format: document.getElementById('form-format').value,
+          date_added: new Date().toISOString().slice(0, 10),
+          watched: document.getElementById('form-watched').checked,
+          notes: document.getElementById('form-notes').value.trim(),
+          custom_front_cover: frontPath,
+          custom_back_cover: backPath,
+          ...selectedDetails,
+        };
+
+        statusEl.textContent = 'movies.json bijwerken...';
+        const status = await upsertMovie(c, entry);
+        statusEl.textContent = `✓ '${entry.title}' ${status}. Je site is over ~1 minuut bijgewerkt.`;
+        statusEl.className = 'text-sm font-mono text-teal';
+
+        document.getElementById('add-form').reset();
+        document.getElementById('add-form').classList.add('hidden');
+        document.getElementById('search-input').value = '';
+        document.getElementById('search-results').innerHTML = '';
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+        statusEl.className = 'text-sm font-mono text-red-400';
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // Bulk
+    document.getElementById('bulk-submit').addEventListener('click', async () => {
+      const c = cfg();
+      if (!cfgReady(c)) { openSettings(); return; }
+
+      const lines = document.getElementById('bulk-input').value.split('\n').map((l) => l.trim()).filter(Boolean);
+      const logEl = document.getElementById('bulk-log');
+      logEl.innerHTML = '';
+      const entries = [];
+
+      for (const line of lines) {
+        const [titleRaw, yearRaw, formatRaw, typeRaw] = line.split('|').map((p) => p?.trim());
+        const logLine = document.createElement('p');
+        logLine.textContent = `Zoeken: ${titleRaw}...`;
+        logEl.appendChild(logLine);
+
+        try {
+          const results = await tmdbSearch(`${titleRaw} ${yearRaw || ''}`.trim(), c.tmdbKey);
+          if (!results.length) {
+            logLine.textContent = `✗ ${titleRaw} — geen resultaat`;
+            logLine.className = 'text-red-400';
+            continue;
+          }
+          let best = results[0];
+          if (yearRaw) {
+            const match = results.find((r) => (r.release_date || r.first_air_date || '').slice(0, 4) === yearRaw);
+            if (match) best = match;
+          }
+          const details = await tmdbDetails(best.id, best.media_type, c.tmdbKey);
+          const slug = slugify(details.title, details.release_year);
+
+          entries.push({
+            id: slug,
+            content_type: typeRaw || (best.media_type === 'tv' ? 'tv' : 'movie'),
+            format: formatRaw || 'bluray',
+            date_added: new Date().toISOString().slice(0, 10),
+            watched: false,
+            notes: '',
+            custom_front_cover: '',
+            custom_back_cover: '',
+            ...details,
+          });
+          logLine.textContent = `✓ ${details.title} (${details.release_year})`;
+          logLine.className = 'text-teal';
+        } catch (err) {
+          logLine.textContent = `✗ ${titleRaw} — ${err.message}`;
+          logLine.className = 'text-red-400';
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      if (entries.length) {
+        const doneLine = document.createElement('p');
+        doneLine.textContent = `${entries.length} titels wegschrijven naar movies.json...`;
+        doneLine.className = 'text-muted';
+        logEl.appendChild(doneLine);
+        try {
+          await upsertMoviesBatch(c, entries);
+          doneLine.textContent = `✓ ${entries.length} titels weggeschreven naar movies.json.`;
+          doneLine.className = 'text-teal';
+        } catch (err) {
+          doneLine.textContent = '✗ ' + err.message;
+          doneLine.className = 'text-red-400';
+        }
+      }
+    });
+  </script>
+</body>
+</html>

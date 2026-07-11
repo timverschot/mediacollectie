@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mijn Mediacollectie</title>
+<meta name="description" content="Persoonlijke collectie van films en series op DVD, Blu-ray en 4K Ultra HD.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: '#14141A',
+          surface: '#1E1E26',
+          gold: '#C9A227',
+          teal: '#2FA4A9',
+          ink: '#F2F0EA',
+          muted: '#8B8A92',
+        },
+        fontFamily: {
+          display: ['"Bebas Neue"', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  body { background-color: #14141A; }
+
+  /* Subtiele filmperforatie-rand bovenaan als sfeerdetail */
+  .sprocket-strip {
+    background-image: radial-gradient(circle, rgba(242,240,234,0.12) 2px, transparent 2px);
+    background-size: 18px 18px;
+    background-position: center;
+  }
+
+  .chip {
+    padding: 0.35rem 0.85rem;
+    border-radius: 9999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    border: 1px solid rgba(242,240,234,0.15);
+    color: #8B8A92;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: rgba(201,162,39,0.5); color: #F2F0EA; }
+  .chip-active {
+    background: #C9A227;
+    border-color: #C9A227;
+    color: #14141A;
+    font-weight: 600;
+  }
+
+  .ribbon {
+    position: absolute;
+    top: 0.5rem;
+    right: -0.4rem;
+    padding: 0.15rem 0.6rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #14141A;
+    border-radius: 3px 0 0 3px;
+    box-shadow: -2px 2px 4px rgba(0,0,0,0.35);
+  }
+  .ribbon-4k { background: #C9A227; }
+  .ribbon-bluray { background: #2FA4A9; color: #14141A; }
+  .ribbon-dvd { background: #8B8A92; color: #14141A; }
+
+  .watched-dot {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 9999px;
+    background: #2FA4A9;
+    box-shadow: 0 0 0 2px rgba(20,20,26,0.8);
+  }
+
+  .case-card:focus-visible {
+    outline: 2px solid #C9A227;
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+  }
+
+  /* Signatuur: modal die opent als een fysiek doosje, met flip tussen voor- en achterkant */
+  .flip-card {
+    perspective: 1600px;
+  }
+  .flip-card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.4, 0.1, 0.2, 1);
+    transform-style: preserve-3d;
+  }
+  .flip-card.flipped .flip-card-inner {
+    transform: rotateY(180deg);
+  }
+  .flip-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  .flip-face img { width: 100%; height: 100%; object-fit: cover; }
+  .flip-back { transform: rotateY(180deg); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flip-card-inner { transition: none; }
+  }
+
+  .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .nav-link.active { color: #C9A227; }
+  .nav-link:not(.active) { color: #8B8A92; }
+</style>
+</head>
+<body class="font-body text-ink min-h-screen">
+
+  <!-- Kop -->
+  <header class="border-b border-white/5">
+    <div class="sprocket-strip h-2 w-full opacity-60"></div>
+    <div class="max-w-7xl mx-auto px-6 py-8 flex items-end justify-between flex-wrap gap-4">
+      <div>
+        <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
+        <h1 class="font-display text-5xl tracking-wide text-ink">Mijn Mediacollectie</h1>
+      </div>
+      <div class="flex items-center gap-6">
+        <nav class="flex gap-6">
+          <a href="index.html" class="nav-link active">Collectie</a>
+          <a href="prijzen.html" class="nav-link">Prijzen</a>
+          <a href="beheer.html" class="nav-link">Beheer</a>
+        </nav>
+        <p id="result-count" class="font-mono text-sm text-muted"></p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Controlepaneel: zoeken, filters, sortering -->
+  <div class="sticky top-0 z-20 bg-bg/95 backdrop-blur border-b border-white/5">
+    <div class="max-w-7xl mx-auto px-6 py-4 space-y-3">
+      <div class="flex flex-wrap gap-3 items-center">
+        <input
+          id="search-input"
+          type="search"
+          placeholder="Zoek op titel…"
+          class="flex-1 min-w-[200px] bg-surface border border-white/10 rounded-md px-4 py-2 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-gold/50"
+        >
+        <select id="sort-select" class="bg-surface border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-gold/50">
+          <option value="date_added_desc">Onlangs toegevoegd</option>
+          <option value="title_asc">Titel (A–Z)</option>
+          <option value="year_desc">Releasejaar (nieuw–oud)</option>
+          <option value="year_asc">Releasejaar (oud–nieuw)</option>
+        </select>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Formaat</span>
+        <div id="format-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-format="4k">4K UHD</button>
+          <button type="button" class="chip" data-format="bluray">Blu-ray</button>
+          <button type="button" class="chip" data-format="dvd">DVD</button>
+        </div>
+        <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Type</span>
+        <div id="type-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-type="movie">Films</button>
+          <button type="button" class="chip" data-type="tv">TV-reeksen</button>
+          <button type="button" class="chip" data-type="animation">Animatie</button>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Genre</span>
+        <div id="genre-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid -->
+  <main class="max-w-7xl mx-auto px-6 py-10">
+    <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-5 gap-y-8"></div>
+
+    <p id="empty-state" class="hidden text-center text-muted py-20 font-body">
+      Geen titels gevonden met deze filters. Pas je zoekopdracht of filters aan.
+    </p>
+
+    <div class="flex justify-center mt-10">
+      <button id="load-more" class="hidden chip px-6 py-2 text-sm">Toon meer</button>
+    </div>
+  </main>
+
+  <footer class="max-w-7xl mx-auto px-6 py-10 text-center text-xs text-muted font-mono">
+    Gegenereerd vanuit movies.json — beheerd via het lokale invoerscript
+  </footer>
+
+  <!-- Detailmodal -->
+  <div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+    <div class="bg-surface rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10">
+      <div class="flex justify-end p-3">
+        <button id="modal-close" aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+      </div>
+      <div class="px-6 pb-8 grid sm:grid-cols-[220px_1fr] gap-6">
+        <div>
+          <div class="flip-card aspect-[2/3] w-full max-w-[220px]">
+            <div class="flip-card-inner">
+              <div class="flip-face flip-front">
+                <img data-cover="front" src="" alt="">
+              </div>
+              <div class="flip-face flip-back">
+                <img data-cover="back" src="" alt="">
+              </div>
+            </div>
+          </div>
+          <button data-flip-btn class="hidden mt-3 chip w-full text-center">Draai hoes om</button>
+        </div>
+        <div class="space-y-3">
+          <h2 data-field="title" class="font-display text-4xl tracking-wide text-ink"></h2>
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted font-mono">
+            <span data-field="year"></span>
+            <span data-field="runtime"></span>
+            <span>TMDb: <span data-field="rating"></span></span>
+          </div>
+          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Genres</span><br><span data-field="genres"></span></p>
+          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Regisseur</span><br><span data-field="director"></span></p>
+          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Hoofdrolspelers</span><br><span data-field="cast"></span></p>
+          <p class="text-sm leading-relaxed" data-field="overview"></p>
+          <div class="pt-3 border-t border-white/10 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <p><span class="text-muted font-mono uppercase text-xs">Formaat</span><br><span data-field="format" class="text-gold font-semibold"></span></p>
+            <p><span class="text-muted font-mono uppercase text-xs">Opmerkingen</span><br><span data-field="notes"></span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/app.js"></script>
+  <script>
+    initCollectionApp({ dataUrl: 'data/movies.json' });
+  </script>
+</body>
+</html>

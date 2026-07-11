@@ -1,0 +1,14 @@
+[
+  {
+    "id": "matrix-1999",
+    "title": "The Matrix",
+    "release_year": 1999,
+    "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    "owned": true,
+    "history": [
+      { "date": "2026-05-01", "ebay_low": 14.99, "ebay_high": 32.5, "ebay_avg": 21.75, "ebay_currency": "GBP", "ebay_count": 18 },
+      { "date": "2026-06-01", "ebay_low": 15.5, "ebay_high": 34.0, "ebay_avg": 22.9, "ebay_currency": "GBP", "ebay_count": 21 },
+      { "date": "2026-07-01", "ebay_low": 16.0, "ebay_high": 38.0, "ebay_avg": 24.3, "ebay_currency": "GBP", "ebay_count": 16 }
+    ]
+  }
+]

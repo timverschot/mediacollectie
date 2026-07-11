@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prijstracker — Mijn Mediacollectie</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: { bg: '#14141A', surface: '#1E1E26', gold: '#C9A227', teal: '#2FA4A9', ink: '#F2F0EA', muted: '#8B8A92' },
+        fontFamily: {
+          display: ['"Bebas Neue"', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background-color: #14141A; }
+  .chip {
+    padding: 0.35rem 0.85rem; border-radius: 9999px; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem; letter-spacing: 0.03em; text-transform: uppercase;
+    border: 1px solid rgba(242,240,234,0.15); color: #8B8A92; background: transparent;
+  }
+  .chip-active { background: #C9A227; border-color: #C9A227; color: #14141A; font-weight: 600; }
+  .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .nav-link.active { color: #C9A227; }
+  .nav-link:not(.active) { color: #8B8A92; }
+</style>
+</head>
+<body class="font-body text-ink min-h-screen">
+
+  <header class="border-b border-white/5">
+    <div class="max-w-7xl mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
+      <h1 class="font-display text-4xl tracking-wide text-ink">Prijstracker</h1>
+      <nav class="flex gap-6">
+        <a href="index.html" class="nav-link">Collectie</a>
+        <a href="prijzen.html" class="nav-link active">Prijzen</a>
+        <a href="beheer.html" class="nav-link">Beheer</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-6 py-6">
+    <p class="text-sm text-muted max-w-2xl mb-6">
+      Prijsrange en gemiddelde zijn gebaseerd op actieve eBay-vraagprijzen (geen bevestigde verkoopprijzen),
+      opgehaald via <code class="font-mono text-xs">scripts/price_tracker.py --refresh</code>. Elke keer dat je
+      dat script draait, komt er een nieuw punt bij in de trendlijn hieronder.
+    </p>
+
+    <div class="flex flex-wrap gap-3 items-center justify-between mb-6">
+      <p id="price-count" class="font-mono text-sm text-muted"></p>
+      <select id="price-sort" class="bg-surface border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-gold/50">
+        <option value="updated_desc">Laatst bijgewerkt</option>
+        <option value="price_desc">Gemiddelde prijs (hoog-laag)</option>
+        <option value="price_asc">Gemiddelde prijs (laag-hoog)</option>
+        <option value="trend_desc">Sterkst stijgend</option>
+        <option value="title_asc">Titel (A-Z)</option>
+      </select>
+    </div>
+
+    <div id="price-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    <p id="price-empty" class="hidden text-center text-muted py-20">
+      Nog geen prijsdata. Draai <code class="font-mono text-xs">python scripts/price_tracker.py --refresh</code> om te starten.
+    </p>
+  </div>
+
+  <script src="assets/price-app.js"></script>
+  <script>initPriceTracker();</script>
+</body>
+</html>

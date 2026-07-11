@@ -1,0 +1,12 @@
+{
+  "tmdb_api_key": "PLAK_HIER_JE_EIGEN_TMDB_API_KEY",
+
+  "_comment_prijstracker": "Onderstaande velden zijn enkel nodig voor scripts/price_tracker.py",
+  "ebay_client_id": "PLAK_HIER_JE_EBAY_CLIENT_ID",
+  "ebay_client_secret": "PLAK_HIER_JE_EBAY_CLIENT_SECRET",
+  "ebay_marketplace": "EBAY_GB",
+
+  "_comment_bol": "Optioneel — enkel invullen als je bol.com-affiliate/partner bent",
+  "bol_client_id": "",
+  "bol_client_secret": ""
+}
