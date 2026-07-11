@@ -142,6 +142,14 @@
           </div>
         </div>
 
+        <div id="seasons-section" class="hidden">
+          <div class="flex items-center justify-between mb-1">
+            <label>Seizoenen</label>
+            <span class="text-xs text-muted normal-case">Vink aan welke je bezit, kies per seizoen het formaat</span>
+          </div>
+          <div id="seasons-list" class="bg-bg rounded-md p-3 space-y-0.5 max-h-64 overflow-y-auto"></div>
+        </div>
+
         <div>
           <label>Opmerkingen</label>
           <input type="text" id="form-notes" placeholder="Bv. Steelbook editie">
@@ -345,6 +353,51 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
       document.getElementById('form-content-type').value = r.media_type === 'tv' ? 'tv' : 'movie';
       document.getElementById('add-form').classList.remove('hidden');
       document.getElementById('form-status').textContent = '';
+
+      const seasonsSection = document.getElementById('seasons-section');
+      if (r.media_type === 'tv' && selectedDetails.seasons && selectedDetails.seasons.length) {
+        seasonsSection.classList.remove('hidden');
+        renderSeasonPicker(selectedDetails.seasons);
+      } else {
+        seasonsSection.classList.add('hidden');
+        document.getElementById('seasons-list').innerHTML = '';
+      }
+    }
+
+    function escapeHtmlLocal(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // Bouwt de seizoenkiezer: per seizoen een checkbox ('in bezit') en een
+    // formaat-dropdown die standaard de algemene formaatkeuze overneemt maar
+    // per seizoen aan te passen is.
+    function renderSeasonPicker(seasons) {
+      const defaultFormat = document.getElementById('form-format').value;
+      const opt = (value, label) =>
+        `<option value="${value}" ${defaultFormat === value ? 'selected' : ''}>${label}</option>`;
+      document.getElementById('seasons-list').innerHTML = seasons
+        .map(
+          (s) => `
+        <label class="flex items-center gap-3 py-1.5 border-b border-white/5 last:border-0 !normal-case">
+          <input type="checkbox" class="season-owned w-4 h-4 shrink-0" data-season="${s.season_number}" checked>
+          <span class="flex-1 text-sm text-ink">${escapeHtmlLocal(s.name)}
+            <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span>
+          </span>
+          <select class="season-format bg-surface border border-white/10 rounded px-2 py-1 text-xs font-mono w-28" data-season="${s.season_number}">
+            ${opt('4k', '4K UHD')}${opt('bluray', 'Blu-ray')}${opt('dvd', 'DVD')}
+          </select>
+        </label>
+      `
+        )
+        .join('');
+
+      // Uitgevinkt seizoen: formaat-dropdown uitschakelen (niet in bezit = geen formaat).
+      document.querySelectorAll('#seasons-list .season-owned').forEach((cb) => {
+        const sel = document.querySelector(`#seasons-list .season-format[data-season="${cb.dataset.season}"]`);
+        const sync = () => { sel.disabled = !cb.checked; };
+        cb.addEventListener('change', sync);
+        sync();
+      });
     }
 
     document.getElementById('add-form').addEventListener('submit', async (e) => {
@@ -372,6 +425,23 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           backFileId = await driveUploadCoverImage(b64, slug, 'back');
         }
 
+        // Seizoensdata verzamelen (enkel relevant als de seizoenkiezer zichtbaar is).
+        let seasons = [];
+        if (!document.getElementById('seasons-section').classList.contains('hidden')) {
+          seasons = (selectedDetails.seasons || []).map((s) => {
+            const cb = document.querySelector(`#seasons-list .season-owned[data-season="${s.season_number}"]`);
+            const sel = document.querySelector(`#seasons-list .season-format[data-season="${s.season_number}"]`);
+            const owned = cb ? cb.checked : false;
+            return {
+              season_number: s.season_number,
+              name: s.name,
+              episode_count: s.episode_count,
+              owned,
+              format: owned && sel ? sel.value : '',
+            };
+          });
+        }
+
         const entry = {
           id: slug,
           content_type: document.getElementById('form-content-type').value,
@@ -382,6 +452,7 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           custom_front_cover: frontFileId,
           custom_back_cover: backFileId,
           ...selectedDetails,
+          seasons,
         };
 
         statusEl.textContent = 'movies.json bijwerken in Drive...';
