@@ -1,0 +1,32 @@
+[
+  {
+    "id": "armageddon-1998",
+    "content_type": "movie",
+    "format": "dvd",
+    "date_added": "2026-07-11",
+    "watched": true,
+    "notes": "",
+    "custom_front_cover": "",
+    "custom_back_cover": "",
+    "tmdb_id": 95,
+    "title": "Armageddon",
+    "release_year": 1998,
+    "poster_path": "/eTM3qtGhDU8cvjpoa6KEt5E2auU.jpg",
+    "genres": [
+      "Actie",
+      "Sciencefiction",
+      "Avontuur"
+    ],
+    "director": "Michael Bay",
+    "cast": [
+      "Bruce Willis",
+      "Billy Bob Thornton",
+      "Ben Affleck",
+      "Liv Tyler",
+      "Will Patton"
+    ],
+    "runtime": 151,
+    "rating": 6.835,
+    "overview": "Een gigantische meteoriet zal over 18 dagen inslaan op aarde. NASA roept de hulp in van Harry Stamper, een boor-expert, om de astronauten te trainen. Harry denkt echter dat de astronauten niet op tijd getraind kunnen zijn, en besluit zelf met z'n crew de klus te gaan klaren."
+  }
+]
