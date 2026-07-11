@@ -2,6 +2,11 @@
  * Prijstracker — leest data/price_history.json en toont per gevolgde titel
  * de laatste eBay-prijsrange/gemiddelde, een trendlijntje en (indien
  * aanwezig) de bol.com-nieuwprijs.
+ *
+ * Als `window.__priceTrackerLoadData` gezet is (een async functie die een
+ * array teruggeeft — zie prijzen.html, gebruikt voor de Drive-koppeling),
+ * heeft die voorrang. Anders wordt data/price_history.json rechtstreeks
+ * opgehaald.
  */
 
 const POSTER_BASE_PRICES = 'https://image.tmdb.org/t/p/w200';
@@ -16,8 +21,12 @@ function initPriceTracker() {
     sort: document.getElementById('price-sort'),
   };
 
-  fetch('data/price_history.json')
-    .then((r) => r.json())
+  const loadPromise =
+    typeof window.__priceTrackerLoadData === 'function'
+      ? window.__priceTrackerLoadData()
+      : fetch('data/price_history.json').then((r) => r.json());
+
+  loadPromise
     .then((data) => {
       state.all = data.filter((t) => t.history && t.history.length);
       render();
