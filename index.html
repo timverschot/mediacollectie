@@ -99,6 +99,26 @@
     box-shadow: 0 0 0 2px rgba(20,20,26,0.8);
   }
 
+  /* Badge rechtsonder op de poster: hoeveel seizoenen van een reeks je bezit */
+  .season-badge {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: rgba(20,20,26,0.85);
+    color: #F2F0EA;
+    border: 1px solid rgba(242,240,234,0.15);
+  }
+  .season-badge-partial {
+    border-color: rgba(201,162,39,0.6);
+    color: #C9A227;
+  }
+
   .case-card:focus-visible {
     outline: 2px solid #C9A227;
     outline-offset: 3px;
@@ -250,6 +270,10 @@
           <div class="pt-3 border-t border-white/10 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <p><span class="text-muted font-mono uppercase text-xs">Formaat</span><br><span data-field="format" class="text-gold font-semibold"></span></p>
             <p><span class="text-muted font-mono uppercase text-xs">Opmerkingen</span><br><span data-field="notes"></span></p>
+          </div>
+          <div data-field="seasons-section" class="hidden pt-3 border-t border-white/10">
+            <p class="text-muted font-mono uppercase text-xs mb-2">Seizoenen</p>
+            <div data-field="seasons-list" class="space-y-1"></div>
           </div>
         </div>
       </div>
