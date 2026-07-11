@@ -133,10 +133,35 @@ function initCollectionApp(config) {
     });
   }
 
+  // Voor reeksen met seizoensdata: geeft het formaat terug als alle bezeten
+  // seizoenen hetzelfde formaat hebben, anders 'Gemengd'. Zonder seizoensdata
+  // (films, of oudere titels) wordt gewoon item.format gebruikt.
+  function ribbonInfo(item) {
+    const labels = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
+    const classes = { '4k': 'ribbon-4k', bluray: 'ribbon-bluray', dvd: 'ribbon-dvd' };
+    if (item.seasons && item.seasons.length) {
+      const owned = [...new Set(item.seasons.filter((s) => s.owned).map((s) => s.format))];
+      if (owned.length === 1) return { label: labels[owned[0]] || owned[0], cls: classes[owned[0]] || '' };
+      if (owned.length > 1) return { label: 'Gemengd', cls: '' };
+    }
+    return { label: labels[item.format] || item.format, cls: classes[item.format] || '' };
+  }
+
+  // Compact seizoensoverzicht voor op de kaart, bv. '2/4' (aantal bezeten
+  // seizoenen / totaal aantal seizoenen). null als er geen seizoensdata is.
+  function seasonBadgeInfo(item) {
+    if (!item.seasons || !item.seasons.length) return null;
+    const ownedCount = item.seasons.filter((s) => s.owned).length;
+    return {
+      text: `${ownedCount}/${item.seasons.length}`,
+      complete: ownedCount === item.seasons.length,
+    };
+  }
+
   function cardTemplate(item) {
     const cover = item.custom_front_cover || (item.poster_path ? POSTER_BASE + item.poster_path : '');
-    const formatLabel = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' }[item.format] || item.format;
-    const ribbonClass = { '4k': 'ribbon-4k', bluray: 'ribbon-bluray', dvd: 'ribbon-dvd' }[item.format] || '';
+    const ribbon = ribbonInfo(item);
+    const seasonBadge = seasonBadgeInfo(item);
 
     return `
       <button data-open-id="${escapeHtml(item.id)}" class="case-card group text-left">
@@ -148,8 +173,13 @@ function initCollectionApp(config) {
                    onerror="this.replaceWith(posterFallback('${escapeAttr(item.title)}'))">`
               : posterFallbackHtml(item.title)
           }
-          <span class="ribbon ${ribbonClass}">${formatLabel}</span>
+          <span class="ribbon ${ribbon.cls}">${ribbon.label}</span>
           ${item.watched ? '<span class="watched-dot" title="Bekeken"></span>' : ''}
+          ${
+            seasonBadge
+              ? `<span class="season-badge ${seasonBadge.complete ? '' : 'season-badge-partial'}" title="${seasonBadge.text} seizoenen in bezit">${seasonBadge.text}</span>`
+              : ''
+          }
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
         <p class="text-xs text-[#8B8A92] font-mono">${item.release_year || ''}</p>
@@ -176,7 +206,7 @@ function initCollectionApp(config) {
 
     const front = item.custom_front_cover || (item.poster_path ? POSTER_BASE + item.poster_path : '');
     const back = item.custom_back_cover || '';
-    const formatLabel = { '4k': '4K Ultra HD', bluray: 'Blu-ray', dvd: 'DVD' }[item.format] || item.format;
+    const ribbon = ribbonInfo(item);
 
     els.modal.querySelector('[data-field="title"]').textContent = item.title;
     els.modal.querySelector('[data-field="year"]').textContent = item.release_year || '—';
@@ -185,9 +215,29 @@ function initCollectionApp(config) {
     els.modal.querySelector('[data-field="director"]').textContent = item.director || '—';
     els.modal.querySelector('[data-field="cast"]').textContent = (item.cast || []).join(', ') || '—';
     els.modal.querySelector('[data-field="genres"]').textContent = (item.genres || []).join(' · ') || '—';
-    els.modal.querySelector('[data-field="format"]').textContent = formatLabel;
+    els.modal.querySelector('[data-field="format"]').textContent = ribbon.label;
     els.modal.querySelector('[data-field="notes"]').textContent = item.notes || 'Geen opmerkingen';
     els.modal.querySelector('[data-field="overview"]').textContent = item.overview || '';
+
+    const seasonsSection = els.modal.querySelector('[data-field="seasons-section"]');
+    const seasonsList = els.modal.querySelector('[data-field="seasons-list"]');
+    if (item.seasons && item.seasons.length) {
+      seasonsSection.classList.remove('hidden');
+      const fmtLabel = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
+      seasonsList.innerHTML = item.seasons
+        .map(
+          (s) => `
+          <div class="flex items-center justify-between text-sm ${s.owned ? '' : 'opacity-40'}">
+            <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+            <span class="font-mono text-xs ${s.owned ? 'text-gold' : 'text-muted'}">${s.owned ? (fmtLabel[s.format] || s.format) : 'niet in bezit'}</span>
+          </div>
+        `
+        )
+        .join('');
+    } else {
+      seasonsSection.classList.add('hidden');
+      seasonsList.innerHTML = '';
+    }
 
     const flipCard = els.modal.querySelector('.flip-card');
     const flipBtn = els.modal.querySelector('[data-flip-btn]');
