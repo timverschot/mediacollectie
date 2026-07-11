@@ -260,6 +260,12 @@ async function upsertMoviesBatchInDrive(entries) {
   await driveSaveNamedFile('movies.json', movies);
 }
 
+async function deleteMovieInDrive(id) {
+  const { movies } = await driveLoadMovies();
+  const filtered = movies.filter((m) => m.id !== id);
+  await driveSaveNamedFile('movies.json', filtered);
+}
+
 async function importMoviesJsonIntoDrive(arr) {
   const { movies } = await driveLoadMovies();
   arr.forEach((entry) => {
