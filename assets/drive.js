@@ -58,10 +58,10 @@ function driveOnReady(cb) {
 }
 
 function tryRestoreSession() {
-  // Als je op een andere pagina van deze site al was ingelogd (binnen dit
-  // browsertabblad), hoef je niet opnieuw in te loggen.
+  // Als je op een andere pagina van deze site al was ingelogd, hoef je niet
+  // opnieuw in te loggen (localStorage werkt over alle tabbladen/pagina's heen).
   try {
-    const cached = JSON.parse(sessionStorage.getItem(DRIVE_TOKEN_CACHE_KEY) || 'null');
+    const cached = JSON.parse(localStorage.getItem(DRIVE_TOKEN_CACHE_KEY) || 'null');
     if (cached && cached.access_token && cached.expires_at > Date.now() + 30000) {
       accessToken = cached.access_token;
       tokenExpiresAt = cached.expires_at;
@@ -90,12 +90,12 @@ function onTokenResponse(resp) {
   accessToken = resp.access_token;
   tokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000;
   try {
-    sessionStorage.setItem(
+    localStorage.setItem(
       DRIVE_TOKEN_CACHE_KEY,
       JSON.stringify({ access_token: accessToken, expires_at: tokenExpiresAt })
     );
   } catch {
-    // Als sessionStorage niet beschikbaar is, blijft inloggen wel werken,
+    // Als localStorage niet beschikbaar is, blijft inloggen wel werken,
     // dan moet je het straks alleen opnieuw doen op een andere pagina.
   }
   if (window._driveAuthenticated) window._driveAuthenticated();
