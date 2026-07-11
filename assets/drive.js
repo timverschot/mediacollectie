@@ -96,7 +96,13 @@ function driveSignIn() {
     driveOnReady(driveSignIn);
     return;
   }
-  tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+  // Een expliciete klik op de inlogknop betekent altijd dat je niet (meer)
+  // bent ingelogd (anders zou dit scherm niet zichtbaar zijn). Vraag daarom
+  // altijd het echte Google-inlogscherm aan ('consent'), nooit een stille
+  // herverbinding — die kan namelijk onopgemerkt mislukken (bv. na het
+  // verlopen van je vorige sessie), waardoor de knop dan niets lijkt te doen.
+  accessToken = null;
+  tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
 function onTokenResponse(resp) {
