@@ -29,7 +29,7 @@ function initCollectionApp(config) {
     grid: document.getElementById('grid'),
     empty: document.getElementById('empty-state'),
     count: document.getElementById('result-count'),
-    search: document.getElementById('search-input'),
+    search: document.getElementById('filter-search'),
     sort: document.getElementById('sort-select'),
     formatChips: document.getElementById('format-chips'),
     typeChips: document.getElementById('type-chips'),
@@ -39,37 +39,43 @@ function initCollectionApp(config) {
     modalClose: document.getElementById('modal-close'),
   };
 
-  const loadPromise =
-    typeof config.loadData === 'function'
-      ? config.loadData()
-      : fetch(config.dataUrl).then((r) => {
-          if (!r.ok) throw new Error('Kon ' + config.dataUrl + ' niet laden');
-          return r.json();
-        });
-
-  loadPromise
-    .then((data) => {
+  // Laadt (of herlaadt) de collectie. Herbruikt voor de eerste keer laden én
+  // om te verversen nadat er via de '+ Titel toevoegen'-modal iets is
+  // toegevoegd, zonder de hele pagina opnieuw te moeten laden.
+  function reload() {
+    const p =
+      typeof config.loadData === 'function'
+        ? config.loadData()
+        : fetch(config.dataUrl).then((r) => {
+            if (!r.ok) throw new Error('Kon ' + config.dataUrl + ' niet laden');
+            return r.json();
+          });
+    return p.then((data) => {
       state.all = data;
       buildGenreChips(data);
       applyFilters();
-    })
-    .catch((err) => {
-      els.grid.innerHTML =
-        '<p class="col-span-full text-center text-[#8B8A92] py-16">Kon de collectie niet laden: ' +
-        escapeHtml(err.message) +
-        '</p>';
-      console.error(err);
     });
+  }
+  window.__collectionReload = reload;
+
+  reload().catch((err) => {
+    els.grid.innerHTML =
+      '<p class="col-span-full text-center text-[#8B8A92] py-16">Kon de collectie niet laden: ' +
+      escapeHtml(err.message) +
+      '</p>';
+    console.error(err);
+  });
 
   function buildGenreChips(data) {
     const genres = new Set();
     data.forEach((item) => (item.genres || []).forEach((g) => genres.add(g)));
+    els.genreChips.innerHTML = '';
     [...genres]
       .sort((a, b) => a.localeCompare(b))
       .forEach((genre) => {
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'chip';
+        chip.className = 'chip' + (state.activeGenres.has(genre) ? ' chip-active' : '');
         chip.textContent = genre;
         chip.dataset.genre = genre;
         chip.addEventListener('click', () => {
@@ -89,7 +95,11 @@ function initCollectionApp(config) {
   function applyFilters() {
     const q = state.search.trim().toLowerCase();
     let list = state.all.filter((item) => {
-      if (q && !item.title.toLowerCase().includes(q)) return false;
+      if (q) {
+        const inTitle = item.title.toLowerCase().includes(q);
+        const inCast = (item.cast || []).some((name) => name.toLowerCase().includes(q));
+        if (!inTitle && !inCast) return false;
+      }
       if (state.activeFormats.size && !state.activeFormats.has(item.format)) return false;
       if (state.activeTypes.size && !state.activeTypes.has(item.content_type)) return false;
       if (state.activeGenres.size) {
@@ -130,7 +140,79 @@ function initCollectionApp(config) {
 
     els.grid.querySelectorAll('[data-open-id]').forEach((card) => {
       card.addEventListener('click', () => openModal(card.dataset.openId));
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openModal(card.dataset.openId);
+        }
+      });
     });
+
+    els.grid.querySelectorAll('[data-delete-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleDeleteTitle(btn.dataset.deleteId, btn.dataset.deleteTitle);
+      });
+    });
+  }
+
+  // Verwijdert een volledige titel uit de collectie (na bevestiging), en
+  // werkt zowel het lokale overzicht als je Google Drive bij.
+  async function handleDeleteTitle(id, title) {
+    if (!confirm(`Weet je zeker dat je "${title}" volledig wilt verwijderen uit je collectie? Dit kan niet ongedaan gemaakt worden.`)) {
+      return;
+    }
+    try {
+      await deleteMovieInDrive(id);
+      state.all = state.all.filter((m) => m.id !== id);
+      buildGenreChips(state.all);
+      applyFilters();
+      if (!els.modal.classList.contains('hidden')) closeModal();
+    } catch (err) {
+      alert('Verwijderen mislukt: ' + err.message);
+    }
+  }
+
+  // Markeert één seizoen van een reeks als 'niet meer in bezit' (behoudt de
+  // rest van de titel, enkel dat seizoen wordt losgekoppeld).
+  async function handleRemoveSeason(item, seasonNumber) {
+    if (!confirm(`Seizoen ${seasonNumber} niet langer als 'in bezit' markeren?`)) return;
+    const season = item.seasons.find((s) => s.season_number === seasonNumber);
+    if (!season) return;
+    const previousOwned = season.owned;
+    const previousFormat = season.format;
+    season.owned = false;
+    season.format = '';
+    try {
+      await upsertMovieInDrive(item);
+      buildGenreChips(state.all);
+      applyFilters();
+      openModal(item.id);
+    } catch (err) {
+      season.owned = previousOwned;
+      season.format = previousFormat;
+      alert('Bijwerken mislukt: ' + err.message);
+    }
+  }
+
+  // Markeert een ontbrekend seizoen alsnog als 'in bezit', met het gekozen formaat.
+  async function handleAddSeason(item, seasonNumber, format) {
+    const season = item.seasons.find((s) => s.season_number === seasonNumber);
+    if (!season) return;
+    const previousOwned = season.owned;
+    const previousFormat = season.format;
+    season.owned = true;
+    season.format = format;
+    try {
+      await upsertMovieInDrive(item);
+      buildGenreChips(state.all);
+      applyFilters();
+      openModal(item.id);
+    } catch (err) {
+      season.owned = previousOwned;
+      season.format = previousFormat;
+      alert('Bijwerken mislukt: ' + err.message);
+    }
   }
 
   // Voor reeksen met seizoensdata: geeft het formaat terug als alle bezeten
@@ -164,7 +246,7 @@ function initCollectionApp(config) {
     const seasonBadge = seasonBadgeInfo(item);
 
     return `
-      <button data-open-id="${escapeHtml(item.id)}" class="case-card group text-left">
+      <div data-open-id="${escapeHtml(item.id)}" class="case-card group text-left cursor-pointer" role="button" tabindex="0">
         <div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 transition">
           ${
             cover
@@ -180,10 +262,11 @@ function initCollectionApp(config) {
               ? `<span class="season-badge ${seasonBadge.complete ? '' : 'season-badge-partial'}" title="${seasonBadge.text} seizoenen in bezit">${seasonBadge.text}</span>`
               : ''
           }
+          <button type="button" class="delete-btn" data-delete-id="${escapeAttr(item.id)}" data-delete-title="${escapeAttr(item.title)}" title="Verwijderen uit collectie" aria-label="Verwijderen uit collectie">&times;</button>
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
         <p class="text-xs text-[#8B8A92] font-mono">${item.release_year || ''}</p>
-      </button>
+      </div>
     `;
   }
 
@@ -224,20 +307,51 @@ function initCollectionApp(config) {
     if (item.seasons && item.seasons.length) {
       seasonsSection.classList.remove('hidden');
       const fmtLabel = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
+      const fmtOption = (value, label, selected) =>
+        `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
       seasonsList.innerHTML = item.seasons
-        .map(
-          (s) => `
-          <div class="flex items-center justify-between text-sm ${s.owned ? '' : 'opacity-40'}">
-            <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-            <span class="font-mono text-xs ${s.owned ? 'text-gold' : 'text-muted'}">${s.owned ? (fmtLabel[s.format] || s.format) : 'niet in bezit'}</span>
-          </div>
-        `
-        )
+        .map((s) => {
+          if (s.owned) {
+            return `
+              <div class="flex items-center justify-between text-sm">
+                <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+                <span class="flex items-center gap-2">
+                  <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
+                  <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
+                </span>
+              </div>
+            `;
+          }
+          return `
+            <div class="flex items-center justify-between text-sm opacity-70">
+              <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+              <span class="flex items-center gap-2">
+                <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-0.5 text-xs font-mono" data-season="${s.season_number}">
+                  ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
+                </select>
+                <button type="button" class="text-gold hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
+              </span>
+            </div>
+          `;
+        })
         .join('');
+
+      seasonsList.querySelectorAll('[data-remove-season]').forEach((btn) => {
+        btn.addEventListener('click', () => handleRemoveSeason(item, Number(btn.dataset.removeSeason)));
+      });
+      seasonsList.querySelectorAll('[data-add-season]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const num = Number(btn.dataset.addSeason);
+          const sel = seasonsList.querySelector(`.add-season-format[data-season="${num}"]`);
+          handleAddSeason(item, num, sel ? sel.value : 'bluray');
+        });
+      });
     } else {
       seasonsSection.classList.add('hidden');
       seasonsList.innerHTML = '';
     }
+
+    els.modal.querySelector('[data-delete-full]').onclick = () => handleDeleteTitle(item.id, item.title);
 
     const flipCard = els.modal.querySelector('.flip-card');
     const flipBtn = els.modal.querySelector('[data-flip-btn]');
