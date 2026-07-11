@@ -379,8 +379,8 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           date_added: new Date().toISOString().slice(0, 10),
           watched: document.getElementById('form-watched').checked,
           notes: document.getElementById('form-notes').value.trim(),
-          custom_front_cover_file_id: frontFileId,
-          custom_back_cover_file_id: backFileId,
+          custom_front_cover: frontFileId,
+          custom_back_cover: backFileId,
           ...selectedDetails,
         };
 
@@ -439,8 +439,8 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
             date_added: new Date().toISOString().slice(0, 10),
             watched: false,
             notes: '',
-            custom_front_cover_file_id: '',
-            custom_back_cover_file_id: '',
+            custom_front_cover: '',
+            custom_back_cover: '',
             ...details,
           });
           logLine.textContent = `✓ ${details.title} (${details.release_year})`;
