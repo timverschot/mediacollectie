@@ -11,6 +11,11 @@
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
+  var GOOGLE_CLIENT_ID = '819389589891-d5mkvj34v8op57r3aolehmtde8fv889p.apps.googleusercontent.com';
+</script>
+<script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+<script>
   tailwind.config = {
     theme: {
       extend: {
@@ -74,7 +79,31 @@
     </p>
   </div>
 
+  <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
+    <div class="text-center max-w-sm px-6">
+      <p class="font-display text-4xl tracking-wide text-ink mb-2">Prijstracker</p>
+      <p id="login-status" class="text-sm text-muted mb-6">Log in met Google om je prijsgegevens te bekijken.</p>
+      <button id="login-btn" class="px-6 py-3 rounded-md font-semibold" style="background:#C9A227;color:#14141A;">
+        Inloggen met Google
+      </button>
+    </div>
+  </div>
+
+  <script src="assets/drive.js"></script>
   <script src="assets/price-app.js"></script>
-  <script>initPriceTracker();</script>
+  <script>
+    document.getElementById('login-btn').addEventListener('click', driveSignIn);
+    window._driveError = function (msg) {
+      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+    };
+    window._driveAuthenticated = function () {
+      document.getElementById('login-gate').remove();
+      window.__priceTrackerLoadData = async () => {
+        const { prices } = await driveLoadPrices();
+        return prices;
+      };
+      initPriceTracker();
+    };
+  </script>
 </body>
 </html>
