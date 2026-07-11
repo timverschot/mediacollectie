@@ -65,10 +65,25 @@ function tryRestoreSession() {
     if (cached && cached.access_token && cached.expires_at > Date.now() + 30000) {
       accessToken = cached.access_token;
       tokenExpiresAt = cached.expires_at;
-      if (window._driveAuthenticated) window._driveAuthenticated();
+      notifyAuthenticated();
     }
   } catch {
     // Corrupte cache negeren, gewoon opnieuw laten inloggen.
+  }
+}
+
+// Stuurt het "ingelogd"-sein pas zodra de hele pagina geparsed is. Dit
+// voorkomt dat het sein verloren gaat wanneer de Google-bibliotheek
+// (die asynchroon laadt) sneller klaar is dan de rest van de pagina, en de
+// pagina zelf (window._driveAuthenticated) dat sein dus nog niet kan opvangen.
+function notifyAuthenticated() {
+  const fire = () => {
+    if (window._driveAuthenticated) window._driveAuthenticated();
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fire, { once: true });
+  } else {
+    fire();
   }
 }
 
@@ -76,7 +91,9 @@ function tryRestoreSession() {
 
 function driveSignIn() {
   if (!tokenClient) {
-    reportError('Google-inlogbibliotheek is nog niet klaar, probeer over enkele seconden opnieuw.');
+    // Bibliotheek nog niet klaar (bv. net op een nieuwe pagina geland): wacht
+    // gewoon en log automatisch in zodra ze klaar is, geen foutmelding nodig.
+    driveOnReady(driveSignIn);
     return;
   }
   tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
@@ -98,7 +115,7 @@ function onTokenResponse(resp) {
     // Als localStorage niet beschikbaar is, blijft inloggen wel werken,
     // dan moet je het straks alleen opnieuw doen op een andere pagina.
   }
-  if (window._driveAuthenticated) window._driveAuthenticated();
+  notifyAuthenticated();
 }
 
 // Zorgt dat er altijd een geldig (niet-verlopen) token is vóór een Drive-aanroep.
