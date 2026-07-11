@@ -11,6 +11,11 @@
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
+  var GOOGLE_CLIENT_ID = '819389589891-d5mkvj34v8op57r3aolehmtde8fv889p.apps.googleusercontent.com';
+</script>
+<script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+<script>
   tailwind.config = {
     theme: {
       extend: {
@@ -45,6 +50,18 @@
 </head>
 <body class="font-body text-ink min-h-screen">
 
+  <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
+    <div class="text-center max-w-sm px-6">
+      <p class="font-display text-4xl tracking-wide text-ink mb-2">Beheer</p>
+      <p id="login-status" class="text-sm text-muted mb-6">Log in met Google om titels te beheren.</p>
+      <button id="login-btn" class="px-6 py-3 rounded-md font-semibold" style="background:#C9A227;color:#14141A;">
+        Inloggen met Google
+      </button>
+    </div>
+  </div>
+
+  <div id="app-content" class="hidden">
+
   <header class="border-b border-white/5">
     <div class="max-w-5xl mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
       <h1 class="font-display text-4xl tracking-wide text-ink">Beheer</h1>
@@ -60,7 +77,23 @@
   <main class="max-w-5xl mx-auto px-6 py-8">
 
     <div id="config-warning" class="hidden bg-surface border border-gold/30 rounded-lg p-4 mb-6 text-sm">
-      Vul eerst je TMDb-key en GitHub-gegevens in via <button id="open-settings-link" class="text-gold underline">Instellingen</button> voor je titels kan toevoegen.
+      Vul eerst je TMDb-key in via <button id="open-settings-link" class="text-gold underline">Instellingen</button> voor je titels kan toevoegen.
+    </div>
+
+    <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
+      <p class="mb-2"><strong>Kom je van GitHub?</strong> Heb je nog een oude <code class="font-mono text-xs">movies.json</code> staan (van vóór de Drive-koppeling)? Importeer die hier eenmalig in je Drive:</p>
+      <div class="flex gap-3 items-center">
+        <input type="file" id="import-file" accept="application/json" class="!p-1 !w-auto flex-1">
+        <button id="import-btn" class="btn btn-secondary shrink-0">Importeren</button>
+      </div>
+      <p id="import-status" class="text-sm font-mono mt-2"></p>
+
+      <p class="mt-4 mb-2"><strong>Oude <code class="font-mono text-xs">price_history.json</code></strong> (van het Python prijstracker-script)? Ook die kun je hier importeren:</p>
+      <div class="flex gap-3 items-center">
+        <input type="file" id="import-prices-file" accept="application/json" class="!p-1 !w-auto flex-1">
+        <button id="import-prices-btn" class="btn btn-secondary shrink-0">Importeren</button>
+      </div>
+      <p id="import-prices-status" class="text-sm font-mono mt-2"></p>
     </div>
 
     <div class="flex gap-4 mb-6 border-b border-white/5">
@@ -150,52 +183,43 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     <div class="bg-surface rounded-xl max-w-md w-full p-6 space-y-4 ring-1 ring-white/10">
       <h2 class="font-display text-2xl tracking-wide">Instellingen</h2>
       <p class="text-xs text-muted">
-        Deze gegevens worden enkel lokaal in je browser bewaard (localStorage) en nooit ergens anders naartoe gestuurd
-        dan naar TMDb en GitHub zelf. Gebruik dit niet op een gedeelde/publieke computer.
+        Enkel je TMDb-key wordt hier bewaard (lokaal in je browser). Je collectiedata zelf staat veilig in je
+        eigen Google Drive, waarmee je al bent ingelogd.
       </p>
       <div>
         <label>TMDb API-key</label>
         <input type="text" id="cfg-tmdb-key">
       </div>
-      <div>
-        <label>GitHub Personal Access Token</label>
-        <input type="text" id="cfg-token" placeholder="ghp_...">
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label>GitHub-gebruikersnaam</label>
-          <input type="text" id="cfg-owner">
-        </div>
-        <div>
-          <label>Repo-naam</label>
-          <input type="text" id="cfg-repo">
-        </div>
-      </div>
-      <div>
-        <label>Branch</label>
-        <input type="text" id="cfg-branch" value="main">
-      </div>
       <p id="settings-status" class="text-sm font-mono"></p>
       <div class="flex gap-3">
-        <button id="test-connection-btn" class="btn btn-secondary flex-1">Test verbinding</button>
         <button id="save-settings-btn" class="btn btn-primary flex-1">Opslaan</button>
       </div>
       <button id="close-settings-btn" class="text-xs text-muted underline w-full text-center">Sluiten</button>
     </div>
   </div>
 
+  <script src="assets/drive.js"></script>
   <script src="assets/admin.js"></script>
   <script>
     let selectedResult = null;
     let selectedDetails = null;
 
     function cfg() { return getConfig(); }
-    function cfgReady(c) { return c.tmdbKey && c.token && c.owner && c.repo && c.branch; }
+    function cfgReady(c) { return !!c.tmdbKey; }
 
     function refreshWarning() {
       document.getElementById('config-warning').classList.toggle('hidden', cfgReady(cfg()));
     }
     refreshWarning();
+
+    document.getElementById('login-btn').addEventListener('click', driveSignIn);
+    window._driveError = function (msg) {
+      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+    };
+    window._driveAuthenticated = function () {
+      document.getElementById('login-gate').remove();
+      document.getElementById('app-content').classList.remove('hidden');
+    };
 
     // Tabs
     document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -216,10 +240,6 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     function openSettings() {
       const c = cfg();
       document.getElementById('cfg-tmdb-key').value = c.tmdbKey || '';
-      document.getElementById('cfg-token').value = c.token || '';
-      document.getElementById('cfg-owner').value = c.owner || '';
-      document.getElementById('cfg-repo').value = c.repo || '';
-      document.getElementById('cfg-branch').value = c.branch || 'main';
       modal.classList.remove('hidden');
     }
     document.getElementById('settings-btn').addEventListener('click', openSettings);
@@ -229,28 +249,45 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     document.getElementById('save-settings-btn').addEventListener('click', () => {
       saveConfig({
         tmdbKey: document.getElementById('cfg-tmdb-key').value.trim(),
-        token: document.getElementById('cfg-token').value.trim(),
-        owner: document.getElementById('cfg-owner').value.trim(),
-        repo: document.getElementById('cfg-repo').value.trim(),
-        branch: document.getElementById('cfg-branch').value.trim() || 'main',
       });
       document.getElementById('settings-status').textContent = '✓ Opgeslagen';
       document.getElementById('settings-status').className = 'text-sm font-mono text-teal';
       refreshWarning();
     });
 
-    document.getElementById('test-connection-btn').addEventListener('click', async () => {
-      const statusEl = document.getElementById('settings-status');
-      statusEl.textContent = 'Bezig met testen...';
+    // Migratie: oude movies.json (van GitHub) importeren in Drive
+    document.getElementById('import-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('import-file');
+      const statusEl = document.getElementById('import-status');
+      const file = fileInput.files[0];
+      if (!file) { statusEl.textContent = 'Kies eerst een bestand.'; return; }
+      statusEl.textContent = 'Bezig met importeren...';
       statusEl.className = 'text-sm font-mono text-muted';
       try {
-        const testCfg = {
-          token: document.getElementById('cfg-token').value.trim(),
-          owner: document.getElementById('cfg-owner').value.trim(),
-          repo: document.getElementById('cfg-repo').value.trim(),
-        };
-        await testConnection(testCfg);
-        statusEl.textContent = '✓ Verbinding gelukt!';
+        const text = await file.text();
+        const arr = JSON.parse(text);
+        const total = await importMoviesJsonIntoDrive(arr);
+        statusEl.textContent = `✓ Geïmporteerd. Je Drive-collectie bevat nu ${total} titels.`;
+        statusEl.className = 'text-sm font-mono text-teal';
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+        statusEl.className = 'text-sm font-mono text-red-400';
+      }
+    });
+
+    // Migratie: oude price_history.json (van het Python-script) importeren in Drive
+    document.getElementById('import-prices-btn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('import-prices-file');
+      const statusEl = document.getElementById('import-prices-status');
+      const file = fileInput.files[0];
+      if (!file) { statusEl.textContent = 'Kies eerst een bestand.'; return; }
+      statusEl.textContent = 'Bezig met importeren...';
+      statusEl.className = 'text-sm font-mono text-muted';
+      try {
+        const text = await file.text();
+        const arr = JSON.parse(text);
+        const total = await importPriceHistoryJsonIntoDrive(arr);
+        statusEl.textContent = `✓ Geïmporteerd. Je Drive-prijsgeschiedenis bevat nu ${total} gevolgde titels.`;
         statusEl.className = 'text-sm font-mono text-teal';
       } catch (err) {
         statusEl.textContent = '✗ ' + err.message;
@@ -312,28 +349,27 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
 
     document.getElementById('add-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const c = cfg();
       const statusEl = document.getElementById('form-status');
       const submitBtn = document.getElementById('submit-btn');
       submitBtn.disabled = true;
-      statusEl.textContent = 'Bezig met opslaan naar GitHub...';
+      statusEl.textContent = 'Bezig met opslaan naar Drive...';
       statusEl.className = 'text-sm font-mono text-muted';
 
       try {
         const slug = slugify(selectedDetails.title, selectedDetails.release_year);
-        let frontPath = '', backPath = '';
+        let frontFileId = '', backFileId = '';
 
         const frontFile = document.getElementById('form-front').files[0];
         const backFile = document.getElementById('form-back').files[0];
         if (frontFile) {
-          statusEl.textContent = 'Voorkant-hoes uploaden...';
+          statusEl.textContent = 'Voorkant-hoes uploaden naar Drive...';
           const b64 = await resizeImageFile(frontFile, 1200);
-          frontPath = await uploadCover(c, slug, 'front', b64);
+          frontFileId = await driveUploadCoverImage(b64, slug, 'front');
         }
         if (backFile) {
-          statusEl.textContent = 'Achterkant-hoes uploaden...';
+          statusEl.textContent = 'Achterkant-hoes uploaden naar Drive...';
           const b64 = await resizeImageFile(backFile, 1200);
-          backPath = await uploadCover(c, slug, 'back', b64);
+          backFileId = await driveUploadCoverImage(b64, slug, 'back');
         }
 
         const entry = {
@@ -343,14 +379,14 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           date_added: new Date().toISOString().slice(0, 10),
           watched: document.getElementById('form-watched').checked,
           notes: document.getElementById('form-notes').value.trim(),
-          custom_front_cover: frontPath,
-          custom_back_cover: backPath,
+          custom_front_cover_file_id: frontFileId,
+          custom_back_cover_file_id: backFileId,
           ...selectedDetails,
         };
 
-        statusEl.textContent = 'movies.json bijwerken...';
-        const status = await upsertMovie(c, entry);
-        statusEl.textContent = `✓ '${entry.title}' ${status}. Je site is over ~1 minuut bijgewerkt.`;
+        statusEl.textContent = 'movies.json bijwerken in Drive...';
+        const status = await upsertMovieInDrive(entry);
+        statusEl.textContent = `✓ '${entry.title}' ${status} in je Google Drive.`;
         statusEl.className = 'text-sm font-mono text-teal';
 
         document.getElementById('add-form').reset();
@@ -403,8 +439,8 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
             date_added: new Date().toISOString().slice(0, 10),
             watched: false,
             notes: '',
-            custom_front_cover: '',
-            custom_back_cover: '',
+            custom_front_cover_file_id: '',
+            custom_back_cover_file_id: '',
             ...details,
           });
           logLine.textContent = `✓ ${details.title} (${details.release_year})`;
@@ -418,12 +454,12 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
 
       if (entries.length) {
         const doneLine = document.createElement('p');
-        doneLine.textContent = `${entries.length} titels wegschrijven naar movies.json...`;
+        doneLine.textContent = `${entries.length} titels wegschrijven naar je Drive...`;
         doneLine.className = 'text-muted';
         logEl.appendChild(doneLine);
         try {
-          await upsertMoviesBatch(c, entries);
-          doneLine.textContent = `✓ ${entries.length} titels weggeschreven naar movies.json.`;
+          await upsertMoviesBatchInDrive(entries);
+          doneLine.textContent = `✓ ${entries.length} titels weggeschreven naar je Google Drive.`;
           doneLine.className = 'text-teal';
         } catch (err) {
           doneLine.textContent = '✗ ' + err.message;
@@ -432,5 +468,7 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
       }
     });
   </script>
+
+  </div><!-- /#app-content -->
 </body>
 </html>
