@@ -4,6 +4,10 @@
  * Deze module is bewust generiek opgezet zodat een tweede verzameling
  * (bv. strips.html) hem kan hergebruiken door enkel een ander `config`
  * object mee te geven aan initCollectionApp().
+ *
+ * `config.loadData` (async functie die een array teruggeeft) heeft
+ * voorrang; is die niet meegegeven, dan valt de app terug op
+ * `config.dataUrl` (een JSON-bestand rechtstreeks ophalen via fetch).
  */
 
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -35,11 +39,15 @@ function initCollectionApp(config) {
     modalClose: document.getElementById('modal-close'),
   };
 
-  fetch(config.dataUrl)
-    .then((r) => {
-      if (!r.ok) throw new Error('Kon ' + config.dataUrl + ' niet laden');
-      return r.json();
-    })
+  const loadPromise =
+    typeof config.loadData === 'function'
+      ? config.loadData()
+      : fetch(config.dataUrl).then((r) => {
+          if (!r.ok) throw new Error('Kon ' + config.dataUrl + ' niet laden');
+          return r.json();
+        });
+
+  loadPromise
     .then((data) => {
       state.all = data;
       buildGenreChips(data);
