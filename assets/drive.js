@@ -9,6 +9,12 @@
  * (dus als onderdeel van dat ene JSON-bestand) — geen aparte Drive-bestanden
  * of extra downloads nodig om ze te tonen.
  *
+ * Fase 1-uitbreidingen:
+ * - Export (download) van movies.json en price_history.json
+ * - Automatische wekelijkse backup in Drive (laatste 4 bewaard) + herstel
+ * - Schrijf-lock zodat twee tabbladen elkaars wijzigingen niet overschrijven
+ * - TMDb-key gesynchroniseerd via config.json in Drive (eenmalig invullen)
+ *
  * Verwacht een globale `GOOGLE_CLIENT_ID` (staat bovenaan elke HTML-pagina)
  * en dat de Google Identity Services-library geladen is via:
  *   <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
@@ -23,8 +29,8 @@ let tokenExpiresAt = 0;
 let isReady = false;
 let readyCallbacks = [];
 
-let moviesFileIdCache = null;
-let pricesFileIdCache = null;
+// Bestandsnaam → Drive file-ID (zodat we niet telkens opnieuw hoeven te zoeken)
+const fileIdCache = {};
 
 // ---------- Opstarten ----------
 
@@ -155,6 +161,41 @@ function reportError(msg) {
   else console.error('Drive-fout:', msg);
 }
 
+// ---------- Schrijf-lock (fase 1) ----------
+// Voorkomt dat twee tabbladen/pagina's van deze site tegelijk movies.json of
+// price_history.json herschrijven en zo elkaars wijziging ongedaan maken.
+// Werkt via localStorage (gedeeld over alle tabbladen van dezelfde browser).
+
+const WRITE_LOCK_KEY = 'mediacollectie_write_lock';
+const WRITE_LOCK_TTL_MS = 20000; // vergrendeling vervalt vanzelf (bv. na crash)
+
+async function withWriteLock(fn) {
+  const started = Date.now();
+  for (;;) {
+    let lock = null;
+    try {
+      lock = JSON.parse(localStorage.getItem(WRITE_LOCK_KEY) || 'null');
+    } catch {}
+    if (!lock || lock.expires < Date.now()) break; // vrij (of verlopen)
+    if (Date.now() - started > 12000) {
+      throw new Error('Een ander tabblad is nog aan het opslaan. Wacht even en probeer opnieuw.');
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  const myToken = Math.random().toString(16).slice(2);
+  try {
+    localStorage.setItem(WRITE_LOCK_KEY, JSON.stringify({ token: myToken, expires: Date.now() + WRITE_LOCK_TTL_MS }));
+  } catch {}
+  try {
+    return await fn();
+  } finally {
+    try {
+      const cur = JSON.parse(localStorage.getItem(WRITE_LOCK_KEY) || 'null');
+      if (cur && cur.token === myToken) localStorage.removeItem(WRITE_LOCK_KEY);
+    } catch {}
+  }
+}
+
 // ---------- Generieke Drive-bestandshelpers (App Data-map) ----------
 
 async function driveApiFetch(url, options = {}) {
@@ -216,13 +257,16 @@ async function driveReadJsonFile(fileId) {
   return resp.json();
 }
 
+async function driveDeleteFile(fileId) {
+  await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: 'DELETE' });
+}
+
 async function driveGetOrCreateFileId(name, defaultValue) {
-  let fileId = name === 'movies.json' ? moviesFileIdCache : pricesFileIdCache;
+  let fileId = fileIdCache[name];
   if (!fileId) {
     fileId = await driveFindFileId(name);
     if (!fileId) fileId = await driveCreateJsonFile(name, defaultValue);
-    if (name === 'movies.json') moviesFileIdCache = fileId;
-    else pricesFileIdCache = fileId;
+    fileIdCache[name] = fileId;
   }
   return fileId;
 }
@@ -241,40 +285,48 @@ async function driveLoadMovies() {
 }
 
 async function upsertMovieInDrive(entry) {
-  const { movies } = await driveLoadMovies();
-  const idx = movies.findIndex((m) => m.id === entry.id);
-  const status = idx >= 0 ? 'bijgewerkt' : 'toegevoegd';
-  if (idx >= 0) movies[idx] = entry;
-  else movies.push(entry);
-  await driveSaveNamedFile('movies.json', movies);
-  return status;
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    const idx = movies.findIndex((m) => m.id === entry.id);
+    const status = idx >= 0 ? 'bijgewerkt' : 'toegevoegd';
+    if (idx >= 0) movies[idx] = entry;
+    else movies.push(entry);
+    await driveSaveNamedFile('movies.json', movies);
+    return status;
+  });
 }
 
 async function upsertMoviesBatchInDrive(entries) {
-  const { movies } = await driveLoadMovies();
-  entries.forEach((entry) => {
-    const idx = movies.findIndex((m) => m.id === entry.id);
-    if (idx >= 0) movies[idx] = entry;
-    else movies.push(entry);
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    entries.forEach((entry) => {
+      const idx = movies.findIndex((m) => m.id === entry.id);
+      if (idx >= 0) movies[idx] = entry;
+      else movies.push(entry);
+    });
+    await driveSaveNamedFile('movies.json', movies);
   });
-  await driveSaveNamedFile('movies.json', movies);
 }
 
 async function deleteMovieInDrive(id) {
-  const { movies } = await driveLoadMovies();
-  const filtered = movies.filter((m) => m.id !== id);
-  await driveSaveNamedFile('movies.json', filtered);
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    const filtered = movies.filter((m) => m.id !== id);
+    await driveSaveNamedFile('movies.json', filtered);
+  });
 }
 
 async function importMoviesJsonIntoDrive(arr) {
-  const { movies } = await driveLoadMovies();
-  arr.forEach((entry) => {
-    const idx = movies.findIndex((m) => m.id === entry.id);
-    if (idx >= 0) movies[idx] = entry;
-    else movies.push(entry);
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    arr.forEach((entry) => {
+      const idx = movies.findIndex((m) => m.id === entry.id);
+      if (idx >= 0) movies[idx] = entry;
+      else movies.push(entry);
+    });
+    await driveSaveNamedFile('movies.json', movies);
+    return movies.length;
   });
-  await driveSaveNamedFile('movies.json', movies);
-  return movies.length;
 }
 
 // ---------- Hoesfoto's ----------
@@ -294,13 +346,153 @@ async function driveLoadPrices() {
 }
 
 async function importPriceHistoryJsonIntoDrive(arr) {
-  const { prices } = await driveLoadPrices();
-  arr.forEach((entry) => {
-    const key = entry.id || entry.title;
-    const idx = prices.findIndex((p) => (p.id || p.title) === key);
-    if (idx >= 0) prices[idx] = entry;
-    else prices.push(entry);
+  return withWriteLock(async () => {
+    const { prices } = await driveLoadPrices();
+    arr.forEach((entry) => {
+      const key = entry.id || entry.title;
+      const idx = prices.findIndex((p) => (p.id || p.title) === key);
+      if (idx >= 0) prices[idx] = entry;
+      else prices.push(entry);
+    });
+    await driveSaveNamedFile('price_history.json', prices);
+    return prices.length;
   });
-  await driveSaveNamedFile('price_history.json', prices);
+}
+
+// ---------- Instellingen-sync (fase 1) ----------
+// Bewaart de TMDb-key ook in Drive (config.json in de App Data-map), zodat je
+// hem op een nieuw toestel niet opnieuw hoeft in te vullen. De lokale kopie in
+// localStorage blijft de 'werkkopie' die admin.js gebruikt.
+
+const CONFIG_LS_KEY = 'mediacollectie_admin_config';
+
+async function driveSyncConfig() {
+  let local = {};
+  try {
+    local = JSON.parse(localStorage.getItem(CONFIG_LS_KEY)) || {};
+  } catch {}
+
+  const fileId = await driveGetOrCreateFileId('config.json', {});
+  let remote = {};
+  try {
+    const r = await driveReadJsonFile(fileId);
+    if (r && typeof r === 'object' && !Array.isArray(r)) remote = r;
+  } catch {}
+
+  if (local.tmdbKey && local.tmdbKey !== remote.tmdbKey) {
+    // Lokaal ingevulde key naar Drive pushen (nieuwste wint: lokaal is waar je hem invult).
+    await driveUpdateJsonFile(fileId, { ...remote, ...local });
+  } else if (!local.tmdbKey && remote.tmdbKey) {
+    // Nieuw toestel: key uit Drive overnemen.
+    try {
+      localStorage.setItem(CONFIG_LS_KEY, JSON.stringify({ ...local, ...remote }));
+    } catch {}
+  }
+}
+
+async function driveSaveConfig(cfg) {
+  const fileId = await driveGetOrCreateFileId('config.json', {});
+  await driveUpdateJsonFile(fileId, cfg || {});
+}
+
+// ---------- Backup & export (fase 1) ----------
+
+const BACKUP_PREFIX = 'movies-backup-';
+const BACKUP_KEEP = 4; // aantal automatische (wekelijkse) backups dat bewaard blijft
+const BACKUP_INTERVAL_DAYS = 7;
+
+function _isDatedBackupName(name) {
+  return /^movies-backup-\d{4}-\d{2}-\d{2}\.json$/.test(name);
+}
+
+// Alle backup-bestanden in Drive, nieuwste eerst.
+async function driveListBackups() {
+  const q = encodeURIComponent(`name contains '${BACKUP_PREFIX}' and trashed=false`);
+  const resp = await driveApiFetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,createdTime,size)&pageSize=100`
+  );
+  const data = await resp.json();
+  return (data.files || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+}
+
+// Maakt (maximaal 1× per week) automatisch een backup-kopie van movies.json
+// in Drive en ruimt oude automatische backups op. Stil op de achtergrond;
+// een mislukte backup blokkeert de site nooit.
+async function driveAutoBackup() {
+  try {
+    return await withWriteLock(async () => {
+      const backups = await driveListBackups();
+      const dated = backups.filter((f) => _isDatedBackupName(f.name));
+      const today = new Date().toISOString().slice(0, 10);
+
+      if (dated.length) {
+        const newestDate = dated[0].name.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10);
+        const ageDays = (new Date(today) - new Date(newestDate)) / 86400000;
+        if (!isNaN(ageDays) && ageDays < BACKUP_INTERVAL_DAYS) return false; // recent genoeg
+      }
+
+      const { movies } = await driveLoadMovies();
+      if (!movies.length) return false; // lege collectie: niets te back-uppen
+
+      await driveCreateJsonFile(`${BACKUP_PREFIX}${today}.json`, movies);
+
+      // Oude automatische backups opruimen (nieuwste BACKUP_KEEP blijven staan).
+      const after = (await driveListBackups()).filter((f) => _isDatedBackupName(f.name));
+      for (const f of after.slice(BACKUP_KEEP)) {
+        try { await driveDeleteFile(f.id); } catch {}
+      }
+      return true;
+    });
+  } catch (e) {
+    console.warn('Automatische backup mislukt (site werkt gewoon verder):', e);
+    return false;
+  }
+}
+
+// Zet een gekozen backup terug als actieve collectie. Bewaart eerst de
+// huidige staat als extra backup ('voor-herstel'), zodat herstellen zelf
+// nooit definitief data kan vernietigen.
+async function driveRestoreBackup(fileId) {
+  return withWriteLock(async () => {
+    const data = await driveReadJsonFile(fileId);
+    if (!Array.isArray(data)) throw new Error('Dit backup-bestand bevat geen geldige collectie.');
+
+    const { movies } = await driveLoadMovies();
+    if (movies.length) {
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', 'u');
+      await driveCreateJsonFile(`${BACKUP_PREFIX}voor-herstel-${stamp}.json`, movies);
+      // Maximaal 2 'voor-herstel'-kopieën bewaren.
+      const restorePoints = (await driveListBackups()).filter((f) => f.name.startsWith(`${BACKUP_PREFIX}voor-herstel-`));
+      for (const f of restorePoints.slice(2)) {
+        try { await driveDeleteFile(f.id); } catch {}
+      }
+    }
+
+    await driveSaveNamedFile('movies.json', data);
+    return data.length;
+  });
+}
+
+// Browser-download van een JSON-bestand.
+function _downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+async function driveExportMovies() {
+  const { movies } = await driveLoadMovies();
+  _downloadJson(`movies-export-${new Date().toISOString().slice(0, 10)}.json`, movies);
+  return movies.length;
+}
+
+async function driveExportPrices() {
+  const { prices } = await driveLoadPrices();
+  _downloadJson(`price_history-export-${new Date().toISOString().slice(0, 10)}.json`, prices);
   return prices.length;
 }
