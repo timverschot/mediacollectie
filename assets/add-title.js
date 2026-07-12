@@ -3,6 +3,11 @@
  * hoesfoto's uploaden, opslaan naar Drive). Wordt gebruikt op zowel
  * index.html (snel een titel toevoegen) als beheer.html.
  *
+ * Fase 1-uitbreiding: duplicaat-check. Bij het selecteren van een zoekresultaat
+ * wordt meteen gecontroleerd of die titel al in je collectie zit; opslaan
+ * overschrijft dan pas na expliciete bevestiging, en behoudt bestaande
+ * hoesfoto's en de oorspronkelijke toevoegdatum.
+ *
  * Verwacht dat de pagina een formulier bevat met deze exacte element-ID's:
  * search-input, search-btn, search-results, add-form, form-poster,
  * form-title, form-year, form-content-type, form-format, form-watched,
@@ -15,6 +20,7 @@
  */
 
 let addTitleSelectedDetails = null;
+let addTitleExistingEntry = null; // bestaande collectie-entry met dezelfde slug (of null)
 let addTitleOnSaved = null;
 
 function initAddTitleUI(onSaved) {
@@ -69,13 +75,17 @@ async function addTitleDoSearch() {
 async function addTitleSelectResult(r) {
   const c = getConfig();
   addTitleSelectedDetails = await tmdbDetails(r.id, r.media_type, c.tmdbKey);
+  addTitleExistingEntry = null;
 
   document.getElementById('form-poster').src = addTitleSelectedDetails.poster_path ? TMDB_IMG_BASE + addTitleSelectedDetails.poster_path : '';
   document.getElementById('form-title').textContent = addTitleSelectedDetails.title;
   document.getElementById('form-year').textContent = addTitleSelectedDetails.release_year || '';
   document.getElementById('form-content-type').value = r.media_type === 'tv' ? 'tv' : 'movie';
   document.getElementById('add-form').classList.remove('hidden');
-  document.getElementById('form-status').textContent = '';
+
+  const statusEl = document.getElementById('form-status');
+  statusEl.textContent = '';
+  statusEl.className = 'text-sm font-mono';
 
   const seasonsSection = document.getElementById('seasons-section');
   if (r.media_type === 'tv' && addTitleSelectedDetails.seasons && addTitleSelectedDetails.seasons.length) {
@@ -84,6 +94,26 @@ async function addTitleSelectResult(r) {
   } else {
     seasonsSection.classList.add('hidden');
     document.getElementById('seasons-list').innerHTML = '';
+  }
+
+  // Duplicaat-check: staat deze titel al in je collectie? (stil op de
+  // achtergrond; een mislukte check blokkeert het formulier niet)
+  try {
+    const slug = slugify(addTitleSelectedDetails.title, addTitleSelectedDetails.release_year);
+    const { movies } = await driveLoadMovies();
+    const existing = movies.find((m) => m.id === slug);
+    if (existing && addTitleSelectedDetails && slugify(addTitleSelectedDetails.title, addTitleSelectedDetails.release_year) === slug) {
+      addTitleExistingEntry = existing;
+      statusEl.textContent = `⚠ Staat al in je collectie (toegevoegd op ${existing.date_added || 'onbekende datum'}). Opslaan werkt de bestaande titel bij.`;
+      statusEl.className = 'text-sm font-mono text-gold';
+      // Formulier alvast invullen met de bestaande gegevens, zodat je niets kwijtraakt.
+      document.getElementById('form-format').value = existing.format || 'bluray';
+      document.getElementById('form-content-type').value = existing.content_type || document.getElementById('form-content-type').value;
+      document.getElementById('form-watched').checked = !!existing.watched;
+      document.getElementById('form-notes').value = existing.notes || '';
+    }
+  } catch (err) {
+    console.warn('Duplicaat-check mislukt:', err);
   }
 }
 
@@ -123,6 +153,17 @@ async function addTitleSubmit(e) {
   e.preventDefault();
   const statusEl = document.getElementById('form-status');
   const submitBtn = document.getElementById('submit-btn');
+
+  // Duplicaat: expliciete bevestiging vóór overschrijven.
+  if (addTitleExistingEntry) {
+    const ok = confirm(
+      `"${addTitleSelectedDetails.title}" staat al in je collectie.\n\n` +
+      `Wil je de bestaande gegevens bijwerken met wat nu in het formulier staat?\n` +
+      `(Bestaande hoesfoto's blijven behouden als je geen nieuwe koos; de oorspronkelijke toevoegdatum blijft staan.)`
+    );
+    if (!ok) return;
+  }
+
   submitBtn.disabled = true;
   statusEl.textContent = 'Bezig met opslaan naar Drive...';
   statusEl.className = 'text-sm font-mono text-muted';
@@ -161,15 +202,18 @@ async function addTitleSubmit(e) {
       });
     }
 
+    const existing = addTitleExistingEntry;
     const entry = {
       id: slug,
       content_type: document.getElementById('form-content-type').value,
       format: document.getElementById('form-format').value,
-      date_added: new Date().toISOString().slice(0, 10),
+      // Bij bijwerken blijft de oorspronkelijke toevoegdatum behouden.
+      date_added: (existing && existing.date_added) || new Date().toISOString().slice(0, 10),
       watched: document.getElementById('form-watched').checked,
       notes: document.getElementById('form-notes').value.trim(),
-      custom_front_cover: frontCover,
-      custom_back_cover: backCover,
+      // Geen nieuwe foto gekozen? Dan blijven eventuele bestaande hoesfoto's staan.
+      custom_front_cover: frontCover || (existing && existing.custom_front_cover) || '',
+      custom_back_cover: backCover || (existing && existing.custom_back_cover) || '',
       ...addTitleSelectedDetails,
       seasons,
     };
@@ -179,6 +223,7 @@ async function addTitleSubmit(e) {
     statusEl.textContent = `✓ '${entry.title}' ${status} in je Google Drive.`;
     statusEl.className = 'text-sm font-mono text-teal';
 
+    addTitleExistingEntry = null;
     document.getElementById('add-form').reset();
     document.getElementById('add-form').classList.add('hidden');
     document.getElementById('seasons-section').classList.add('hidden');
