@@ -7,6 +7,9 @@
  * array teruggeeft — zie prijzen.html, gebruikt voor de Drive-koppeling),
  * heeft die voorrang. Anders wordt data/price_history.json rechtstreeks
  * opgehaald.
+ *
+ * Fase 1: alle dynamische tekst (titels, datums, valuta) wordt netjes
+ * ge-escaped voor ze in de HTML belandt.
  */
 
 const POSTER_BASE_PRICES = 'https://image.tmdb.org/t/p/w200';
@@ -20,6 +23,10 @@ function initPriceTracker() {
     count: document.getElementById('price-count'),
     sort: document.getElementById('price-sort'),
   };
+
+  function esc(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
 
   const loadPromise =
     typeof window.__priceTrackerLoadData === 'function'
@@ -105,20 +112,20 @@ function initPriceTracker() {
       return `
         <div class="bg-surface rounded-lg p-4 flex gap-4 ring-1 ring-white/5">
           <div class="w-16 shrink-0 rounded overflow-hidden aspect-[2/3] bg-[#14141A]">
-            ${cover ? `<img src="${cover}" class="w-full h-full object-cover" loading="lazy" alt="${entry.title}">` : ''}
+            ${cover ? `<img src="${esc(cover)}" class="w-full h-full object-cover" loading="lazy" alt="${esc(entry.title)}">` : ''}
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-start justify-between gap-2">
-              <p class="font-display text-xl tracking-wide truncate">${entry.title}</p>
+              <p class="font-display text-xl tracking-wide truncate">${esc(entry.title)}</p>
               ${entry.owned ? '<span class="chip chip-active shrink-0 !text-[10px] !py-0.5">In collectie</span>' : '<span class="chip shrink-0 !text-[10px] !py-0.5">Verlanglijst</span>'}
             </div>
-            <p class="text-xs text-muted font-mono mb-2">${entry.release_year || ''} — bijgewerkt ${last.date}</p>
+            <p class="text-xs text-muted font-mono mb-2">${esc(entry.release_year || '')} — bijgewerkt ${esc(last.date || '')}</p>
             <p class="text-sm">
-              <span class="font-mono text-ink">${last.ebay_low ?? '—'}–${last.ebay_high ?? '—'} ${last.ebay_currency || ''}</span>
+              <span class="font-mono text-ink">${last.ebay_low ?? '—'}–${last.ebay_high ?? '—'} ${esc(last.ebay_currency || '')}</span>
               <span class="text-muted"> · gem. </span><span class="font-mono text-gold">${last.ebay_avg ?? '—'}</span>
               ${trendBadge(entry)}
             </p>
-            ${last.bol_new_price ? `<p class="text-xs text-muted font-mono">bol.com nieuw: €${last.bol_new_price}</p>` : ''}
+            ${last.bol_new_price ? `<p class="text-xs text-muted font-mono">bol.com nieuw: €${esc(last.bol_new_price)}</p>` : ''}
             <div class="mt-2">${sparkline(entry)}</div>
           </div>
         </div>
