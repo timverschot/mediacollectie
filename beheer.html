@@ -80,6 +80,28 @@
       Vul eerst je TMDb-key in via <button id="open-settings-link" class="text-gold underline">Instellingen</button> voor je titels kan toevoegen.
     </div>
 
+    <!-- BACKUP & EXPORT (fase 1) -->
+    <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
+      <p class="mb-1"><strong>Backup &amp; export</strong></p>
+      <p class="text-muted text-xs mb-3">
+        Er wordt automatisch wekelijks een backup van je collectie in Drive bewaard (laatste 4 blijven staan).
+        Download daarnaast af en toe zelf een kopie naar je computer — dat is je vangnet als er ooit iets misgaat.
+      </p>
+      <div class="flex flex-wrap gap-3 items-center mb-3">
+        <button id="export-movies-btn" class="btn btn-secondary">⬇ Download movies.json</button>
+        <button id="export-prices-btn" class="btn btn-secondary">⬇ Download price_history.json</button>
+        <span id="export-status" class="text-sm font-mono"></span>
+      </div>
+      <div class="border-t border-white/10 pt-3">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-mono uppercase text-muted">Backups in Drive</p>
+          <button id="refresh-backups-btn" class="text-xs text-muted underline">vernieuwen</button>
+        </div>
+        <div id="backup-list" class="space-y-1 text-sm font-mono text-muted">Laden...</div>
+        <p id="backup-status" class="text-sm font-mono mt-2"></p>
+      </div>
+    </div>
+
     <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
       <p class="mb-2"><strong>Kom je van GitHub?</strong> Heb je nog een oude <code class="font-mono text-xs">movies.json</code> staan (van vóór de Drive-koppeling)? Importeer die hier eenmalig in je Drive:</p>
       <div class="flex gap-3 items-center">
@@ -176,7 +198,8 @@
       <p class="text-sm text-muted mb-3">
         Eén titel per regel, formaat: <code class="font-mono text-xs">Titel | Jaar | formaat | content-type</code>
         (jaar/formaat/content-type mogen leeg blijven, standaard is <code class="font-mono text-xs">bluray</code> / <code class="font-mono text-xs">movie</code>).<br>
-        Voorbeeld: <code class="font-mono text-xs">The Matrix | 1999 | 4k</code>
+        Voorbeeld: <code class="font-mono text-xs">The Matrix | 1999 | 4k</code><br>
+        Titels die al in je collectie staan worden bijgewerkt; je bestaande notities, hoesfoto's en "bekeken"-status blijven daarbij behouden.
       </p>
       <textarea id="bulk-input" rows="10" placeholder="The Matrix | 1999 | 4k
 Spirited Away | 2001 | bluray
@@ -191,8 +214,8 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     <div class="bg-surface rounded-xl max-w-md w-full p-6 space-y-4 ring-1 ring-white/10">
       <h2 class="font-display text-2xl tracking-wide">Instellingen</h2>
       <p class="text-xs text-muted">
-        Enkel je TMDb-key wordt hier bewaard (lokaal in je browser). Je collectiedata zelf staat veilig in je
-        eigen Google Drive, waarmee je al bent ingelogd.
+        Je TMDb-key wordt lokaal in je browser bewaard én meegesynchroniseerd naar je eigen Google Drive,
+        zodat je hem op een ander toestel niet opnieuw hoeft in te vullen.
       </p>
       <div>
         <label>TMDb API-key</label>
@@ -225,6 +248,14 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     window._driveAuthenticated = function () {
       document.getElementById('login-gate').remove();
       document.getElementById('app-content').classList.remove('hidden');
+
+      // Fase 1: TMDb-key syncen met Drive (nieuw toestel? key komt vanzelf mee),
+      // daarna eventueel de wekelijkse automatische backup draaien, en de
+      // backuplijst tonen.
+      driveSyncConfig()
+        .then(refreshWarning)
+        .catch((e) => console.warn('Instellingen-sync mislukt:', e));
+      driveAutoBackup().finally(renderBackupList);
     };
 
     // Tabs
@@ -252,14 +283,93 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     document.getElementById('open-settings-link').addEventListener('click', openSettings);
     document.getElementById('close-settings-btn').addEventListener('click', () => modal.classList.add('hidden'));
 
-    document.getElementById('save-settings-btn').addEventListener('click', () => {
-      saveConfig({
-        tmdbKey: document.getElementById('cfg-tmdb-key').value.trim(),
-      });
-      document.getElementById('settings-status').textContent = '✓ Opgeslagen';
-      document.getElementById('settings-status').className = 'text-sm font-mono text-teal';
+    document.getElementById('save-settings-btn').addEventListener('click', async () => {
+      const newCfg = { tmdbKey: document.getElementById('cfg-tmdb-key').value.trim() };
+      saveConfig(newCfg);
+      const statusEl = document.getElementById('settings-status');
+      statusEl.textContent = '✓ Lokaal opgeslagen, syncen met Drive...';
+      statusEl.className = 'text-sm font-mono text-muted';
       refreshWarning();
+      try {
+        await driveSaveConfig(newCfg);
+        statusEl.textContent = '✓ Opgeslagen (ook in je Drive)';
+        statusEl.className = 'text-sm font-mono text-teal';
+      } catch (err) {
+        statusEl.textContent = '✓ Lokaal opgeslagen (Drive-sync mislukt: ' + err.message + ')';
+        statusEl.className = 'text-sm font-mono text-gold';
+      }
     });
+
+    // ---------- Fase 1: export & backups ----------
+
+    function _escapeHtmlBeheer(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    document.getElementById('export-movies-btn').addEventListener('click', async () => {
+      const s = document.getElementById('export-status');
+      s.textContent = 'Bezig...'; s.className = 'text-sm font-mono text-muted';
+      try {
+        const n = await driveExportMovies();
+        s.textContent = `✓ ${n} titels gedownload`; s.className = 'text-sm font-mono text-teal';
+      } catch (err) {
+        s.textContent = '✗ ' + err.message; s.className = 'text-sm font-mono text-red-400';
+      }
+    });
+
+    document.getElementById('export-prices-btn').addEventListener('click', async () => {
+      const s = document.getElementById('export-status');
+      s.textContent = 'Bezig...'; s.className = 'text-sm font-mono text-muted';
+      try {
+        const n = await driveExportPrices();
+        s.textContent = `✓ ${n} gevolgde titels gedownload`; s.className = 'text-sm font-mono text-teal';
+      } catch (err) {
+        s.textContent = '✗ ' + err.message; s.className = 'text-sm font-mono text-red-400';
+      }
+    });
+
+    async function renderBackupList() {
+      const listEl = document.getElementById('backup-list');
+      try {
+        const backups = await driveListBackups();
+        if (!backups.length) {
+          listEl.innerHTML = '<p class="text-muted">Nog geen backups. De eerste wordt automatisch gemaakt zodra je collectie titels bevat.</p>';
+          return;
+        }
+        listEl.innerHTML = backups
+          .map((f) => `
+            <div class="flex items-center justify-between gap-3">
+              <span class="truncate">${_escapeHtmlBeheer(f.name)}</span>
+              <button data-restore-id="${_escapeHtmlBeheer(f.id)}" data-restore-name="${_escapeHtmlBeheer(f.name)}" class="text-gold underline shrink-0">zet terug</button>
+            </div>
+          `)
+          .join('');
+        listEl.querySelectorAll('[data-restore-id]').forEach((btn) => {
+          btn.addEventListener('click', () => restoreBackup(btn.dataset.restoreId, btn.dataset.restoreName));
+        });
+      } catch (err) {
+        listEl.innerHTML = '<p class="text-red-400">Kon backups niet laden: ' + _escapeHtmlBeheer(err.message) + '</p>';
+      }
+    }
+
+    async function restoreBackup(fileId, name) {
+      const s = document.getElementById('backup-status');
+      if (!confirm(
+        `Weet je zeker dat je "${name}" wilt terugzetten als je actieve collectie?\n\n` +
+        `Je huidige collectie wordt eerst zelf als extra backup bewaard, dus dit kan altijd weer ongedaan gemaakt worden.`
+      )) return;
+      s.textContent = 'Bezig met terugzetten...'; s.className = 'text-sm font-mono text-muted';
+      try {
+        const n = await driveRestoreBackup(fileId);
+        s.textContent = `✓ Backup teruggezet (${n} titels). Herlaad de Collectie-pagina om het resultaat te zien.`;
+        s.className = 'text-sm font-mono text-teal';
+        renderBackupList();
+      } catch (err) {
+        s.textContent = '✗ ' + err.message; s.className = 'text-sm font-mono text-red-400';
+      }
+    }
+
+    document.getElementById('refresh-backups-btn').addEventListener('click', renderBackupList);
 
     // Migratie: oude movies.json (van GitHub) importeren in Drive
     document.getElementById('import-btn').addEventListener('click', async () => {
@@ -314,6 +424,20 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
       logEl.innerHTML = '';
       const entries = [];
 
+      // Fase 1: bestaande collectie éénmaal inladen, zodat we per regel weten
+      // of het om een nieuwe titel of een update gaat (en bestaande notities/
+      // foto's/bekeken-status kunnen behouden).
+      let existingById = {};
+      try {
+        const { movies } = await driveLoadMovies();
+        movies.forEach((m) => { existingById[m.id] = m; });
+      } catch (err) {
+        const warnLine = document.createElement('p');
+        warnLine.textContent = '⚠ Kon bestaande collectie niet inladen voor duplicaat-check: ' + err.message;
+        warnLine.className = 'text-gold';
+        logEl.appendChild(warnLine);
+      }
+
       for (const line of lines) {
         const [titleRaw, yearRaw, formatRaw, typeRaw] = line.split('|').map((p) => p?.trim());
         const logLine = document.createElement('p');
@@ -334,20 +458,34 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           }
           const details = await tmdbDetails(best.id, best.media_type, c.tmdbKey);
           const slug = slugify(details.title, details.release_year);
+          const existing = existingById[slug];
 
-          entries.push({
-            id: slug,
-            content_type: typeRaw || (best.media_type === 'tv' ? 'tv' : 'movie'),
-            format: formatRaw || 'bluray',
-            date_added: new Date().toISOString().slice(0, 10),
-            watched: false,
-            notes: '',
-            custom_front_cover: '',
-            custom_back_cover: '',
-            ...details,
-          });
-          logLine.textContent = `✓ ${details.title} (${details.release_year})`;
-          logLine.className = 'text-teal';
+          if (existing) {
+            // Update: bestaande persoonlijke gegevens behouden, metadata verversen.
+            entries.push({
+              ...existing,
+              ...details,
+              id: slug,
+              content_type: typeRaw || existing.content_type || (best.media_type === 'tv' ? 'tv' : 'movie'),
+              format: formatRaw || existing.format || 'bluray',
+            });
+            logLine.textContent = `✓ ${details.title} (${details.release_year}) — bijgewerkt (stond al in je collectie)`;
+            logLine.className = 'text-gold';
+          } else {
+            entries.push({
+              id: slug,
+              content_type: typeRaw || (best.media_type === 'tv' ? 'tv' : 'movie'),
+              format: formatRaw || 'bluray',
+              date_added: new Date().toISOString().slice(0, 10),
+              watched: false,
+              notes: '',
+              custom_front_cover: '',
+              custom_back_cover: '',
+              ...details,
+            });
+            logLine.textContent = `✓ ${details.title} (${details.release_year})`;
+            logLine.className = 'text-teal';
+          }
         } catch (err) {
           logLine.textContent = `✗ ${titleRaw} — ${err.message}`;
           logLine.className = 'text-red-400';
