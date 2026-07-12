@@ -443,6 +443,11 @@
         },
       });
 
+      // Fase 1: TMDb-key syncen met Drive en (maximaal 1× per week) op de
+      // achtergrond een automatische backup van je collectie maken.
+      driveSyncConfig().catch((e) => console.warn('Instellingen-sync mislukt:', e));
+      driveAutoBackup();
+
       // '+ Titel toevoegen'-modal
       const addModal = document.getElementById('add-title-modal');
       document.getElementById('open-add-title-btn').addEventListener('click', () => {
