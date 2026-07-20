@@ -111,6 +111,8 @@ async function addTitleSelectResult(r) {
       document.getElementById('form-content-type').value = existing.content_type || document.getElementById('form-content-type').value;
       document.getElementById('form-watched').checked = !!existing.watched;
       document.getElementById('form-notes').value = existing.notes || '';
+      const ownedSelect = document.getElementById('form-owned');
+      if (ownedSelect) ownedSelect.value = existing.wishlist ? 'wishlist' : 'owned';
     }
   } catch (err) {
     console.warn('Duplicaat-check mislukt:', err);
@@ -203,10 +205,12 @@ async function addTitleSubmit(e) {
     }
 
     const existing = addTitleExistingEntry;
+    const ownedSelect = document.getElementById('form-owned');
     const entry = {
       id: slug,
       content_type: document.getElementById('form-content-type').value,
       format: document.getElementById('form-format').value,
+      wishlist: ownedSelect ? ownedSelect.value === 'wishlist' : false,
       // Bij bijwerken blijft de oorspronkelijke toevoegdatum behouden.
       date_added: (existing && existing.date_added) || new Date().toISOString().slice(0, 10),
       watched: document.getElementById('form-watched').checked,
