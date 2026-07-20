@@ -330,9 +330,93 @@ async function importMoviesJsonIntoDrive(arr) {
 }
 
 // ---------- Hoesfoto's ----------
-// Hoesfoto's worden als data-URL in movies.json zelf opgeslagen (zie hierboven),
-// zodat app.js ze direct als <img src="..."> kan tonen zonder extra Drive-aanroep.
+// Fase 2b: hoesfoto's worden voortaan als LOSSE bestandjes in de App Data-map
+// bewaard (cover-<id>-front.jpg / -back.jpg). movies.json bevat enkel nog het
+// Drive-bestand-ID, waardoor het klein en snel blijft — hoe groot je
+// fotocollectie ook wordt. Oude foto's (data-URL's in movies.json) worden
+// eenmalig automatisch gemigreerd via driveMigrateCoversToFiles().
 
+function _base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+// Upload (of overschrijf) een hoesfoto als los Drive-bestand; geeft het file-ID terug.
+async function driveUploadCoverFile(base64Jpeg, id, side) {
+  const name = `cover-${id}-${side}.jpg`;
+  const bytes = _base64ToBytes(base64Jpeg);
+
+  let fileId = await driveFindFileId(name);
+  if (!fileId) {
+    const resp = await driveApiFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, parents: ['appDataFolder'] }),
+    });
+    fileId = (await resp.json()).id;
+  }
+  await driveApiFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: bytes,
+  });
+  return fileId;
+}
+
+// Haalt een hoesfoto op en geeft een lokale blob-URL terug (met cache, zodat
+// dezelfde foto maar één keer gedownload wordt per sessie).
+const _coverUrlCache = {};
+async function driveCoverBlobUrl(fileId) {
+  if (_coverUrlCache[fileId]) return _coverUrlCache[fileId];
+  const resp = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  _coverUrlCache[fileId] = url;
+  return url;
+}
+
+async function driveDeleteCoverFile(fileId) {
+  if (!fileId) return;
+  try {
+    await driveDeleteFile(fileId);
+  } catch {
+    // Al verwijderd of onbereikbaar: geen probleem.
+  }
+}
+
+function _isCoverDataUrl(v) {
+  return typeof v === 'string' && v.startsWith('data:image');
+}
+
+// Eenmalige migratie: zet alle foto's die nog als data-URL in movies.json
+// zitten om naar losse Drive-bestanden. onProgress(klaar, totaal) per titel.
+async function driveMigrateCoversToFiles(onProgress) {
+  const { movies } = await driveLoadMovies();
+  const todo = movies.filter((m) => _isCoverDataUrl(m.custom_front_cover) || _isCoverDataUrl(m.custom_back_cover));
+  if (!todo.length) return 0;
+
+  let done = 0;
+  for (const m of todo) {
+    if (_isCoverDataUrl(m.custom_front_cover)) {
+      m.custom_front_cover_id = await driveUploadCoverFile(m.custom_front_cover.split(',')[1], m.id, 'front');
+      m.custom_front_cover = '';
+    }
+    if (_isCoverDataUrl(m.custom_back_cover)) {
+      m.custom_back_cover_id = await driveUploadCoverFile(m.custom_back_cover.split(',')[1], m.id, 'back');
+      m.custom_back_cover = '';
+    }
+    done++;
+    if (onProgress) onProgress(done, todo.length);
+  }
+
+  await withWriteLock(() => driveSaveNamedFile('movies.json', movies));
+  return todo.length;
+}
+
+// Oude helper (data-URL in movies.json) — enkel nog aanwezig zodat een
+// verouderde pagina-versie in cache geen fout geeft. Niet meer gebruiken.
 async function driveUploadCoverImage(base64Jpeg, slug, side) {
   return `data:image/jpeg;base64,${base64Jpeg}`;
 }
