@@ -119,6 +119,24 @@
     color: #C9A227;
   }
 
+  /* Banner onderaan de poster voor verlanglijst-titels */
+  .wish-banner {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 0.2rem 0;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #C9A227;
+    background: rgba(20,20,26,0.85);
+    border-top: 1px solid rgba(201,162,39,0.5);
+  }
+
   /* Verwijderknop linksboven op de poster, enkel zichtbaar bij hover/focus */
   .delete-btn {
     position: absolute;
@@ -189,14 +207,16 @@
      bewust beperkt tot #add-title-modal zodat de bestaande filter-/sorteerbalk
      hierboven niet meeverandert. */
   #add-title-modal input[type="text"], #add-title-modal input[type="number"],
-  #add-title-modal input[type="search"], #add-title-modal select, #add-title-modal textarea {
+  #add-title-modal input[type="search"], #add-title-modal select, #add-title-modal textarea,
+  [data-edit-panel] input[type="text"], [data-edit-panel] select {
     background: #1E1E26; border: 1px solid rgba(242,240,234,0.15); border-radius: 0.4rem;
     padding: 0.5rem 0.75rem; color: #F2F0EA; font-size: 0.9rem; width: 100%;
   }
-  #add-title-modal input:focus, #add-title-modal select:focus, #add-title-modal textarea:focus {
+  #add-title-modal input:focus, #add-title-modal select:focus, #add-title-modal textarea:focus,
+  [data-edit-panel] input:focus, [data-edit-panel] select:focus {
     outline: none; box-shadow: 0 0 0 2px rgba(201,162,39,0.5);
   }
-  #add-title-modal label { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; text-transform: uppercase; color: #8B8A92; letter-spacing: 0.03em; }
+  #add-title-modal label, [data-edit-panel] label { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; text-transform: uppercase; color: #8B8A92; letter-spacing: 0.03em; }
   .btn { padding: 0.55rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
   .btn-primary { background: #C9A227; color: #14141A; }
   .btn-primary:hover { background: #d9b13a; }
@@ -257,6 +277,16 @@
           <button type="button" class="chip" data-type="movie">Films</button>
           <button type="button" class="chip" data-type="tv">TV-reeksen</button>
           <button type="button" class="chip" data-type="animation">Animatie</button>
+        </div>
+        <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Status</span>
+        <div id="status-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-status="owned">In bezit</button>
+          <button type="button" class="chip" data-status="wishlist">Verlanglijst</button>
+        </div>
+        <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Bekeken</span>
+        <div id="watched-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-watched="watched">Bekeken</button>
+          <button type="button" class="chip" data-watched="unwatched">Niet bekeken</button>
         </div>
       </div>
 
@@ -319,6 +349,71 @@
             <p><span class="text-muted font-mono uppercase text-xs">Formaat</span><br><span data-field="format" class="text-gold font-semibold"></span></p>
             <p><span class="text-muted font-mono uppercase text-xs">Opmerkingen</span><br><span data-field="notes"></span></p>
           </div>
+          <!-- Fase 2: snelle acties + bewerken -->
+          <div class="pt-3 border-t border-white/10 flex flex-wrap gap-2">
+            <button type="button" data-toggle-watched class="chip">Markeer als bekeken</button>
+            <button type="button" data-edit-open class="chip">✎ Bewerken</button>
+          </div>
+
+          <div data-edit-panel class="hidden pt-3 border-t border-white/10 space-y-3 bg-bg rounded-lg p-4">
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label>Content-type</label>
+                <select data-edit-content>
+                  <option value="movie">Film</option>
+                  <option value="tv">TV-reeks</option>
+                  <option value="animation">Animatie</option>
+                </select>
+              </div>
+              <div>
+                <label>Formaat</label>
+                <select data-edit-format>
+                  <option value="4k">4K UHD</option>
+                  <option value="bluray">Blu-ray</option>
+                  <option value="dvd">DVD</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label>Status</label>
+                <select data-edit-owned>
+                  <option value="owned">In bezit</option>
+                  <option value="wishlist">Verlanglijst</option>
+                </select>
+              </div>
+              <div class="flex items-end gap-2 pb-1">
+                <input type="checkbox" data-edit-watched class="w-4 h-4">
+                <label class="!normal-case !text-sm text-ink">Al bekeken</label>
+              </div>
+            </div>
+            <div>
+              <label>Opmerkingen</label>
+              <input type="text" data-edit-notes placeholder="Bv. Steelbook editie">
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label>Nieuwe voorkant-foto</label>
+                <input type="file" data-edit-front accept="image/*" class="!p-1">
+                <label class="!normal-case flex items-center gap-2 mt-1 !text-xs text-muted hidden">
+                  <input type="checkbox" data-edit-remove-front class="w-3 h-3"> huidige foto verwijderen
+                </label>
+              </div>
+              <div>
+                <label>Nieuwe achterkant-foto</label>
+                <input type="file" data-edit-back accept="image/*" class="!p-1">
+                <label class="!normal-case flex items-center gap-2 mt-1 !text-xs text-muted hidden">
+                  <input type="checkbox" data-edit-remove-back class="w-3 h-3"> huidige foto verwijderen
+                </label>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-3 items-center">
+              <button type="button" data-edit-save class="btn btn-primary">Opslaan</button>
+              <button type="button" data-edit-cancel class="btn btn-secondary">Annuleren</button>
+              <span data-edit-status class="text-sm font-mono"></span>
+            </div>
+          </div>
+
           <div data-field="seasons-section" class="hidden pt-3 border-t border-white/10">
             <p class="text-muted font-mono uppercase text-xs mb-2">Seizoenen</p>
             <div data-field="seasons-list" class="space-y-1"></div>
@@ -355,7 +450,7 @@
           </div>
         </div>
 
-        <div class="grid sm:grid-cols-3 gap-4">
+        <div class="grid sm:grid-cols-2 gap-4">
           <div>
             <label>Content-type</label>
             <select id="form-content-type">
@@ -370,6 +465,13 @@
               <option value="4k">4K UHD</option>
               <option value="bluray" selected>Blu-ray</option>
               <option value="dvd">DVD</option>
+            </select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="form-owned">
+              <option value="owned" selected>In bezit</option>
+              <option value="wishlist">Verlanglijst (nog te kopen)</option>
             </select>
           </div>
           <div class="flex items-end gap-2 pb-1">
