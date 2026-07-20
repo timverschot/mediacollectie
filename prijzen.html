@@ -12,6 +12,15 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   var GOOGLE_CLIENT_ID = '819389589891-d5mkvj34v8op57r3aolehmtde8fv889p.apps.googleusercontent.com';
+
+  // Jouw Cloudflare Worker (het veilige doorgeefluik naar eBay).
+  // Plak hier de URL die je krijgt na het aanmaken van de Worker,
+  // bv. 'https://mediacollectie-prijzen.jouwnaam.workers.dev'
+  var PRICE_WORKER_URL = 'https://flat-night-bc97mediacollectie-prijzen.timothyverschoren.workers.dev';
+
+  // eBay-marktplaats voor de prijzen (EBAY_NL = ebay.nl, in euro's;
+  // alternatieven: EBAY_BE, EBAY_DE, EBAY_FR, EBAY_GB, ...)
+  var PRICE_MARKT = 'EBAY_NL';
 </script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
@@ -40,6 +49,18 @@
   .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
   .nav-link.active { color: #C9A227; }
   .nav-link:not(.active) { color: #8B8A92; }
+  input[type="search"], select {
+    background: #1E1E26; border: 1px solid rgba(242,240,234,0.15); border-radius: 0.4rem;
+    padding: 0.5rem 0.75rem; color: #F2F0EA; font-size: 0.9rem;
+  }
+  input:focus, select:focus { outline: none; box-shadow: 0 0 0 2px rgba(201,162,39,0.5); }
+  .btn { padding: 0.55rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+  .btn-primary { background: #C9A227; color: #14141A; }
+  .btn-primary:hover { background: #d9b13a; }
+  .btn-primary:disabled { opacity: 0.5; cursor: wait; }
+  .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
+  .result-card { cursor: pointer; border: 1px solid rgba(242,240,234,0.1); border-radius: 0.5rem; padding: 0.5rem; transition: border-color 0.15s; }
+  .result-card:hover { border-color: #C9A227; }
 </style>
 </head>
 <body class="font-body text-ink min-h-screen">
@@ -57,10 +78,39 @@
 
   <div class="max-w-7xl mx-auto px-6 py-6">
     <p class="text-sm text-muted max-w-2xl mb-6">
-      Prijsrange en gemiddelde zijn gebaseerd op actieve eBay-vraagprijzen (geen bevestigde verkoopprijzen),
-      opgehaald via <code class="font-mono text-xs">scripts/price_tracker.py --refresh</code>. Elke keer dat je
-      dat script draait, komt er een nieuw punt bij in de trendlijn hieronder.
+      Prijsrange en gemiddelde zijn gebaseerd op actieve eBay-vraagprijzen (geen bevestigde verkoopprijzen).
+      Klik op <strong class="text-ink">Ververs prijzen</strong> om de actuele prijzen op te halen — je hele
+      collectie wordt automatisch gevolgd. Elke verversing voegt een punt toe aan de trendlijn (max. één per dag).
     </p>
+
+    <!-- Verversen -->
+    <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
+      <div class="flex flex-wrap gap-3 items-center">
+        <button id="refresh-btn" class="btn btn-primary">⟳ Ververs prijzen</button>
+        <span id="refresh-status" class="font-mono text-sm text-muted"></span>
+      </div>
+      <div id="refresh-progress" class="hidden mt-3">
+        <div class="w-full bg-bg rounded-full h-1.5 overflow-hidden">
+          <div id="refresh-bar" class="bg-gold h-1.5 rounded-full transition-all" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Extra titel volgen (verlanglijst) -->
+    <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
+      <p class="mb-2"><strong>Volg een extra titel</strong> <span class="text-muted">(nog niet in je collectie — een verlanglijst-titel)</span></p>
+      <div class="flex flex-wrap gap-3 items-center mb-3">
+        <input type="search" id="track-search-input" placeholder="Zoek titel op TMDb…" class="flex-1 min-w-[200px]">
+        <select id="track-format" class="font-mono text-xs">
+          <option value="4k">4K UHD</option>
+          <option value="bluray" selected>Blu-ray</option>
+          <option value="dvd">DVD</option>
+        </select>
+        <button id="track-search-btn" class="btn btn-secondary shrink-0">Zoeken</button>
+      </div>
+      <div id="track-results" class="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-8 gap-3"></div>
+      <p id="track-status" class="text-sm font-mono mt-2"></p>
+    </div>
 
     <div class="flex flex-wrap gap-3 items-center justify-between mb-6">
       <p id="price-count" class="font-mono text-sm text-muted"></p>
@@ -75,7 +125,8 @@
 
     <div id="price-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
     <p id="price-empty" class="hidden text-center text-muted py-20">
-      Nog geen prijsdata. Draai <code class="font-mono text-xs">python scripts/price_tracker.py --refresh</code> om te starten.
+      Nog geen gevolgde titels. Klik op "Ververs prijzen" om je collectie te volgen,
+      of voeg hierboven een extra titel toe.
     </p>
   </div>
 
@@ -90,12 +141,18 @@
   </div>
 
   <script src="assets/drive.js"></script>
+  <script src="assets/admin.js"></script>
   <script src="assets/price-app.js"></script>
   <script>
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
     window._driveError = function (msg) {
       document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
     };
+
+    function workerConfigured() {
+      return PRICE_WORKER_URL && PRICE_WORKER_URL !== 'PLAK_HIER_JE_WORKER_URL';
+    }
+
     window._driveAuthenticated = function () {
       document.getElementById('login-gate').remove();
       window.__priceTrackerLoadData = async () => {
@@ -103,7 +160,119 @@
         return prices;
       };
       initPriceTracker();
+      driveSyncConfig().catch(() => {});
+
+      if (!workerConfigured()) {
+        const s = document.getElementById('refresh-status');
+        s.textContent = 'Nog niet ingesteld: plak eerst je Worker-URL bovenaan prijzen.html (zie PRIJZEN-INSTRUCTIES.md).';
+        s.className = 'font-mono text-sm text-gold';
+        document.getElementById('refresh-btn').disabled = true;
+      }
     };
+
+    // ---------- Ververs prijzen ----------
+    document.getElementById('refresh-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('refresh-btn');
+      const status = document.getElementById('refresh-status');
+      const progressWrap = document.getElementById('refresh-progress');
+      const bar = document.getElementById('refresh-bar');
+
+      btn.disabled = true;
+      progressWrap.classList.remove('hidden');
+      status.className = 'font-mono text-sm text-muted';
+
+      try {
+        const result = await priceRefreshAll(PRICE_WORKER_URL, PRICE_MARKT, (i, total, title) => {
+          status.textContent = `(${i}/${total}) ${title}...`;
+          bar.style.width = Math.round((i / total) * 100) + '%';
+        });
+        status.textContent = `✓ Klaar: ${result.updated} titels bijgewerkt` +
+          (result.skipped ? `, ${result.skipped} zonder prijsdata` : '') + '.';
+        status.className = 'font-mono text-sm text-teal';
+        if (window.__priceReload) window.__priceReload();
+      } catch (err) {
+        status.textContent = '✗ ' + err.message;
+        status.className = 'font-mono text-sm text-red-400';
+      } finally {
+        btn.disabled = false;
+        setTimeout(() => progressWrap.classList.add('hidden'), 1500);
+        bar.style.width = '0%';
+      }
+    });
+
+    // ---------- Extra titel volgen ----------
+    function escTrack(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function doTrackSearch() {
+      const c = getConfig();
+      const statusEl = document.getElementById('track-status');
+      if (!c.tmdbKey) {
+        statusEl.textContent = 'Vul eerst je TMDb API-key in via Instellingen op de Beheer-pagina.';
+        statusEl.className = 'text-sm font-mono text-gold';
+        return;
+      }
+      const query = document.getElementById('track-search-input').value.trim();
+      if (!query) return;
+
+      const resultsEl = document.getElementById('track-results');
+      resultsEl.innerHTML = '<p class="col-span-full text-muted text-sm">Zoeken...</p>';
+      statusEl.textContent = '';
+      try {
+        const results = await tmdbSearch(query, c.tmdbKey);
+        if (!results.length) {
+          resultsEl.innerHTML = '<p class="col-span-full text-muted text-sm">Geen resultaten.</p>';
+          return;
+        }
+        resultsEl.innerHTML = '';
+        results.slice(0, 8).forEach((r) => {
+          const title = r.title || r.name;
+          const date = r.release_date || r.first_air_date || '';
+          const div = document.createElement('div');
+          div.className = 'result-card';
+          div.innerHTML = `
+            ${r.poster_path ? `<img src="${TMDB_IMG_BASE}${r.poster_path}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
+            <p class="text-xs truncate">${escTrack(title)}</p>
+            <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
+          `;
+          div.addEventListener('click', () => trackResult(r));
+          resultsEl.appendChild(div);
+        });
+      } catch (err) {
+        resultsEl.innerHTML = `<p class="col-span-full text-red-400 text-sm">${escTrack(err.message)}</p>`;
+      }
+    }
+
+    async function trackResult(r) {
+      const c = getConfig();
+      const statusEl = document.getElementById('track-status');
+      statusEl.textContent = 'Toevoegen aan de tracker...';
+      statusEl.className = 'text-sm font-mono text-muted';
+      try {
+        const details = await tmdbDetails(r.id, r.media_type, c.tmdbKey);
+        const format = document.getElementById('track-format').value;
+        const result = await priceTrackNewTitle(details, format);
+        if (result.status === 'bestaat') {
+          statusEl.textContent = `'${result.title}' wordt al gevolgd.`;
+          statusEl.className = 'text-sm font-mono text-gold';
+        } else {
+          statusEl.textContent = `✓ '${result.title}' toegevoegd. Klik op "Ververs prijzen" voor een eerste prijs.`;
+          statusEl.className = 'text-sm font-mono text-teal';
+          document.getElementById('track-results').innerHTML = '';
+          document.getElementById('track-search-input').value = '';
+        }
+        if (window.__priceReload) window.__priceReload();
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+        statusEl.className = 'text-sm font-mono text-red-400';
+      }
+    }
+
+    document.getElementById('track-search-btn').addEventListener('click', doTrackSearch);
+    document.getElementById('track-search-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doTrackSearch();
+    });
   </script>
 </body>
 </html>
