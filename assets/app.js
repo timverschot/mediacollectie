@@ -8,6 +8,12 @@
  * `config.loadData` (async functie die een array teruggeeft) heeft
  * voorrang; is die niet meegegeven, dan valt de app terug op
  * `config.dataUrl` (een JSON-bestand rechtstreeks ophalen via fetch).
+ *
+ * Fase 2-uitbreidingen:
+ * - Bewerken via de detailmodal (formaat, notities, status, hoesfoto's)
+ * - Snelle 'bekeken'-toggle in de modal + filter Bekeken/Niet bekeken
+ * - Verlanglijst: titels met wishlist=true krijgen een banner, een eigen
+ *   filterchip en tellen mee in de prijstracker als 'Verlanglijst'
  */
 
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -22,6 +28,8 @@ function initCollectionApp(config) {
     activeFormats: new Set(),
     activeTypes: new Set(),
     activeGenres: new Set(),
+    activeStatus: new Set(),   // 'owned' / 'wishlist'
+    activeWatched: new Set(),  // 'watched' / 'unwatched'
     sort: 'date_added_desc',
   };
 
@@ -34,6 +42,8 @@ function initCollectionApp(config) {
     formatChips: document.getElementById('format-chips'),
     typeChips: document.getElementById('type-chips'),
     genreChips: document.getElementById('genre-chips'),
+    statusChips: document.getElementById('status-chips'),
+    watchedChips: document.getElementById('watched-chips'),
     loadMore: document.getElementById('load-more'),
     modal: document.getElementById('detail-modal'),
     modalClose: document.getElementById('modal-close'),
@@ -106,6 +116,14 @@ function initCollectionApp(config) {
         const hasGenre = (item.genres || []).some((g) => state.activeGenres.has(g));
         if (!hasGenre) return false;
       }
+      if (state.activeStatus.size) {
+        const status = item.wishlist ? 'wishlist' : 'owned';
+        if (!state.activeStatus.has(status)) return false;
+      }
+      if (state.activeWatched.size) {
+        const w = item.watched ? 'watched' : 'unwatched';
+        if (!state.activeWatched.has(w)) return false;
+      }
       return true;
     });
 
@@ -132,7 +150,10 @@ function initCollectionApp(config) {
 
   function render() {
     const visible = state.filtered.slice(0, state.visibleCount);
-    els.count.textContent = state.filtered.length + ' titel' + (state.filtered.length === 1 ? '' : 's');
+    const wishCount = state.filtered.filter((i) => i.wishlist).length;
+    els.count.textContent =
+      state.filtered.length + ' titel' + (state.filtered.length === 1 ? '' : 's') +
+      (wishCount ? ` · ${wishCount} verlanglijst` : '');
     els.empty.classList.toggle('hidden', state.filtered.length !== 0);
     els.loadMore.classList.toggle('hidden', state.visibleCount >= state.filtered.length);
 
@@ -262,6 +283,7 @@ function initCollectionApp(config) {
               ? `<span class="season-badge ${seasonBadge.complete ? '' : 'season-badge-partial'}" title="${seasonBadge.text} seizoenen in bezit">${seasonBadge.text}</span>`
               : ''
           }
+          ${item.wishlist ? '<span class="wish-banner">Verlanglijst</span>' : ''}
           <button type="button" class="delete-btn" data-delete-id="${escapeAttr(item.id)}" data-delete-title="${escapeAttr(item.title)}" title="Verwijderen uit collectie" aria-label="Verwijderen uit collectie">&times;</button>
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
@@ -298,7 +320,7 @@ function initCollectionApp(config) {
     els.modal.querySelector('[data-field="director"]').textContent = item.director || '—';
     els.modal.querySelector('[data-field="cast"]').textContent = (item.cast || []).join(', ') || '—';
     els.modal.querySelector('[data-field="genres"]').textContent = (item.genres || []).join(' · ') || '—';
-    els.modal.querySelector('[data-field="format"]').textContent = ribbon.label;
+    els.modal.querySelector('[data-field="format"]').textContent = ribbon.label + (item.wishlist ? ' · Verlanglijst' : '');
     els.modal.querySelector('[data-field="notes"]').textContent = item.notes || 'Geen opmerkingen';
     els.modal.querySelector('[data-field="overview"]').textContent = item.overview || '';
 
@@ -353,6 +375,41 @@ function initCollectionApp(config) {
 
     els.modal.querySelector('[data-delete-full]').onclick = () => handleDeleteTitle(item.id, item.title);
 
+    // ---------- Fase 2: snelle 'bekeken'-toggle ----------
+    const watchedBtn = els.modal.querySelector('[data-toggle-watched]');
+    if (watchedBtn) {
+      watchedBtn.textContent = item.watched ? '✓ Bekeken — zet terug op niet bekeken' : 'Markeer als bekeken';
+      watchedBtn.classList.toggle('chip-active', !!item.watched);
+      watchedBtn.onclick = async () => {
+        const previous = item.watched;
+        item.watched = !item.watched;
+        watchedBtn.disabled = true;
+        try {
+          await upsertMovieInDrive(item);
+          applyFilters();
+          openModal(item.id);
+        } catch (err) {
+          item.watched = previous;
+          alert('Bijwerken mislukt: ' + err.message);
+        } finally {
+          watchedBtn.disabled = false;
+        }
+      };
+    }
+
+    // ---------- Fase 2: bewerken-paneel ----------
+    const editPanel = els.modal.querySelector('[data-edit-panel]');
+    const editBtn = els.modal.querySelector('[data-edit-open]');
+    if (editPanel && editBtn) {
+      editPanel.classList.add('hidden');
+      editBtn.onclick = () => {
+        editPanel.classList.toggle('hidden');
+        if (!editPanel.classList.contains('hidden')) fillEditPanel(item);
+      };
+      els.modal.querySelector('[data-edit-cancel]').onclick = () => editPanel.classList.add('hidden');
+      els.modal.querySelector('[data-edit-save]').onclick = () => saveEditPanel(item);
+    }
+
     const flipCard = els.modal.querySelector('.flip-card');
     const flipBtn = els.modal.querySelector('[data-flip-btn]');
     const frontImg = els.modal.querySelector('[data-cover="front"]');
@@ -374,6 +431,86 @@ function initCollectionApp(config) {
 
     els.modal.classList.remove('hidden');
     document.body.classList.add('overflow-hidden');
+  }
+
+  // Vult het bewerken-paneel met de huidige gegevens van de titel.
+  function fillEditPanel(item) {
+    const m = els.modal;
+    m.querySelector('[data-edit-content]').value = item.content_type || 'movie';
+    m.querySelector('[data-edit-format]').value = item.format || 'bluray';
+    m.querySelector('[data-edit-owned]').value = item.wishlist ? 'wishlist' : 'owned';
+    m.querySelector('[data-edit-watched]').checked = !!item.watched;
+    m.querySelector('[data-edit-notes]').value = item.notes || '';
+    m.querySelector('[data-edit-front]').value = '';
+    m.querySelector('[data-edit-back]').value = '';
+    const remFront = m.querySelector('[data-edit-remove-front]');
+    const remBack = m.querySelector('[data-edit-remove-back]');
+    remFront.checked = false;
+    remBack.checked = false;
+    // 'Huidige foto verwijderen' enkel tonen als er een eigen hoesfoto is.
+    remFront.closest('label').classList.toggle('hidden', !item.custom_front_cover);
+    remBack.closest('label').classList.toggle('hidden', !item.custom_back_cover);
+    const status = m.querySelector('[data-edit-status]');
+    status.textContent = '';
+    status.className = 'text-sm font-mono';
+  }
+
+  // Slaat de wijzigingen uit het bewerken-paneel op naar Drive.
+  async function saveEditPanel(item) {
+    const m = els.modal;
+    const saveBtn = m.querySelector('[data-edit-save]');
+    const status = m.querySelector('[data-edit-status]');
+    saveBtn.disabled = true;
+    status.textContent = 'Opslaan...';
+    status.className = 'text-sm font-mono text-muted';
+
+    const previous = {
+      content_type: item.content_type,
+      format: item.format,
+      wishlist: item.wishlist,
+      watched: item.watched,
+      notes: item.notes,
+      custom_front_cover: item.custom_front_cover,
+      custom_back_cover: item.custom_back_cover,
+    };
+
+    try {
+      // Nieuwe hoesfoto's verwerken (vereist resizeImageFile uit admin.js en
+      // driveUploadCoverImage uit drive.js — beide geladen op deze pagina).
+      const frontFile = m.querySelector('[data-edit-front]').files[0];
+      const backFile = m.querySelector('[data-edit-back]').files[0];
+      if (frontFile) {
+        status.textContent = 'Voorkant-foto verwerken...';
+        item.custom_front_cover = await driveUploadCoverImage(await resizeImageFile(frontFile, 1200), item.id, 'front');
+      } else if (m.querySelector('[data-edit-remove-front]').checked) {
+        item.custom_front_cover = '';
+      }
+      if (backFile) {
+        status.textContent = 'Achterkant-foto verwerken...';
+        item.custom_back_cover = await driveUploadCoverImage(await resizeImageFile(backFile, 1200), item.id, 'back');
+      } else if (m.querySelector('[data-edit-remove-back]').checked) {
+        item.custom_back_cover = '';
+      }
+
+      item.content_type = m.querySelector('[data-edit-content]').value;
+      item.format = m.querySelector('[data-edit-format]').value;
+      item.wishlist = m.querySelector('[data-edit-owned]').value === 'wishlist';
+      item.watched = m.querySelector('[data-edit-watched]').checked;
+      item.notes = m.querySelector('[data-edit-notes]').value.trim();
+
+      status.textContent = 'Opslaan naar Drive...';
+      await upsertMovieInDrive(item);
+
+      buildGenreChips(state.all);
+      applyFilters();
+      openModal(item.id);
+    } catch (err) {
+      Object.assign(item, previous);
+      status.textContent = '✗ ' + err.message;
+      status.className = 'text-sm font-mono text-red-400';
+    } finally {
+      saveBtn.disabled = false;
+    }
   }
 
   function closeModal() {
@@ -414,6 +551,26 @@ function initCollectionApp(config) {
       applyFilters();
     });
   });
+
+  if (els.statusChips) {
+    els.statusChips.querySelectorAll('[data-status]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeStatus, chip.dataset.status);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+    });
+  }
+
+  if (els.watchedChips) {
+    els.watchedChips.querySelectorAll('[data-watched]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeWatched, chip.dataset.watched);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+    });
+  }
 
   els.loadMore.addEventListener('click', () => {
     state.visibleCount += PAGE_SIZE;
