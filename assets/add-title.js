@@ -172,19 +172,19 @@ async function addTitleSubmit(e) {
 
   try {
     const slug = slugify(addTitleSelectedDetails.title, addTitleSelectedDetails.release_year);
-    let frontCover = '', backCover = '';
+    let frontCoverId = '', backCoverId = '';
 
     const frontFile = document.getElementById('form-front').files[0];
     const backFile = document.getElementById('form-back').files[0];
     if (frontFile) {
-      statusEl.textContent = 'Voorkant-hoes verwerken...';
+      statusEl.textContent = 'Voorkant-hoes uploaden...';
       const b64 = await resizeImageFile(frontFile, 1200);
-      frontCover = await driveUploadCoverImage(b64, slug, 'front');
+      frontCoverId = await driveUploadCoverFile(b64, slug, 'front');
     }
     if (backFile) {
-      statusEl.textContent = 'Achterkant-hoes verwerken...';
+      statusEl.textContent = 'Achterkant-hoes uploaden...';
       const b64 = await resizeImageFile(backFile, 1200);
-      backCover = await driveUploadCoverImage(b64, slug, 'back');
+      backCoverId = await driveUploadCoverFile(b64, slug, 'back');
     }
 
     // Seizoensdata verzamelen (enkel relevant als de seizoenkiezer zichtbaar is).
@@ -216,8 +216,10 @@ async function addTitleSubmit(e) {
       watched: document.getElementById('form-watched').checked,
       notes: document.getElementById('form-notes').value.trim(),
       // Geen nieuwe foto gekozen? Dan blijven eventuele bestaande hoesfoto's staan.
-      custom_front_cover: frontCover || (existing && existing.custom_front_cover) || '',
-      custom_back_cover: backCover || (existing && existing.custom_back_cover) || '',
+      custom_front_cover_id: frontCoverId || (existing && existing.custom_front_cover_id) || '',
+      custom_back_cover_id: backCoverId || (existing && existing.custom_back_cover_id) || '',
+      custom_front_cover: frontCoverId ? '' : (existing && existing.custom_front_cover) || '',
+      custom_back_cover: backCoverId ? '' : (existing && existing.custom_back_cover) || '',
       ...addTitleSelectedDetails,
       seasons,
     };
