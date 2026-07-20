@@ -2,6 +2,9 @@
  * Beheer-tool — zoekt op TMDb. De config (TMDb-key) wordt enkel lokaal in je
  * browser bewaard (localStorage), nooit verstuurd naar iets anders dan TMDb.
  * Het wegschrijven naar je collectie gebeurt via assets/drive.js (Google Drive).
+ *
+ * Fase 2b: tmdbDetails geeft nu ook de officiële TMDb-reeks mee
+ * (belongs_to_collection, bv. "Harry Potter Collection") als `saga`.
  */
 
 const LS_KEY = 'mediacollectie_admin_config';
@@ -111,6 +114,9 @@ async function tmdbDetails(id, mediaType, apiKey) {
     runtime: runtime || null,
     rating: d.vote_average || null,
     overview: d.overview || '',
+    // Officiële TMDb-reeks (enkel films), bv. "Harry Potter Collection".
+    // Handmatig aan te passen via het bewerken-paneel.
+    saga: (d.belongs_to_collection && d.belongs_to_collection.name) || '',
     ...(seasons ? { seasons } : {}),
   };
 }
