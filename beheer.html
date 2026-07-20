@@ -141,7 +141,7 @@
           </div>
         </div>
 
-        <div class="grid sm:grid-cols-3 gap-4">
+        <div class="grid sm:grid-cols-2 gap-4">
           <div>
             <label>Content-type</label>
             <select id="form-content-type">
@@ -156,6 +156,13 @@
               <option value="4k">4K UHD</option>
               <option value="bluray" selected>Blu-ray</option>
               <option value="dvd">DVD</option>
+            </select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="form-owned">
+              <option value="owned" selected>In bezit</option>
+              <option value="wishlist">Verlanglijst (nog te kopen)</option>
             </select>
           </div>
           <div class="flex items-end gap-2 pb-1">
@@ -478,6 +485,7 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
               format: formatRaw || 'bluray',
               date_added: new Date().toISOString().slice(0, 10),
               watched: false,
+              wishlist: false,
               notes: '',
               custom_front_cover: '',
               custom_back_cover: '',
