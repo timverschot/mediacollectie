@@ -167,6 +167,8 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
   prices.forEach((p) => { byId[p.id] = p; });
 
   // Gevolgde titels = hele collectie + extra titels die al in de tracker zitten.
+  // Collectie-titels die op je verlanglijst staan (wishlist=true) tellen als
+  // 'Verlanglijst' in de tracker, niet als 'In collectie'.
   const tracked = {};
   movies.forEach((m) => {
     tracked[m.id] = {
@@ -175,7 +177,7 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
       release_year: m.release_year,
       poster_path: m.poster_path || '',
       format: m.format,
-      owned: true,
+      owned: !m.wishlist,
     };
   });
   prices.forEach((h) => {
