@@ -932,9 +932,10 @@ function initCollectionApp(config) {
       s.style.opacity = opacity;
     });
     const stageW = els.shelfStage.clientWidth || 800;
-    const itemW = shelfItemWidth();
-    const stride = itemW + SHELF_PAD;
-    els.shelfTrack.style.transform = `translateX(${stageW / 2 - (shelfActive * stride + itemW / 2)}px)`;
+    // De werkelijke slidebreedte uit de DOM meten (inclusief padding) i.p.v.
+    // te schatten — anders stapelt een klein verschil op tot zichtbare drift.
+    const stride = slides.length ? slides[0].offsetWidth : shelfItemWidth();
+    els.shelfTrack.style.transform = `translateX(${stageW / 2 - (shelfActive * stride + stride / 2)}px)`;
 
     const u = shelfUnits[shelfActive];
     if (u) {
