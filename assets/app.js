@@ -62,6 +62,9 @@ function checkAssetVersions() {
   if (typeof loadUniverseMembers === 'undefined') {
     missing.push('assets/universes.js');
   }
+  if (typeof addTitleOpenForTmdb === 'undefined' || typeof addTitleBulkSubmit === 'undefined') {
+    missing.push('assets/add-title.js');
+  }
   return missing;
 }
 
@@ -778,16 +781,22 @@ function initCollectionApp(config) {
   }
 
   // Lintjes op de poster: één per formaat dat je bezit, onder elkaar.
+  // Bij één formaat past de volledige naam ("Blu-ray"); zodra er gestapeld
+  // wordt, is er alleen ruimte voor de korte code ("BD").
   function ribbonsHtml(item) {
     const formats = ownedFormats(item);
     const list = formats.length ? formats : allFormats(item);
-    return list
-      .slice(0, 3)
+    const shown = list.slice(0, 3);
+    const useShort = shown.length > 1;
+
+    return shown
       .map(
         (f, i) =>
           `<span class="ribbon" style="background:${formatColor(f)};color:#14141A;top:${
             0.5 + i * 1.35
-          }rem">${escapeHtml(formatShort(f))}</span>`
+          }rem" title="${escapeAttr(formatLabel(f))}">${escapeHtml(
+            useShort ? formatShort(f) : formatLabel(f)
+          )}</span>`
       )
       .join('');
   }
@@ -2479,7 +2488,15 @@ function initCollectionApp(config) {
     // Volledig toevoegformulier openen voor een ontbrekend deel.
     listEl.querySelectorAll('[data-saga-own]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        if (typeof addTitleOpenForTmdb !== 'function') return;
+        // Stil terugkeren maakt de knop 'dood' zonder uitleg — liever zeggen
+        // wat eraan scheelt.
+        if (typeof addTitleOpenForTmdb !== 'function') {
+          alert(
+            'Deze knop heeft een nieuwere assets/add-title.js nodig.\n\n' +
+            'Upload dat bestand opnieuw en herlaad met Ctrl+Shift+R.'
+          );
+          return;
+        }
         closeModal();
         const addModal = document.getElementById('add-title-modal');
         if (addModal) addModal.classList.remove('hidden');
