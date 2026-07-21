@@ -45,6 +45,60 @@ const MEDIA_FORMATS = [
   { value: 'vhs', label: 'VHS', short: 'VHS', rank: 1, color: '#7A6E62' },
 ];
 
+/**
+ * Uitvoeringen van een exemplaar. Staan los van het formaat — een DVD kan
+ * evengoed een steelbook zijn als een 4K.
+ *
+ * Twee soorten door elkaar, bewust gelijk behandeld:
+ * - Verpakking: steelbook, limited edition
+ * - Inhoud: extended edition, director's cut (andere montage, langere film)
+ *
+ * Voor de prijsopvolging maakt dat onderscheid niet uit: alle vier vragen ze
+ * een eigen zoekterm en hebben ze een eigen markt.
+ *
+ * `search` is wat er in de eBay-zoekterm komt; `match` bepaalt of een
+ * advertentie bij die uitvoering hoort.
+ */
+const EDITION_VARIANTS = [
+  {
+    key: 'steelbook',
+    label: 'Steelbook',
+    search: 'steelbook',
+    match: /(^|[^a-z])steel\s?book([^a-z]|$)/i,
+  },
+  {
+    key: 'limited',
+    label: 'Limited edition',
+    search: 'limited edition',
+    match: /(^|[^a-z])limited(\s+edition)?([^a-z]|$)/i,
+  },
+  {
+    key: 'extended',
+    label: 'Extended edition',
+    search: 'extended edition',
+    match: /(^|[^a-z])extended(\s+(edition|cut|version))?([^a-z]|$)/i,
+  },
+  {
+    key: 'directors',
+    label: "Director's cut",
+    search: "director's cut",
+    // Vangt "director's cut", "directors cut" en "director cut"
+    match: /(^|[^a-z])director'?s?\s+cut([^a-z]|$)/i,
+  },
+];
+
+// Welke uitvoeringen staan er aan bij dit exemplaar? Vaste volgorde, zodat
+// dezelfde combinatie altijd dezelfde sleutel oplevert.
+function editionVariantKeys(edition) {
+  if (!edition) return [];
+  return EDITION_VARIANTS.filter((v) => edition[v.key]).map((v) => v.key);
+}
+
+function editionVariantLabels(edition) {
+  if (!edition) return [];
+  return EDITION_VARIANTS.filter((v) => edition[v.key]).map((v) => v.label);
+}
+
 const FORMAT_BY_VALUE = {};
 MEDIA_FORMATS.forEach((f) => { FORMAT_BY_VALUE[f.value] = f; });
 
@@ -90,7 +144,9 @@ function normalizeMovieEntry(m) {
       if (!ed.eid) ed.eid = 'e' + (i + 1);
       if (!ed.format) ed.format = 'bluray';
       if (typeof ed.wishlist !== 'boolean') ed.wishlist = false;
-      if (typeof ed.steelbook !== 'boolean') ed.steelbook = false;
+      EDITION_VARIANTS.forEach((v) => {
+        if (typeof ed[v.key] !== 'boolean') ed[v.key] = false;
+      });
       if (ed.notes == null) ed.notes = '';
       if (ed.boxset == null) ed.boxset = '';
       if (ed.location == null) ed.location = '';
