@@ -163,9 +163,13 @@ function tmdbTrailerKey(d) {
 
 async function tmdbDetails(id, mediaType, apiKey) {
   // Alles in één aanroep: details + credits + keuring + trailer + externe ID's.
+  // Voor series 'aggregate_credits' in plaats van 'credits': dat laatste geeft
+  // enkel de HUIDIGE hoofdcast, dus acteurs die halverwege de reeks vertrokken
+  // ontbreken volledig. aggregate_credits voegt alle seizoenen samen en meldt
+  // per acteur in hoeveel afleveringen die te zien is.
   const appends =
     mediaType === 'tv'
-      ? 'credits,content_ratings,external_ids,videos'
+      ? 'aggregate_credits,content_ratings,external_ids,videos'
       : 'credits,release_dates,external_ids,videos';
   const d = await tmdbGet(`${mediaType}/${id}`, { language: 'nl-NL', append_to_response: appends }, apiKey);
 
@@ -183,7 +187,46 @@ async function tmdbDetails(id, mediaType, apiKey) {
     }
   }
 
-  const crew = (d.credits && d.credits.crew) || [];
+  // Films leveren credits.cast/crew; series leveren aggregate_credits met een
+  // andere vorm (roles[] resp. jobs[] in plaats van character/job). Hieronder
+  // brengen we beide naar dezelfde vorm.
+  const rawCredits = d.aggregate_credits || d.credits || {};
+
+  const crew = ((rawCredits.crew || [])).flatMap((c) => {
+    if (Array.isArray(c.jobs) && c.jobs.length) {
+      // aggregate_credits: één persoon met meerdere functies
+      return c.jobs.map((j) => ({
+        id: c.id,
+        name: c.name,
+        profile_path: c.profile_path,
+        job: j.job,
+        episode_count: j.episode_count || c.total_episode_count || 0,
+      }));
+    }
+    return [{ id: c.id, name: c.name, profile_path: c.profile_path, job: c.job, episode_count: 0 }];
+  });
+
+  const castSource = (rawCredits.cast || []).map((c) => {
+    if (Array.isArray(c.roles) && c.roles.length) {
+      // aggregate_credits: rolnamen samenvoegen (personages veranderen soms)
+      const characters = [...new Set(c.roles.map((r) => r.character).filter(Boolean))];
+      return {
+        id: c.id,
+        name: c.name,
+        profile_path: c.profile_path,
+        character: characters.join(' / '),
+        episode_count: c.total_episode_count || 0,
+      };
+    }
+    return {
+      id: c.id,
+      name: c.name,
+      profile_path: c.profile_path,
+      character: c.character || '',
+      episode_count: 0,
+    };
+  });
+
   const uniqueNames = (list) => [...new Set(list.map((c) => c.name))];
 
   let directors = uniqueNames(crew.filter((c) => c.job === 'Director'));
@@ -191,7 +234,16 @@ async function tmdbDetails(id, mediaType, apiKey) {
   const writers = uniqueNames(crew.filter((c) => ['Screenplay', 'Writer', 'Story', 'Author'].includes(c.job))).slice(0, 3);
   const composers = uniqueNames(crew.filter((c) => c.job === 'Original Music Composer')).slice(0, 2);
 
-  const castRaw = ((d.credits && d.credits.cast) || []).slice(0, 12);
+  // Bij series sorteren we op aantal afleveringen: wie het vaakst te zien was,
+  // staat vooraan. Bij films houdt TMDb zijn eigen volgorde aan, die daar goed is.
+  const castOrdered =
+    mediaType === 'tv'
+      ? [...castSource].sort((a, b) => (b.episode_count || 0) - (a.episode_count || 0))
+      : castSource;
+
+  // Ruimer dan vroeger: twaalf was te krap voor series met een grote cast.
+  const castRaw = castOrdered.slice(0, 25);
+
   // `cast` blijft een simpele namenlijst (zo blijft bestaande code werken);
   // `cast_details` voegt rolnaam, portretfoto en het TMDb-id toe. Dat id is
   // nodig om de filmografie van die persoon te kunnen opvragen.
@@ -201,6 +253,7 @@ async function tmdbDetails(id, mediaType, apiKey) {
     name: c.name,
     character: c.character || '',
     profile_path: c.profile_path || '',
+    episode_count: c.episode_count || 0,
   }));
 
   // Crew: enkel de functies die er voor een verzamelaar toe doen, anders staan
@@ -400,6 +453,30 @@ async function tmdbPerson(personId, apiKey) {
     known_for_department: d.known_for_department || '',
     credits: main,
     appearances,
+  };
+}
+
+/**
+ * Alle afleveringen van één seizoen (fase 13).
+ * Geeft nummer, titel, uitzenddatum, synopsis, beoordeling en speelduur.
+ */
+async function tmdbSeason(tvId, seasonNumber, apiKey) {
+  const d = await tmdbGet(`tv/${tvId}/season/${seasonNumber}`, { language: 'nl-NL' }, apiKey);
+  return {
+    season_number: d.season_number,
+    name: d.name || '',
+    overview: d.overview || '',
+    poster_path: d.poster_path || '',
+    air_date: d.air_date || '',
+    episodes: (d.episodes || []).map((e) => ({
+      episode_number: e.episode_number,
+      name: e.name || '',
+      overview: e.overview || '',
+      air_date: e.air_date || '',
+      runtime: e.runtime || null,
+      rating: e.vote_average || null,
+      still_path: e.still_path || '',
+    })),
   };
 }
 
