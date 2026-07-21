@@ -294,6 +294,19 @@
   /* Mobiel: filterbalk uitklappen via de Filters-knop */
   .filter-open { display: block !important; }
 
+  /* Uitgeklapt nam het filtermenu het hele scherm in beslag, zeker in
+     liggende stand waar er nauwelijks hoogte is. Begrenzen en zelf laten
+     scrollen, zodat je collectie zichtbaar blijft. */
+  #filter-panel.filter-open {
+    max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 0.25rem;
+  }
+  @media (max-height: 520px) {
+    #filter-panel.filter-open { max-height: 50vh; }
+  }
+
   /* Verwijderknop linksboven op de poster, enkel zichtbaar bij hover/focus */
   .delete-btn {
     position: absolute;
