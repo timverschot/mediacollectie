@@ -61,6 +61,17 @@ function initAddTitleUI(onSaved) {
     });
   }
 
+  // Uitvoeringen uit de gedeelde lijst (drive.js) opbouwen.
+  const variantsBox = document.getElementById('form-variants');
+  if (variantsBox && typeof EDITION_VARIANTS !== 'undefined') {
+    variantsBox.innerHTML = EDITION_VARIANTS.map(
+      (v) => `
+        <label class="!normal-case !text-sm text-ink flex items-center gap-2">
+          <input type="checkbox" class="w-4 h-4 form-variant" data-variant="${v.key}"> ${addTitleEscapeHtml(v.label)}
+        </label>`
+    ).join('');
+  }
+
   const bulkBtn = document.getElementById('saga-bulk-btn');
   if (bulkBtn) bulkBtn.addEventListener('click', addTitleAddWholeSaga);
 
@@ -156,7 +167,6 @@ async function addTitleBulkSubmit() {
             notes: '',
             boxset,
             location: '',
-            steelbook: false,
             wishlist,
             date_added: today,
             custom_front_cover_id: '',
@@ -208,14 +218,19 @@ async function addTitleBulkSubmit() {
 // Bouwt één exemplaar op basis van wat er in het formulier staat.
 function addTitleBuildEdition(eid, coverIds) {
   const boxsetEl = document.getElementById('form-boxset');
-  const steelEl = document.getElementById('form-steelbook');
   const ownedSelect = document.getElementById('form-owned');
+
+  const variants = {};
+  document.querySelectorAll('#form-variants .form-variant').forEach((cb) => {
+    variants[cb.dataset.variant] = cb.checked;
+  });
+
   return {
     eid: eid || 'e1',
     format: document.getElementById('form-format').value,
     notes: document.getElementById('form-notes').value.trim(),
     boxset: boxsetEl ? boxsetEl.value.trim() : '',
-    steelbook: steelEl ? steelEl.checked : false,
+    ...variants,
     wishlist: ownedSelect ? ownedSelect.value === 'wishlist' : false,
     date_added: new Date().toISOString().slice(0, 10),
     custom_front_cover_id: (coverIds && coverIds.front) || '',
@@ -562,8 +577,10 @@ async function addTitleSubmit(e) {
       if (sameFormat) {
         sameFormat.notes = newEdition.notes;
         sameFormat.boxset = newEdition.boxset;
-        sameFormat.steelbook = newEdition.steelbook;
         sameFormat.wishlist = newEdition.wishlist;
+        EDITION_VARIANTS.forEach((v) => {
+          sameFormat[v.key] = !!newEdition[v.key];
+        });
         if (frontCoverId) sameFormat.custom_front_cover_id = frontCoverId;
         if (backCoverId) sameFormat.custom_back_cover_id = backCoverId;
       } else {
