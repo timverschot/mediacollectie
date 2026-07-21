@@ -400,7 +400,7 @@
   <!-- Kop -->
   <header class="border-b border-white/5">
     <div class="sprocket-strip h-2 w-full opacity-60"></div>
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3 sm:gap-4">
+    <div class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-4 sm:px-6 2xl:px-10 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3 sm:gap-4">
       <div>
         <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
         <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Mijn Mediacollectie</h1>
@@ -425,7 +425,7 @@
 
   <!-- Controlepaneel: zoeken, filters, sortering -->
   <div class="sticky top-0 z-20 bg-bg/95 backdrop-blur border-b border-white/5">
-    <div class="max-w-7xl mx-auto px-6 py-4 space-y-3">
+    <div class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-6 2xl:px-10 py-4 space-y-3">
       <div class="flex flex-wrap gap-3 items-center">
         <input
           id="filter-search"
@@ -510,7 +510,7 @@
   </div>
 
   <!-- Grid -->
-  <main class="max-w-7xl mx-auto px-6 py-10">
+  <main class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-6 2xl:px-10 py-10">
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-5 gap-y-8"></div>
 
     <p id="empty-state" class="hidden text-center text-muted py-20 font-body">
@@ -522,7 +522,7 @@
     </div>
   </main>
 
-  <footer class="max-w-7xl mx-auto px-6 py-10 text-center text-xs text-muted font-mono space-y-3">
+  <footer class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-6 2xl:px-10 py-10 text-center text-xs text-muted font-mono space-y-3">
     <p>Je collectie staat in je eigen Google Drive</p>
     <!-- Attributie zoals vereist door TMDb. Logo en tekst mogen niet gewijzigd
          worden; zie themoviedb.org/about/logos-attribution -->
@@ -539,7 +539,7 @@
 
   <!-- Detailmodal -->
   <div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/70">
-    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-[100rem] h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
       <!-- Kop met brede achtergrondafbeelding (TMDb-backdrop), indien beschikbaar -->
       <div class="relative min-h-[3.25rem]">
         <div data-backdrop-wrap class="hidden">
@@ -759,7 +759,7 @@
 
   <!-- '+ Titel toevoegen'-modal: zelfde flow als Beheer, rechtstreeks vanaf de collectiepagina -->
   <div id="add-title-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-    <div class="bg-surface rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-6">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-2xl lg:max-w-4xl 2xl:max-w-6xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6 2xl:p-8">
       <div class="flex items-center justify-between mb-4">
         <h2 class="font-display text-2xl tracking-wide">Titel toevoegen</h2>
         <button id="close-add-title-btn" aria-label="Sluiten"
@@ -771,7 +771,7 @@
         <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
       </div>
 
-      <div id="search-results" class="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-3"></div>
+      <div id="search-results" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-7 gap-3 mb-3"></div>
 
       <!-- Meerdere resultaten tegelijk toevoegen, bv. alle Ace Ventura-films -->
       <div id="bulk-add-bar" class="hidden bg-bg rounded-lg p-3 mb-6 space-y-3">
@@ -943,7 +943,7 @@
 
   <!-- Lijstinvoer: een geplakte lijst titels in één keer verwerken -->
   <div id="bulk-text-modal" class="hidden fixed inset-0 z-[58] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
-    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl 2xl:max-w-5xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
       <div class="flex items-center justify-between mb-3 gap-2">
         <h2 class="font-display text-2xl tracking-wide">Lijst invoeren</h2>
         <button data-bulktext-close aria-label="Sluiten"
@@ -1016,7 +1016,7 @@
 
   <!-- Afleveringpagina: eigen achtergrond en volledige uitleg -->
   <div id="episode-modal" class="hidden fixed inset-0 z-[59] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/80">
-    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl 2xl:max-w-5xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
       <div class="relative min-h-[3.25rem]">
         <div data-ep-still-wrap class="hidden">
           <img data-ep-still src="" alt="" class="block w-full h-48 sm:h-72 object-cover sm:rounded-t-xl">
@@ -1058,7 +1058,7 @@
 
   <!-- Personenmodaal: profiel + volledige filmografie, met wat je ervan bezit -->
   <div id="person-modal" class="hidden fixed inset-0 z-[55] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
-    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-4xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-4xl 2xl:max-w-6xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
       <div class="relative">
         <button data-person-close aria-label="Sluiten"
           class="modal-close-fixed absolute top-3 right-3 z-10 w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
