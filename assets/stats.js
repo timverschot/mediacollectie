@@ -225,21 +225,24 @@ async function initStatsPage() {
   function renderFormats(list) {
     const counts = {};
     list.forEach((m) => {
-      // Bij reeksen telt elk seizoen dat je bezit mee in zijn eigen formaat.
+      // Bij reeksen telt elk seizoen dat je bezit mee in zijn eigen formaat;
+      // bij films elk exemplaar (dezelfde film op DVD én 4K telt dus dubbel).
       if (m.seasons && m.seasons.some((s) => s.owned)) {
         m.seasons.filter((s) => s.owned).forEach((s) => {
           const f = s.format || m.format;
           counts[f] = (counts[f] || 0) + 1;
         });
       } else {
-        counts[m.format] = (counts[m.format] || 0) + 1;
+        (m.editions || [{ format: m.format, wishlist: m.wishlist }])
+          .filter((e) => !e.wishlist)
+          .forEach((e) => {
+            counts[e.format] = (counts[e.format] || 0) + 1;
+          });
       }
     });
-    const rows = Object.keys(STATS_FORMAT_LABELS).map((f) => ({
-      label: STATS_FORMAT_LABELS[f],
-      value: counts[f] || 0,
-      color: STATS_FORMAT_COLORS[f],
-    }));
+    const rows = (typeof MEDIA_FORMATS !== 'undefined' ? MEDIA_FORMATS : [])
+      .filter((f) => counts[f.value])
+      .map((f) => ({ label: f.label, value: counts[f.value], color: f.color }));
     els.formats.innerHTML = statsBarChart(rows, { showShare: true });
   }
 
@@ -329,16 +332,25 @@ async function initStatsPage() {
       { label: 'Nog te kijken', value: list.length - watched, color: '#3A3A45' },
     ]);
 
-    const rows = Object.keys(STATS_FORMAT_LABELS).map((f) => {
-      const inFormat = list.filter((m) => m.format === f);
-      const seen = inFormat.filter((m) => m.watched).length;
-      return {
-        label: STATS_FORMAT_LABELS[f],
-        value: inFormat.length ? Math.round((seen / inFormat.length) * 100) : 0,
-        sub: inFormat.length ? `${seen}/${inFormat.length}` : '—',
-        color: STATS_FORMAT_COLORS[f],
-      };
-    });
+    const formats = typeof MEDIA_FORMATS !== 'undefined' ? MEDIA_FORMATS : [];
+    const rows = formats
+      .map((f) => {
+        // Een titel telt mee bij elk formaat waarin je haar bezit.
+        const inFormat = list.filter((m) =>
+          (m.editions || [{ format: m.format, wishlist: m.wishlist }]).some(
+            (e) => !e.wishlist && e.format === f.value
+          )
+        );
+        const seen = inFormat.filter((m) => m.watched).length;
+        return {
+          label: f.label,
+          value: inFormat.length ? Math.round((seen / inFormat.length) * 100) : 0,
+          sub: inFormat.length ? `${seen}/${inFormat.length}` : '—',
+          color: f.color,
+          _has: inFormat.length,
+        };
+      })
+      .filter((r) => r._has);
     els.watchedPerFormat.innerHTML = statsBarChart(rows, { keepZero: true });
   }
 
