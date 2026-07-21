@@ -447,10 +447,10 @@
           <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen">≡</button>
         </div>
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
-        <button id="filter-toggle" type="button" class="chip sm:hidden">Filters ▾</button>
+        <button id="filter-toggle" type="button" class="chip" aria-expanded="false" aria-controls="filter-panel">Filters ▾</button>
       </div>
 
-      <div id="filter-panel" class="hidden sm:block space-y-3">
+      <div id="filter-panel" class="hidden space-y-3">
 
       <div id="letter-chips" class="flex gap-1 overflow-x-auto pb-1"></div>
 
@@ -498,6 +498,10 @@
       <div id="location-row" class="hidden flex-wrap gap-2 items-center">
         <span class="text-xs font-mono text-muted uppercase mr-1">Locatie</span>
         <div id="location-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <div class="flex justify-end pt-1">
+        <button id="clear-filters" type="button" class="hidden chip">Alle filters wissen</button>
       </div>
 
       </div><!-- /#filter-panel -->
@@ -1130,15 +1134,8 @@
         driveAutoBackup();
       })();
 
-      // Inklapbare filterbalk op kleine schermen
-      const filterToggle = document.getElementById('filter-toggle');
-      const filterPanel = document.getElementById('filter-panel');
-      if (filterToggle && filterPanel) {
-        filterToggle.addEventListener('click', () => {
-          const open = filterPanel.classList.toggle('filter-open');
-          filterToggle.textContent = open ? 'Filters ▴' : 'Filters ▾';
-        });
-      }
+      // De filterbalk wordt volledig beheerd in app.js (open/dicht, teller,
+      // buitenom klikken, wissen) — daar zit de filterstatus.
 
       // 'Wat kijken?' en 'Dubbels'
       document.getElementById('open-pick-btn').addEventListener('click', () => {
