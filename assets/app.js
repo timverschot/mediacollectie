@@ -54,6 +54,7 @@ function initCollectionApp(config) {
     activeWatched: new Set(),  // 'watched' / 'unwatched'
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
+    activeBoxsets: new Set(),  // namen van boxsets
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
@@ -74,12 +75,16 @@ function initCollectionApp(config) {
     decadeChips: document.getElementById('decade-chips'),
     certChips: document.getElementById('cert-chips'),
     certRow: document.getElementById('cert-row'),
+    boxsetChips: document.getElementById('boxset-chips'),
+    boxsetRow: document.getElementById('boxset-row'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
     viewChips: document.getElementById('view-chips'),
     personModal: document.getElementById('person-modal'),
+    pickModal: document.getElementById('pick-modal'),
+    dupesModal: document.getElementById('dupes-modal'),
     saveIndicator: document.getElementById('save-indicator'),
     loadMore: document.getElementById('load-more'),
     modal: document.getElementById('detail-modal'),
@@ -139,15 +144,19 @@ function initCollectionApp(config) {
     return item.backdrop_path ? BACKDROP_BASE + item.backdrop_path : '';
   }
 
-  function frontCoverRef(item) {
-    // Nieuw: los Drive-bestand (id). Oud (nog niet gemigreerd): data-URL.
-    if (item.custom_front_cover_id) return { fileId: item.custom_front_cover_id };
-    if (item.custom_front_cover) return { dataUrl: item.custom_front_cover };
+  // Hoesfoto's horen bij een exemplaar, niet bij de film: van dezelfde titel
+  // kan je een DVD- én een 4K-doosje hebben. Zonder exemplaar valt het terug
+  // op de oude velden op filmniveau.
+  function frontCoverRef(item, edition) {
+    const src = edition || item;
+    if (src.custom_front_cover_id) return { fileId: src.custom_front_cover_id };
+    if (src.custom_front_cover) return { dataUrl: src.custom_front_cover };
     return null;
   }
-  function backCoverRef(item) {
-    if (item.custom_back_cover_id) return { fileId: item.custom_back_cover_id };
-    if (item.custom_back_cover) return { dataUrl: item.custom_back_cover };
+  function backCoverRef(item, edition) {
+    const src = edition || item;
+    if (src.custom_back_cover_id) return { fileId: src.custom_back_cover_id };
+    if (src.custom_back_cover) return { dataUrl: src.custom_back_cover };
     return null;
   }
 
@@ -335,11 +344,85 @@ function initCollectionApp(config) {
     });
   }
 
+  // Formaatchips komen uit de collectie zelf: je ziet enkel formaten die je
+  // ook echt hebt, van hoogste naar laagste kwaliteit.
+  function buildFormatChips(data) {
+    if (!els.formatChips) return;
+    const counts = {};
+    data.forEach((item) => {
+      allFormats(item).forEach((f) => {
+        counts[f] = (counts[f] || 0) + 1;
+      });
+    });
+    const values = MEDIA_FORMATS.map((f) => f.value).filter((v) => counts[v]);
+
+    els.formatChips.innerHTML = '';
+    values.forEach((value) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeFormats.has(value) ? ' chip-active' : '');
+      chip.textContent = formatLabel(value);
+      chip.title = `${counts[value]} titel(s)`;
+      chip.dataset.format = value;
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeFormats, value);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.formatChips.appendChild(chip);
+    });
+
+    [...state.activeFormats].forEach((v) => {
+      if (!values.includes(v)) state.activeFormats.delete(v);
+    });
+  }
+
+  // Boxsets: enkel tonen als je er ook echt gebruik van maakt.
+  function buildBoxsetChips(data) {
+    if (!els.boxsetChips) return;
+    const counts = {};
+    data.forEach((item) => {
+      const boxes = new Set(
+        (item.editions || []).map((e) => (e.boxset || '').trim()).filter(Boolean)
+      );
+      boxes.forEach((b) => {
+        counts[b] = (counts[b] || 0) + 1;
+      });
+    });
+    const values = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+
+    if (els.boxsetRow) {
+      els.boxsetRow.classList.toggle('hidden', values.length === 0);
+      if (values.length) els.boxsetRow.classList.add('flex');
+    }
+
+    els.boxsetChips.innerHTML = '';
+    values.forEach((value) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeBoxsets.has(value) ? ' chip-active' : '');
+      chip.textContent = value;
+      chip.title = `${counts[value]} titel(s)`;
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeBoxsets, value);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.boxsetChips.appendChild(chip);
+    });
+
+    [...state.activeBoxsets].forEach((v) => {
+      if (!values.includes(v)) state.activeBoxsets.delete(v);
+    });
+  }
+
   // Alle chips die uit de data zelf worden afgeleid, in één keer opnieuw opbouwen.
   function buildFacetChips(data) {
+    buildFormatChips(data);
     buildGenreChips(data);
     buildDecadeChips(data);
     buildCertChips(data);
+    buildBoxsetChips(data);
   }
 
   function buildLetterChips() {
@@ -382,7 +465,11 @@ function initCollectionApp(config) {
         const inSaga = sagaOf(item).toLowerCase().includes(q);
         if (!inTitle && !inOriginal && !inCast && !inDirector && !inWriters && !inSaga) return false;
       }
-      if (state.activeFormats.size && !state.activeFormats.has(item.format)) return false;
+      if (state.activeFormats.size && !allFormats(item).some((f) => state.activeFormats.has(f))) return false;
+      if (state.activeBoxsets.size) {
+        const boxes = (item.editions || []).map((e) => (e.boxset || '').trim()).filter(Boolean);
+        if (!boxes.some((b) => state.activeBoxsets.has(b))) return false;
+      }
       if (state.activeTypes.size && !state.activeTypes.has(item.content_type)) return false;
       if (state.activeGenres.size) {
         const hasGenre = (item.genres || []).some((g) => state.activeGenres.has(g));
@@ -578,15 +665,49 @@ function initCollectionApp(config) {
 
   // ---------- Kaarten ----------
 
+  // Alle formaten die je van deze titel bezit, van hoog naar laag. Bij series
+  // tellen ook de formaten van de seizoenen mee.
+  function ownedFormats(item) {
+    const set = new Set();
+    (item.editions || []).forEach((e) => {
+      if (!e.wishlist) set.add(e.format);
+    });
+    (item.seasons || []).forEach((s) => {
+      if (s.owned && s.format) set.add(s.format);
+    });
+    return [...set].sort((a, b) => formatRank(b) - formatRank(a));
+  }
+
+  // Alle formaten, inclusief die op je verlanglijst staan. Voor het filteren.
+  function allFormats(item) {
+    const set = new Set((item.editions || []).map((e) => e.format));
+    (item.seasons || []).forEach((s) => {
+      if (s.owned && s.format) set.add(s.format);
+    });
+    return [...set];
+  }
+
   function ribbonInfo(item) {
-    const labels = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
-    const classes = { '4k': 'ribbon-4k', bluray: 'ribbon-bluray', dvd: 'ribbon-dvd' };
-    if (item.seasons && item.seasons.length) {
-      const owned = [...new Set(item.seasons.filter((s) => s.owned).map((s) => s.format))];
-      if (owned.length === 1) return { label: labels[owned[0]] || owned[0], cls: classes[owned[0]] || '' };
-      if (owned.length > 1) return { label: 'Gemengd', cls: '' };
-    }
-    return { label: labels[item.format] || item.format, cls: classes[item.format] || '' };
+    const formats = ownedFormats(item);
+    if (formats.length > 1) return { label: 'Gemengd', cls: '', formats };
+    const f = formats[0] || (item.editions && item.editions[0] && item.editions[0].format) || item.format;
+    const cls = f === '4k' ? 'ribbon-4k' : f === 'bluray' || f === 'bluray3d' ? 'ribbon-bluray' : 'ribbon-dvd';
+    return { label: formatLabel(f), cls, formats: formats.length ? formats : [f] };
+  }
+
+  // Lintjes op de poster: één per formaat dat je bezit, onder elkaar.
+  function ribbonsHtml(item) {
+    const formats = ownedFormats(item);
+    const list = formats.length ? formats : allFormats(item);
+    return list
+      .slice(0, 3)
+      .map(
+        (f, i) =>
+          `<span class="ribbon" style="background:${formatColor(f)};color:#14141A;top:${
+            0.5 + i * 1.35
+          }rem">${escapeHtml(formatShort(f))}</span>`
+      )
+      .join('');
   }
 
   function seasonBadgeInfo(item) {
@@ -602,7 +723,6 @@ function initCollectionApp(config) {
     // Grid toont bewust altijd de TMDb-poster (snel, uniform); je eigen
     // hoesfoto's bekijk je in de detailmodal.
     const cover = posterUrl(item);
-    const ribbon = ribbonInfo(item);
     const seasonBadge = seasonBadgeInfo(item);
 
     return `
@@ -615,7 +735,7 @@ function initCollectionApp(config) {
                    onerror="this.replaceWith(posterFallback('${escapeAttr(item.title)}'))">`
               : posterFallbackHtml(item.title)
           }
-          <span class="ribbon ${ribbon.cls}">${ribbon.label}</span>
+          ${ribbonsHtml(item)}
           ${item.watched ? '<span class="watched-dot" title="Bekeken"></span>' : ''}
           ${
             seasonBadge
@@ -656,15 +776,14 @@ function initCollectionApp(config) {
 
   // ---------- Rijen (compacte en tekstweergave) ----------
 
-  const FORMAT_SHORT = { '4k': '4K', bluray: 'BD', dvd: 'DVD' };
-
+  // Toont alle formaten die je van deze titel bezit, bv. "4K·BD".
   function formatTagHtml(item) {
-    const ribbon = ribbonInfo(item);
-    const short = FORMAT_SHORT[item.format] || ribbon.label;
-    const color =
-      item.format === '4k' ? 'text-gold' : item.format === 'bluray' ? 'text-teal' : 'text-muted';
-    return `<span class="font-mono text-[11px] ${color} w-9 text-right shrink-0">${escapeHtml(
-      ribbon.label === 'Gemengd' ? 'mix' : short
+    const formats = ownedFormats(item);
+    const list = formats.length ? formats : allFormats(item);
+    const text = list.map(formatShort).join('·') || '—';
+    const color = list.length ? formatColor(list[0]) : '#8B8A92';
+    return `<span class="font-mono text-[11px] w-16 text-right shrink-0" style="color:${color}">${escapeHtml(
+      text
     )}</span>`;
   }
 
@@ -828,7 +947,8 @@ function initCollectionApp(config) {
   function updateModalCoverTabs(item) {
     const tabs = els.modal.querySelector('[data-cover-tabs]');
     if (!tabs) return;
-    const hasCustom = !!(frontCoverRef(item) || backCoverRef(item));
+    const ed = activeEdition(item);
+    const hasCustom = !!(frontCoverRef(item, ed) || backCoverRef(item, ed));
     tabs.classList.toggle('hidden', !hasCustom);
     tabs.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('chip-active', b.dataset.coverTab === modalCoverMode);
@@ -849,9 +969,11 @@ function initCollectionApp(config) {
       frontImg.alt = item.title + ' — TMDb-poster';
       flipBtn.classList.add('hidden');
     } else {
-      // Hoesfoto's: voorkant (of poster als er geen voorkant-foto is) + evt. achterkant
-      const frontRef = frontCoverRef(item);
-      const backRef = backCoverRef(item);
+      // Hoesfoto's van het gekozen exemplaar: voorkant (of de poster als er
+      // geen voorkant-foto is) + eventueel de achterkant.
+      const ed = activeEdition(item);
+      const frontRef = frontCoverRef(item, ed);
+      const backRef = backCoverRef(item, ed);
       frontImg.src = modalCoverSrcs.poster; // tijdelijke placeholder terwijl blob laadt
       frontImg.alt = item.title + ' — voorkant hoes';
       if (frontRef) {
@@ -1021,6 +1143,342 @@ function initCollectionApp(config) {
     }
 
     showSagaCompleteness(item);
+  }
+
+  // ---------- Wat zullen we kijken? ----------
+
+  let pickScope = 'unwatched';
+
+  function pickCandidates() {
+    const genre = els.pickModal.querySelector('[data-pick-genre]').value;
+    const maxRuntime = Number(els.pickModal.querySelector('[data-pick-runtime]').value) || 0;
+
+    return state.all.filter((m) => {
+      // Verlanglijst-titels kan je vanavond niet kijken.
+      if (m.wishlist) return false;
+      if (pickScope === 'unwatched' && m.watched) return false;
+      if (genre && !(m.genres || []).includes(genre)) return false;
+      if (maxRuntime) {
+        const rt = Number(m.runtime) || 0;
+        // Bij series is runtime de afleveringsduur; die past bijna altijd.
+        if (!rt || rt > maxRuntime) return false;
+      }
+      return true;
+    });
+  }
+
+  function updatePickCount() {
+    const n = pickCandidates().length;
+    els.pickModal.querySelector('[data-pick-count]').textContent =
+      n === 0 ? 'Geen titels die hieraan voldoen' : `${n} titel${n === 1 ? '' : 's'} om uit te kiezen`;
+  }
+
+  function rollPick() {
+    const list = pickCandidates();
+    const box = els.pickModal.querySelector('[data-pick-result]');
+    if (!list.length) {
+      box.classList.remove('hidden');
+      box.innerHTML = '<p class="text-sm text-muted">Niets gevonden. Probeer een ruimer filter.</p>';
+      return;
+    }
+    const pick = list[Math.floor(Math.random() * list.length)];
+    const cover = posterUrl(pick);
+
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="flex gap-4">
+        <div class="w-24 shrink-0 aspect-[2/3] rounded overflow-hidden bg-bg ring-1 ring-white/10">
+          ${cover ? `<img src="${escapeAttr(cover)}" alt="" class="w-full h-full object-cover">` : ''}
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="font-display text-2xl tracking-wide leading-tight">${escapeHtml(pick.title)}</p>
+          <p class="text-sm text-muted font-mono">${pick.release_year || ''}${
+      pick.runtime ? ' · ' + pick.runtime + ' min' : ''
+    }${pick.rating ? ' · TMDb ' + pick.rating.toFixed(1) : ''}</p>
+          <p class="text-xs text-muted mt-1">${escapeHtml((pick.genres || []).join(' · '))}</p>
+          <p class="text-xs text-muted mt-1">${escapeHtml(ownedFormats(pick).map(formatLabel).join(', '))}</p>
+          <div class="flex gap-2 mt-3">
+            <button type="button" class="chip" data-pick-open="${escapeAttr(pick.id)}">Bekijk details</button>
+            <button type="button" class="chip" data-pick-again>Nog eens</button>
+          </div>
+        </div>
+      </div>`;
+
+    box.querySelector('[data-pick-open]').addEventListener('click', () => {
+      closePickModal();
+      openModal(pick.id);
+    });
+    box.querySelector('[data-pick-again]').addEventListener('click', rollPick);
+  }
+
+  function openPickModal() {
+    if (!els.pickModal) return;
+    // Genrelijst vullen met wat er in je collectie zit.
+    const genres = new Set();
+    state.all.forEach((m) => (m.genres || []).forEach((g) => genres.add(g)));
+    const sel = els.pickModal.querySelector('[data-pick-genre]');
+    sel.innerHTML =
+      '<option value="">alle genres</option>' +
+      [...genres].sort((a, b) => a.localeCompare(b)).map((g) => `<option value="${escapeAttr(g)}">${escapeHtml(g)}</option>`).join('');
+
+    els.pickModal.querySelector('[data-pick-result]').classList.add('hidden');
+    updatePickCount();
+    els.pickModal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  }
+
+  function closePickModal() {
+    if (!els.pickModal) return;
+    els.pickModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  }
+
+  // ---------- Dubbels ----------
+
+  // Twee soorten dubbels: hetzelfde formaat meer dan eens binnen één titel,
+  // en twee losse titels met een vrijwel gelijke naam en hetzelfde jaar.
+  function findDuplicates() {
+    const results = [];
+
+    state.all.forEach((m) => {
+      const counts = {};
+      (m.editions || []).forEach((e) => {
+        if (e.wishlist) return;
+        counts[e.format] = (counts[e.format] || 0) + 1;
+      });
+      Object.keys(counts)
+        .filter((f) => counts[f] > 1)
+        .forEach((f) => {
+          results.push({
+            kind: 'edition',
+            items: [m],
+            text: `${counts[f]}× ${formatLabel(f)} van dezelfde titel`,
+          });
+        });
+    });
+
+    const byKey = {};
+    state.all.forEach((m) => {
+      if (m.wishlist) return;
+      const key = sortTitle(m) + '|' + (m.release_year || '');
+      (byKey[key] = byKey[key] || []).push(m);
+    });
+    Object.values(byKey)
+      .filter((group) => group.length > 1)
+      .forEach((group) => {
+        results.push({
+          kind: 'title',
+          items: group,
+          text: `${group.length} aparte titels met dezelfde naam en jaar`,
+        });
+      });
+
+    return results;
+  }
+
+  function openDupesModal() {
+    if (!els.dupesModal) return;
+    const list = els.dupesModal.querySelector('[data-dupes-list]');
+    const dupes = findDuplicates();
+
+    list.innerHTML = dupes.length
+      ? dupes
+          .map(
+            (d) => `
+              <div class="bg-bg rounded-lg p-3">
+                <p class="text-sm text-ink">${escapeHtml(d.items[0].title)} <span class="text-muted font-mono text-xs">${
+              d.items[0].release_year || ''
+            }</span></p>
+                <p class="text-xs text-gold font-mono mt-0.5">${escapeHtml(d.text)}</p>
+                <div class="flex flex-wrap gap-2 mt-2">
+                  ${d.items
+                    .map(
+                      (it) =>
+                        `<button type="button" class="chip !py-1 !px-2.5 text-[11px]" data-dupe-open="${escapeAttr(
+                          it.id
+                        )}">Open ${escapeHtml(it.id)}</button>`
+                    )
+                    .join('')}
+                </div>
+              </div>`
+          )
+          .join('')
+      : '<p class="text-sm text-muted py-4">Geen dubbels gevonden. Netjes.</p>';
+
+    list.querySelectorAll('[data-dupe-open]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeDupesModal();
+        openModal(btn.dataset.dupeOpen);
+      });
+    });
+
+    els.dupesModal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  }
+
+  function closeDupesModal() {
+    if (!els.dupesModal) return;
+    els.dupesModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  }
+
+  window.__openPickModal = openPickModal;
+  window.__openDupesModal = openDupesModal;
+
+  if (els.pickModal) {
+    els.pickModal.addEventListener('click', (e) => {
+      if (e.target === els.pickModal) closePickModal();
+    });
+    els.pickModal.querySelector('[data-pick-close]').addEventListener('click', closePickModal);
+    els.pickModal.querySelector('[data-pick-roll]').addEventListener('click', rollPick);
+    els.pickModal.querySelector('[data-pick-genre]').addEventListener('change', updatePickCount);
+    els.pickModal.querySelector('[data-pick-runtime]').addEventListener('change', updatePickCount);
+    els.pickModal.querySelectorAll('[data-pick-scope]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        pickScope = btn.dataset.pickScope;
+        els.pickModal.querySelectorAll('[data-pick-scope]').forEach((b) => {
+          b.classList.toggle('chip-active', b === btn);
+        });
+        updatePickCount();
+      });
+    });
+  }
+
+  if (els.dupesModal) {
+    els.dupesModal.addEventListener('click', (e) => {
+      if (e.target === els.dupesModal) closeDupesModal();
+    });
+    els.dupesModal.querySelector('[data-dupes-close]').addEventListener('click', closeDupesModal);
+  }
+
+  // ---------- Exemplaren (fase 8) ----------
+
+  // Welk exemplaar staat er in de detailweergave centraal? Bepaalt welke
+  // hoesfoto's en opmerkingen je ziet en wat het bewerkpaneel aanpast.
+  let activeEditionId = null;
+
+  function activeEdition(item) {
+    const eds = item.editions || [];
+    return eds.find((e) => e.eid === activeEditionId) || primaryEdition(item) || eds[0] || null;
+  }
+
+  function renderEditions(item) {
+    const section = els.modal.querySelector('[data-field="editions-section"]');
+    const list = els.modal.querySelector('[data-field="editions-list"]');
+    if (!section || !list) return;
+
+    const eds = item.editions || [];
+    const active = activeEdition(item);
+    if (active) activeEditionId = active.eid;
+
+    list.innerHTML = eds
+      .map((e) => {
+        const isActive = active && e.eid === active.eid;
+        const bits = [];
+        if (e.steelbook) bits.push('Steelbook');
+        if (e.boxset) bits.push(escapeHtml(e.boxset));
+        if (e.notes) bits.push(escapeHtml(e.notes));
+        const hasPhotos = e.custom_front_cover_id || e.custom_front_cover || e.custom_back_cover_id || e.custom_back_cover;
+
+        return `
+          <div class="flex items-center gap-3 py-2 px-2 rounded ${
+            isActive ? 'bg-white/5 ring-1 ring-gold/40' : 'hover:bg-white/5'
+          } cursor-pointer" data-edition="${escapeAttr(e.eid)}" role="button" tabindex="0">
+            <span class="font-mono text-xs px-1.5 py-0.5 rounded shrink-0" style="background:${formatColor(
+              e.format
+            )};color:#14141A">${escapeHtml(formatShort(e.format))}</span>
+            <span class="flex-1 min-w-0">
+              <span class="block text-sm text-ink">${escapeHtml(formatLabel(e.format))}${
+          e.wishlist ? ' <span class="text-gold font-mono text-[10px]">verlanglijst</span>' : ''
+        }</span>
+              ${bits.length ? `<span class="block text-[11px] text-muted truncate">${bits.join(' · ')}</span>` : ''}
+            </span>
+            ${hasPhotos ? '<span class="font-mono text-[10px] text-teal shrink-0" title="Eigen hoesfoto\'s">foto</span>' : ''}
+            <button type="button" class="text-muted hover:text-red-400 text-xs underline shrink-0"
+              data-remove-edition="${escapeAttr(e.eid)}">verwijderen</button>
+          </div>`;
+      })
+      .join('');
+
+    section.classList.remove('hidden');
+
+    list.querySelectorAll('[data-edition]').forEach((row) => {
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-remove-edition]')) return;
+        activeEditionId = row.dataset.edition;
+        openModal(item.id);
+      });
+    });
+    list.querySelectorAll('[data-remove-edition]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        handleRemoveEdition(item, btn.dataset.removeEdition);
+      });
+    });
+  }
+
+  function handleAddEdition(item) {
+    const used = new Set((item.editions || []).map((e) => e.format));
+    const next = MEDIA_FORMATS.map((f) => f.value).find((v) => !used.has(v)) || 'bluray';
+    const edition = {
+      eid: nextEditionId(item),
+      format: next,
+      notes: '',
+      boxset: '',
+      steelbook: false,
+      wishlist: false,
+      date_added: new Date().toISOString().slice(0, 10),
+      custom_front_cover_id: '',
+      custom_back_cover_id: '',
+      custom_front_cover: '',
+      custom_back_cover: '',
+    };
+    const snapshot = JSON.parse(JSON.stringify(item.editions || []));
+    item.editions = [...(item.editions || []), edition];
+    syncLegacyFieldsFromEditions(item);
+    activeEditionId = edition.eid;
+
+    buildFacetChips(state.all);
+    applyFilters();
+    openModal(item.id);
+
+    backgroundSave(
+      () => upsertMovieInDrive(item),
+      () => {
+        item.editions = snapshot;
+        syncLegacyFieldsFromEditions(item);
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
+    );
+  }
+
+  function handleRemoveEdition(item, eid) {
+    const eds = item.editions || [];
+    if (eds.length <= 1) {
+      alert('Dit is het laatste exemplaar. Gebruik "Volledige titel verwijderen" als je de titel helemaal weg wil.');
+      return;
+    }
+    const target = eds.find((e) => e.eid === eid);
+    if (!target) return;
+    if (!confirm(`Exemplaar op ${formatLabel(target.format)} verwijderen uit je collectie?`)) return;
+
+    const snapshot = JSON.parse(JSON.stringify(eds));
+    item.editions = eds.filter((e) => e.eid !== eid);
+    syncLegacyFieldsFromEditions(item);
+    activeEditionId = null;
+
+    buildFacetChips(state.all);
+    applyFilters();
+    openModal(item.id);
+
+    backgroundSave(
+      () => upsertMovieInDrive(item),
+      () => {
+        item.editions = snapshot;
+        syncLegacyFieldsFromEditions(item);
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
+    );
   }
 
   // ---------- Personen ----------
@@ -1408,6 +1866,8 @@ function initCollectionApp(config) {
   function openModal(id) {
     const item = state.all.find((m) => m.id === id);
     if (!item) return;
+    // Wissel je van titel, dan begint de exemplaarkeuze opnieuw.
+    if (currentModalId !== id) activeEditionId = null;
     currentModalId = id;
 
     const ribbon = ribbonInfo(item);
@@ -1420,8 +1880,12 @@ function initCollectionApp(config) {
     els.modal.querySelector('[data-field="genres"]').textContent = (item.genres || []).join(' · ') || '—';
 
     fillEnrichedFields(item);
-    els.modal.querySelector('[data-field="format"]').textContent = ribbon.label + (item.wishlist ? ' · Verlanglijst' : '');
-    els.modal.querySelector('[data-field="notes"]').textContent = item.notes || 'Geen opmerkingen';
+    const ed = activeEdition(item);
+    els.modal.querySelector('[data-field="format"]').textContent =
+      (ed ? formatLabel(ed.format) : ribbon.label) + (ed && ed.wishlist ? ' · Verlanglijst' : '');
+    els.modal.querySelector('[data-field="notes"]').textContent =
+      (ed && ed.notes) || 'Geen opmerkingen';
+    renderEditions(item);
     els.modal.querySelector('[data-field="overview"]').textContent = item.overview || '';
     const sagaField = els.modal.querySelector('[data-field="saga"]');
     if (sagaField) sagaField.textContent = sagaOf(item) || '—';
@@ -1501,6 +1965,9 @@ function initCollectionApp(config) {
 
     els.modal.querySelector('[data-delete-full]').onclick = () => handleDeleteTitle(item.id, item.title);
 
+    const addEditionBtn = els.modal.querySelector('[data-add-edition]');
+    if (addEditionBtn) addEditionBtn.onclick = () => handleAddEdition(item);
+
     // Snelle 'bekeken'-toggle (optimistic)
     const watchedBtn = els.modal.querySelector('[data-toggle-watched]');
     if (watchedBtn) {
@@ -1547,21 +2014,41 @@ function initCollectionApp(config) {
 
   function fillEditPanel(item) {
     const m = els.modal;
+    const ed = activeEdition(item) || {};
+
+    // Formaatkeuze opbouwen uit de gedeelde formatenlijst.
+    const formatSel = m.querySelector('[data-edit-format]');
+    formatSel.innerHTML = MEDIA_FORMATS.map(
+      (f) => `<option value="${f.value}">${escapeHtml(f.label)}</option>`
+    ).join('');
+
     m.querySelector('[data-edit-content]').value = item.content_type || 'movie';
-    m.querySelector('[data-edit-format]').value = item.format || 'bluray';
-    m.querySelector('[data-edit-owned]').value = item.wishlist ? 'wishlist' : 'owned';
+    formatSel.value = ed.format || 'bluray';
+    m.querySelector('[data-edit-owned]').value = ed.wishlist ? 'wishlist' : 'owned';
     m.querySelector('[data-edit-watched]').checked = !!item.watched;
-    m.querySelector('[data-edit-notes]').value = item.notes || '';
+    m.querySelector('[data-edit-notes]').value = ed.notes || '';
+    const steelbook = m.querySelector('[data-edit-steelbook]');
+    if (steelbook) steelbook.checked = !!ed.steelbook;
+    const boxsetInput = m.querySelector('[data-edit-boxset]');
+    if (boxsetInput) boxsetInput.value = ed.boxset || '';
     const sagaInput = m.querySelector('[data-edit-saga]');
     if (sagaInput) sagaInput.value = item.saga || '';
+
+    // Duidelijk maken welk exemplaar je aan het bewerken bent.
+    const which = m.querySelector('[data-edit-which]');
+    if (which) {
+      which.textContent =
+        (item.editions || []).length > 1 ? `je ${formatLabel(ed.format)}-exemplaar` : '';
+    }
+
     m.querySelector('[data-edit-front]').value = '';
     m.querySelector('[data-edit-back]').value = '';
     const remFront = m.querySelector('[data-edit-remove-front]');
     const remBack = m.querySelector('[data-edit-remove-back]');
     remFront.checked = false;
     remBack.checked = false;
-    remFront.closest('label').classList.toggle('hidden', !frontCoverRef(item));
-    remBack.closest('label').classList.toggle('hidden', !backCoverRef(item));
+    remFront.closest('label').classList.toggle('hidden', !frontCoverRef(item, ed));
+    remBack.closest('label').classList.toggle('hidden', !backCoverRef(item, ed));
     const status = m.querySelector('[data-edit-status]');
     status.textContent = '';
     status.className = 'text-sm font-mono';
@@ -1647,55 +2134,65 @@ function initCollectionApp(config) {
     const status = m.querySelector('[data-edit-status]');
     saveBtn.disabled = true;
 
+    const ed = activeEdition(item);
+    if (!ed) return;
+
     const previous = {
       content_type: item.content_type,
-      format: item.format,
-      wishlist: item.wishlist,
       watched: item.watched,
-      notes: item.notes,
       saga: item.saga,
       custom_poster_path: item.custom_poster_path,
-      custom_front_cover: item.custom_front_cover,
-      custom_back_cover: item.custom_back_cover,
-      custom_front_cover_id: item.custom_front_cover_id,
-      custom_back_cover_id: item.custom_back_cover_id,
+      editions: JSON.parse(JSON.stringify(item.editions || [])),
     };
 
     try {
       // Foto's verwerken (dit deel blijft zichtbaar 'bezig': uploads kosten even)
       const frontFile = m.querySelector('[data-edit-front]').files[0];
       const backFile = m.querySelector('[data-edit-back]').files[0];
+      // Hoesfoto's horen bij dít exemplaar; de bestandsnaam bevat daarom ook
+      // het exemplaar-id, zodat een DVD- en een 4K-doosje elkaar niet
+      // overschrijven.
+      const coverKey = item.id + '-' + ed.eid;
       if (frontFile) {
         status.textContent = 'Voorkant-foto uploaden...';
         status.className = 'text-sm font-mono text-muted';
-        item.custom_front_cover_id = await driveUploadCoverFile(await resizeImageFile(frontFile, 1200), item.id, 'front');
-        item.custom_front_cover = '';
-        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[item.custom_front_cover_id];
+        ed.custom_front_cover_id = await driveUploadCoverFile(await resizeImageFile(frontFile, 1200), coverKey, 'front');
+        ed.custom_front_cover = '';
+        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[ed.custom_front_cover_id];
       } else if (m.querySelector('[data-edit-remove-front]').checked) {
-        await driveDeleteCoverFile(item.custom_front_cover_id);
-        item.custom_front_cover_id = '';
-        item.custom_front_cover = '';
+        await driveDeleteCoverFile(ed.custom_front_cover_id);
+        ed.custom_front_cover_id = '';
+        ed.custom_front_cover = '';
       }
       if (backFile) {
         status.textContent = 'Achterkant-foto uploaden...';
         status.className = 'text-sm font-mono text-muted';
-        item.custom_back_cover_id = await driveUploadCoverFile(await resizeImageFile(backFile, 1200), item.id, 'back');
-        item.custom_back_cover = '';
-        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[item.custom_back_cover_id];
+        ed.custom_back_cover_id = await driveUploadCoverFile(await resizeImageFile(backFile, 1200), coverKey, 'back');
+        ed.custom_back_cover = '';
+        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[ed.custom_back_cover_id];
       } else if (m.querySelector('[data-edit-remove-back]').checked) {
-        await driveDeleteCoverFile(item.custom_back_cover_id);
-        item.custom_back_cover_id = '';
-        item.custom_back_cover = '';
+        await driveDeleteCoverFile(ed.custom_back_cover_id);
+        ed.custom_back_cover_id = '';
+        ed.custom_back_cover = '';
       }
 
       // Velden: meteen doorvoeren in de interface, opslaan op de achtergrond.
+      // Filmniveau:
       item.content_type = m.querySelector('[data-edit-content]').value;
-      item.format = m.querySelector('[data-edit-format]').value;
-      item.wishlist = m.querySelector('[data-edit-owned]').value === 'wishlist';
       item.watched = m.querySelector('[data-edit-watched]').checked;
-      item.notes = m.querySelector('[data-edit-notes]').value.trim();
       const sagaInput = m.querySelector('[data-edit-saga]');
       if (sagaInput) item.saga = sagaInput.value.trim();
+
+      // Exemplaarniveau:
+      ed.format = m.querySelector('[data-edit-format]').value;
+      ed.wishlist = m.querySelector('[data-edit-owned]').value === 'wishlist';
+      ed.notes = m.querySelector('[data-edit-notes]').value.trim();
+      const steelbook = m.querySelector('[data-edit-steelbook]');
+      if (steelbook) ed.steelbook = steelbook.checked;
+      const boxsetInput = m.querySelector('[data-edit-boxset]');
+      if (boxsetInput) ed.boxset = boxsetInput.value.trim();
+
+      syncLegacyFieldsFromEditions(item);
       // Posterkeuze: null = niets veranderd, '' = terug naar de standaardposter.
       if (pendingPosterPath !== null) item.custom_poster_path = pendingPosterPath;
 
@@ -1705,10 +2202,15 @@ function initCollectionApp(config) {
 
       backgroundSave(
         () => upsertMovieInDrive(item),
-        () => { Object.assign(item, previous); if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+        () => {
+          Object.assign(item, previous);
+          syncLegacyFieldsFromEditions(item);
+          if (!els.modal.classList.contains('hidden')) openModal(item.id);
+        }
       );
     } catch (err) {
       Object.assign(item, previous);
+      syncLegacyFieldsFromEditions(item);
       status.textContent = '✗ ' + err.message;
       status.className = 'text-sm font-mono text-red-400';
     } finally {
@@ -1774,6 +2276,8 @@ function initCollectionApp(config) {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
+      else if (els.pickModal && !els.pickModal.classList.contains('hidden')) closePickModal();
+      else if (els.dupesModal && !els.dupesModal.classList.contains('hidden')) closeDupesModal();
       else if (els.personModal && !els.personModal.classList.contains('hidden')) closePersonModal();
       else if (els.groupModal && !els.groupModal.classList.contains('hidden')) closeGroupModal();
       else closeModal();
@@ -1790,13 +2294,7 @@ function initCollectionApp(config) {
     applyFilters();
   });
 
-  els.formatChips.querySelectorAll('[data-format]').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      toggleSetValue(state.activeFormats, chip.dataset.format);
-      chip.classList.toggle('chip-active');
-      applyFilters();
-    });
-  });
+  // De formaatchips worden dynamisch opgebouwd in buildFormatChips().
 
   els.typeChips.querySelectorAll('[data-type]').forEach((chip) => {
     chip.addEventListener('click', () => {
