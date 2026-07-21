@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Universums — Mijn Mediacollectie</title>
+<meta name="description" content="Overkoepelende filmfranchises en hoeveel je ervan bezit.">
+
+<link rel="manifest" href="manifest.json" id="app-manifest">
+<meta name="theme-color" content="#14141A">
+<link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<meta name="apple-mobile-web-app-title" content="Mediacollectie">
+<script>
+  // Zie index.html: op iOS geen standalone-installatie, anders breekt inloggen.
+  (function () {
+    var isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      var link = document.getElementById('app-manifest');
+      if (link) link.remove();
+    }
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  var GOOGLE_CLIENT_ID = '819389589891-d5mkvj34v8op57r3aolehmtde8fv889p.apps.googleusercontent.com';
+</script>
+<script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: { bg: '#14141A', surface: '#1E1E26', gold: '#C9A227', teal: '#2FA4A9', ink: '#F2F0EA', muted: '#8B8A92' },
+        fontFamily: {
+          display: ['"Bebas Neue"', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body {
+    background-color: #14141A;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .sprocket-strip {
+    background-image: radial-gradient(circle, rgba(242,240,234,0.12) 2px, transparent 2px);
+    background-size: 18px 18px; background-position: center;
+    margin-top: env(safe-area-inset-top);
+  }
+  .chip {
+    padding: 0.35rem 0.85rem; border-radius: 9999px; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem; letter-spacing: 0.03em; text-transform: uppercase;
+    border: 1px solid rgba(242,240,234,0.15); color: #8B8A92; background: transparent;
+    cursor: pointer; transition: all 0.15s ease; white-space: nowrap;
+  }
+  .chip:hover { border-color: rgba(201,162,39,0.5); color: #F2F0EA; }
+  .chip-active { background: #C9A227; border-color: #C9A227; color: #14141A; font-weight: 600; }
+  .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .nav-link.active { color: #C9A227; }
+  .nav-link:not(.active) { color: #8B8A92; }
+  .panel { background: #1E1E26; border-radius: 0.75rem; padding: 1.25rem; box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
+  input[type="search"], input[type="text"], select {
+    background: #1E1E26; border: 1px solid rgba(242,240,234,0.15); border-radius: 0.4rem;
+    padding: 0.5rem 0.75rem; color: #F2F0EA; font-size: 0.9rem;
+  }
+  input:focus, select:focus { outline: none; box-shadow: 0 0 0 2px rgba(201,162,39,0.5); }
+  .btn { padding: 0.55rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+  .btn-primary { background: #C9A227; color: #14141A; }
+  .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
+  @media (pointer: coarse) { .chip { padding: 0.55rem 1rem; } }
+</style>
+</head>
+<body class="font-body text-ink min-h-screen">
+
+  <header class="border-b border-white/5">
+    <div class="sprocket-strip h-2 w-full opacity-60"></div>
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3">
+      <div>
+        <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
+        <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Universums</h1>
+      </div>
+      <nav class="flex gap-4 sm:gap-6 overflow-x-auto w-full sm:w-auto">
+        <a href="index.html" class="nav-link">Collectie</a>
+        <a href="universums.html" class="nav-link active">Universums</a>
+        <a href="statistieken.html" class="nav-link">Statistieken</a>
+        <a href="prijzen.html" class="nav-link">Prijzen</a>
+        <a href="beheer.html" class="nav-link">Beheer</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+
+    <p class="text-sm text-muted max-w-2xl">
+      Een universum is een overkoepelende franchise die verder gaat dan één filmreeks — het Marvel Cinematic
+      Universe bevat tientallen films én series. TMDb kent zoiets alleen als trefwoord, dus dat zoek je
+      hieronder één keer op. Daarna vult de lijst zichzelf aan bij nieuwe releases.
+    </p>
+
+    <!-- Nieuw universum toevoegen -->
+    <section class="panel">
+      <p class="font-display text-2xl tracking-wide mb-3">Universum toevoegen</p>
+      <div class="flex flex-wrap gap-3 items-center mb-3">
+        <input type="search" id="kw-query" placeholder="Bv. marvel cinematic universe" class="flex-1 min-w-[220px]">
+        <label class="text-sm flex items-center gap-2 text-ink">
+          <input type="checkbox" id="kw-include-tv" class="w-4 h-4" checked> Series meetellen
+        </label>
+        <button id="kw-search-btn" class="btn btn-primary shrink-0">Zoeken</button>
+      </div>
+      <div id="kw-results" class="space-y-1"></div>
+      <p id="kw-status" class="text-sm font-mono mt-2"></p>
+    </section>
+
+    <!-- Overzicht van je universums -->
+    <div id="universe-list" class="space-y-6"></div>
+
+    <p id="universe-empty" class="hidden text-center text-muted py-16">
+      Nog geen universums. Zoek hierboven bijvoorbeeld op "marvel cinematic universe" of "wizarding world".
+    </p>
+
+    <p id="page-error" class="hidden text-center text-red-400 font-mono text-sm py-6"></p>
+  </main>
+
+  <footer class="max-w-6xl mx-auto px-4 sm:px-6 py-10 text-center text-xs text-muted font-mono">
+    Ledenlijsten komen live van TMDb en worden niet opgeslagen
+  </footer>
+
+  <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
+    <div class="text-center max-w-sm px-6">
+      <p class="font-display text-4xl tracking-wide text-ink mb-2">Universums</p>
+      <p id="login-status" class="text-sm text-muted mb-6">Log in met Google om je collectie te bekijken.</p>
+      <button id="login-btn" class="px-6 py-3 rounded-md font-semibold" style="background:#C9A227;color:#14141A;">
+        Inloggen met Google
+      </button>
+    </div>
+  </div>
+
+  <script src="assets/drive.js"></script>
+  <script src="assets/admin.js"></script>
+  <script src="assets/universes.js"></script>
+  <script src="assets/universes-page.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+
+    document.getElementById('login-btn').addEventListener('click', driveSignIn);
+    window._driveError = function (msg) {
+      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+    };
+
+    window._driveAuthenticated = function () {
+      document.getElementById('login-gate').remove();
+      initUniversesPage().catch(function (err) {
+        console.error(err);
+        var box = document.getElementById('page-error');
+        box.textContent = 'Er ging iets mis: ' + err.message;
+        box.classList.remove('hidden');
+      });
+    };
+  </script>
+</body>
+</html>
