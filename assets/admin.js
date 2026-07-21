@@ -24,6 +24,38 @@ const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p/w200';
 // (Kijkwijzer), dan Brits/Amerikaans als die er niet zijn.
 const TMDB_CERT_COUNTRIES = ['NL', 'BE', 'GB', 'US'];
 
+// Welke crewfuncties we bewaren, en in welke volgorde ze getoond worden.
+// TMDb levert vaak honderden crewleden; dit houdt het bij wie ertoe doet.
+const KEY_CREW_JOBS = {
+  Director: 1,
+  Screenplay: 2,
+  Writer: 2,
+  Story: 3,
+  Novel: 3,
+  'Original Music Composer': 4,
+  'Director of Photography': 5,
+  Editor: 6,
+  'Production Design': 7,
+  'Costume Design': 8,
+  Producer: 9,
+  'Executive Producer': 10,
+};
+
+const KEY_CREW_LABELS = {
+  Director: 'Regie',
+  Screenplay: 'Scenario',
+  Writer: 'Scenario',
+  Story: 'Verhaal',
+  Novel: 'Roman',
+  'Original Music Composer': 'Muziek',
+  'Director of Photography': 'Camera',
+  Editor: 'Montage',
+  'Production Design': 'Decor',
+  'Costume Design': 'Kostuums',
+  Producer: 'Productie',
+  'Executive Producer': 'Uitvoerend producent',
+};
+
 function getConfig() {
   try {
     return JSON.parse(localStorage.getItem(LS_KEY)) || {};
@@ -159,15 +191,54 @@ async function tmdbDetails(id, mediaType, apiKey) {
   const writers = uniqueNames(crew.filter((c) => ['Screenplay', 'Writer', 'Story', 'Author'].includes(c.job))).slice(0, 3);
   const composers = uniqueNames(crew.filter((c) => c.job === 'Original Music Composer')).slice(0, 2);
 
-  const castRaw = ((d.credits && d.credits.cast) || []).slice(0, 8);
+  const castRaw = ((d.credits && d.credits.cast) || []).slice(0, 12);
   // `cast` blijft een simpele namenlijst (zo blijft bestaande code werken);
-  // `cast_details` voegt rolnaam en portretfoto toe voor de detailweergave.
+  // `cast_details` voegt rolnaam, portretfoto en het TMDb-id toe. Dat id is
+  // nodig om de filmografie van die persoon te kunnen opvragen.
   const cast = castRaw.slice(0, 5).map((c) => c.name);
   const castDetails = castRaw.map((c) => ({
+    id: c.id || null,
     name: c.name,
     character: c.character || '',
     profile_path: c.profile_path || '',
   }));
+
+  // Crew: enkel de functies die er voor een verzamelaar toe doen, anders staan
+  // er al snel honderd namen in. Dezelfde persoon met meerdere functies wordt
+  // samengevoegd ("Regie · Scenario").
+  const crewByPerson = {};
+  crew
+    .filter((c) => KEY_CREW_JOBS[c.job])
+    .forEach((c) => {
+      const key = c.id || c.name;
+      if (!crewByPerson[key]) {
+        crewByPerson[key] = {
+          id: c.id || null,
+          name: c.name,
+          profile_path: c.profile_path || '',
+          jobs: [],
+          rank: KEY_CREW_JOBS[c.job],
+        };
+      }
+      const label = KEY_CREW_LABELS[c.job] || c.job;
+      if (!crewByPerson[key].jobs.includes(label)) crewByPerson[key].jobs.push(label);
+      crewByPerson[key].rank = Math.min(crewByPerson[key].rank, KEY_CREW_JOBS[c.job]);
+    });
+
+  // Bij series staan de bedenkers niet in de crew-lijst maar apart.
+  (d.created_by || []).forEach((p) => {
+    const key = p.id || p.name;
+    if (!crewByPerson[key]) {
+      crewByPerson[key] = { id: p.id || null, name: p.name, profile_path: p.profile_path || '', jobs: [], rank: 0 };
+    }
+    if (!crewByPerson[key].jobs.includes('Bedenker')) crewByPerson[key].jobs.unshift('Bedenker');
+    crewByPerson[key].rank = 0;
+  });
+
+  const crewDetails = Object.values(crewByPerson)
+    .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+    .slice(0, 14)
+    .map(({ rank, ...rest }) => rest);
 
   const title = d.title || d.name;
   const date = d.release_date || d.first_air_date || '';
@@ -206,6 +277,7 @@ async function tmdbDetails(id, mediaType, apiKey) {
     composer: composers.join(', '),
     cast,
     cast_details: castDetails,
+    crew_details: crewDetails,
     runtime: runtime || null,
     rating: d.vote_average || null,
     vote_count: d.vote_count || 0,
@@ -248,6 +320,89 @@ async function tmdbCollection(collectionId, apiKey) {
   return { id: d.id, name: d.name || '', overview: d.overview || '', poster_path: d.poster_path || '', parts };
 }
 
+/**
+ * Alles van één persoon: profiel, biografie en de volledige filmografie
+ * (zowel acteerwerk als crewfuncties, samengevoegd per titel).
+ *
+ * Dezelfde film kan meermaals voorkomen — bv. als regisseur én scenarist —
+ * en wordt dan tot één regel samengevoegd met beide functies.
+ */
+async function tmdbPerson(personId, apiKey) {
+  const d = await tmdbGet(
+    `person/${personId}`,
+    { language: 'nl-NL', append_to_response: 'combined_credits' },
+    apiKey
+  );
+
+  // Nederlandse biografieën ontbreken vaak; dan de Engelse tonen.
+  let biography = d.biography || '';
+  if (!biography) {
+    try {
+      const en = await tmdbGet(`person/${personId}`, { language: 'en-US' }, apiKey);
+      biography = en.biography || '';
+    } catch {
+      // Geen biografie is niet erg.
+    }
+  }
+
+  const credits = d.combined_credits || {};
+  const merged = {};
+  const order = [];
+
+  const addCredit = (c, role, kind) => {
+    if (!c || !c.id) return;
+    const mediaType = c.media_type === 'tv' ? 'tv' : 'movie';
+    const key = mediaType + ':' + c.id;
+    if (!merged[key]) {
+      const date = c.release_date || c.first_air_date || '';
+      merged[key] = {
+        tmdb_id: c.id,
+        media_type: mediaType,
+        title: c.title || c.name || '',
+        release_year: /^\d{4}/.test(date) ? parseInt(date.slice(0, 4), 10) : null,
+        poster_path: c.poster_path || '',
+        roles: [],
+        as_cast: false,
+        popularity: c.popularity || 0,
+      };
+      order.push(key);
+    }
+    if (kind === 'cast') merged[key].as_cast = true;
+    const label = kind === 'crew' ? KEY_CREW_LABELS[role] || role : role;
+    if (label && !merged[key].roles.includes(label)) merged[key].roles.push(label);
+  };
+
+  (credits.cast || []).forEach((c) => addCredit(c, c.character || '', 'cast'));
+  (credits.crew || []).forEach((c) => addCredit(c, c.job || '', 'crew'));
+
+  const all = order.map((k) => merged[k]);
+
+  // Gastoptredens als zichzelf (talkshows, documentaires) zijn zelden wat je
+  // zoekt en overspoelen de lijst; die zetten we apart.
+  const isSelfAppearance = (entry) =>
+    entry.as_cast && entry.roles.length > 0 && entry.roles.every((r) => /^self\b/i.test(r) || r === 'Zichzelf');
+
+  const main = all.filter((e) => !isSelfAppearance(e));
+  const appearances = all.filter(isSelfAppearance);
+
+  const byYearDesc = (a, b) => (b.release_year || 0) - (a.release_year || 0);
+  main.sort(byYearDesc);
+  appearances.sort(byYearDesc);
+
+  return {
+    id: d.id,
+    name: d.name || '',
+    biography,
+    profile_path: d.profile_path || '',
+    birthday: d.birthday || '',
+    deathday: d.deathday || '',
+    place_of_birth: d.place_of_birth || '',
+    known_for_department: d.known_for_department || '',
+    credits: main,
+    appearances,
+  };
+}
+
 // Beschikbare posters voor een titel, zodat je zelf de afbeelding kan kiezen
 // die bij jouw editie past. include_image_language haalt ook posters zonder
 // taalmarkering op (vaak de mooiste, tekstloze varianten).
@@ -269,7 +424,7 @@ async function tmdbPosters(id, mediaType, apiKey) {
 const TMDB_MANAGED_FIELDS = [
   'title', 'original_title', 'original_language', 'release_year', 'release_date',
   'poster_path', 'backdrop_path', 'genres', 'director', 'writers', 'composer',
-  'cast', 'cast_details', 'runtime', 'rating', 'vote_count', 'overview', 'tagline',
+  'cast', 'cast_details', 'crew_details', 'runtime', 'rating', 'vote_count', 'overview', 'tagline',
   'certification', 'certification_country', 'trailer_key', 'imdb_id',
   'saga_id', 'tv_status', 'number_of_seasons',
 ];
