@@ -74,6 +74,7 @@ function normalizeMovieEntry(m) {
         format: m.format || 'bluray',
         notes: m.notes || '',
         boxset: '',
+        location: '',
         steelbook: false,
         wishlist: !!m.wishlist,
         date_added: m.date_added || '',
@@ -92,6 +93,7 @@ function normalizeMovieEntry(m) {
       if (typeof ed.steelbook !== 'boolean') ed.steelbook = false;
       if (ed.notes == null) ed.notes = '';
       if (ed.boxset == null) ed.boxset = '';
+      if (ed.location == null) ed.location = '';
     });
   }
 
