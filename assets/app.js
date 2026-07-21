@@ -860,12 +860,15 @@ function initCollectionApp(config) {
   // in plaats van waar hij de vorige keer bleef staan.
   function captureShelfAnchor() {
     if (!els.grid) return;
+    // Onder de vaste zoekbalk beginnen, zodat we ankeren op wat je écht ziet.
+    const bar = document.querySelector('.sticky');
+    const cutoff = bar ? bar.getBoundingClientRect().bottom : 0;
     const cards = els.grid.querySelectorAll('[data-open-id],[data-open-group]');
     let best = null, bestTop = Infinity;
     cards.forEach((c) => {
       const r = c.getBoundingClientRect();
-      // Kaart die (deels) onder de vaste kop staat en het hoogst in beeld is.
-      if (r.bottom > 120 && r.top < bestTop) { bestTop = r.top; best = c; }
+      // De hoogst zichtbare kaart die onder de balk uitkomt.
+      if (r.bottom > cutoff + 8 && r.top < bestTop) { bestTop = r.top; best = c; }
     });
     if (!best && cards.length) best = cards[0];
     shelfAnchor = best ? { id: best.dataset.openId || null, group: best.dataset.openGroup || null } : null;
@@ -887,6 +890,9 @@ function initCollectionApp(config) {
     els.grid.classList.add('hidden');
     els.loadMore.classList.add('hidden');
     els.shelfStage.classList.remove('hidden');
+    // Bij binnenkomst vanuit een andere weergave naar boven, zodat de (grote)
+    // plank meteen volledig in beeld staat.
+    if (shelfAnchor) window.scrollTo({ top: 0 });
 
     const units = buildRenderUnits();
     const wishCount = state.filtered.filter((i) => i.wishlist).length;
