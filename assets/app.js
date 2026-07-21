@@ -530,6 +530,30 @@ function initCollectionApp(config) {
 
   // ---------- Filteren & sorteren ----------
 
+  // Vingerafdruk van alles wat de sélectie bepaalt. Verandert die niet, dan is
+  // er alleen data gewijzigd en blijft je positie in de lijst behouden.
+  let lastFilterSignature = null;
+
+  function filterSignature() {
+    const s = (set) => [...set].sort().join(',');
+    return [
+      state.search.trim().toLowerCase(),
+      s(state.activeFormats),
+      s(state.activeTypes),
+      s(state.activeGenres),
+      s(state.activeStatus),
+      s(state.activeWatched),
+      s(state.activeDecades),
+      s(state.activeCerts),
+      s(state.activeBoxsets),
+      s(state.activeLocations),
+      state.activeLetter || '',
+      state.sort,
+      state.view,
+      state.groupSagas ? 'g' : '',
+    ].join('|');
+  }
+
   function applyFilters() {
     const q = state.search.trim().toLowerCase();
     let list = state.all.filter((item) => {
@@ -575,7 +599,18 @@ function initCollectionApp(config) {
 
     list = sortList(list, state.sort);
     state.filtered = list;
-    state.visibleCount = pageSizeForView(state.view);
+
+    // Terug naar de eerste pagina hoort alleen te gebeuren als je de selectie
+    // wijzigt — een filter, de zoekterm, de sortering of de weergave. Bewerk je
+    // een titel die je pas na 'Toon meer' zag, dan moet je blijven waar je was.
+    // Daarom vergelijken we een 'vingerafdruk' van de selectie in plaats van
+    // op elke plek in de code te moeten onthouden wat er wel of niet mag.
+    const signature = filterSignature();
+    if (signature !== lastFilterSignature) {
+      state.visibleCount = pageSizeForView(state.view);
+      lastFilterSignature = signature;
+    }
+
     updateFilterButton();
     render();
   }
@@ -642,10 +677,14 @@ function initCollectionApp(config) {
 
   // De container krijgt per weergave andere opmaak: een raster voor posters,
   // een verticale lijst voor de andere twee.
+  // Meer kolommen naarmate het scherm breder wordt — op een breedbeeldscherm
+  // stond er anders een smalle strook posters met veel lege ruimte ernaast.
+  // De tekst- en compacte lijst krijgen kolommen in plaats van één lange rij,
+  // want een titel van 30 tekens over 1800 pixels uitsmeren leest slecht.
   const VIEW_CONTAINER_CLASSES = {
-    grid: 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-5 gap-y-8',
-    compact: 'flex flex-col divide-y divide-white/5',
-    text: 'flex flex-col divide-y divide-white/5',
+    grid: 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-9 gap-x-5 gap-y-8',
+    compact: 'grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-x-8',
+    text: 'grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-x-8',
   };
 
   function applyViewClasses() {
