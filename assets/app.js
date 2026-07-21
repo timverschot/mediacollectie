@@ -131,6 +131,9 @@ function initCollectionApp(config) {
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
     viewChips: document.getElementById('view-chips'),
+    filterToggle: document.getElementById('filter-toggle'),
+    filterPanel: document.getElementById('filter-panel'),
+    clearFilters: document.getElementById('clear-filters'),
     personModal: document.getElementById('person-modal'),
     episodeModal: document.getElementById('episode-modal'),
     pickModal: document.getElementById('pick-modal'),
@@ -570,6 +573,7 @@ function initCollectionApp(config) {
     list = sortList(list, state.sort);
     state.filtered = list;
     state.visibleCount = pageSizeForView(state.view);
+    updateFilterButton();
     render();
   }
 
@@ -1308,6 +1312,88 @@ function initCollectionApp(config) {
       .join('');
 
     section.classList.remove('hidden');
+  }
+
+  // ---------- Filterpaneel open en dicht (fase 14) ----------
+
+  // Hoeveel filters staan er aan? Bepaalt het label op de knop en of de
+  // wisknop zichtbaar is.
+  function activeFilterCount() {
+    return (
+      state.activeFormats.size +
+      state.activeTypes.size +
+      state.activeGenres.size +
+      state.activeStatus.size +
+      state.activeWatched.size +
+      state.activeDecades.size +
+      state.activeCerts.size +
+      state.activeBoxsets.size +
+      state.activeLocations.size +
+      (state.activeLetter ? 1 : 0) +
+      (state.search.trim() ? 1 : 0)
+    );
+  }
+
+  function updateFilterButton() {
+    if (!els.filterToggle) return;
+    const n = activeFilterCount();
+    const open = els.filterPanel && els.filterPanel.classList.contains('filter-open');
+    els.filterToggle.textContent = `Filters${n ? ` (${n})` : ''} ${open ? '▴' : '▾'}`;
+    els.filterToggle.classList.toggle('chip-active', n > 0);
+    els.filterToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (els.clearFilters) els.clearFilters.classList.toggle('hidden', n === 0);
+  }
+
+  function setFilterPanel(open) {
+    if (!els.filterPanel) return;
+    els.filterPanel.classList.toggle('filter-open', open);
+    updateFilterButton();
+  }
+
+  function clearAllFilters() {
+    state.activeFormats.clear();
+    state.activeTypes.clear();
+    state.activeGenres.clear();
+    state.activeStatus.clear();
+    state.activeWatched.clear();
+    state.activeDecades.clear();
+    state.activeCerts.clear();
+    state.activeBoxsets.clear();
+    state.activeLocations.clear();
+    state.activeLetter = null;
+    state.search = '';
+    if (els.search) els.search.value = '';
+    buildFacetChips(state.all);
+    if (els.letterChips) {
+      els.letterChips.querySelectorAll('.letter-chip').forEach((c) => c.classList.remove('letter-chip-active'));
+    }
+    els.typeChips.querySelectorAll('[data-type]').forEach((c) => c.classList.remove('chip-active'));
+    if (els.statusChips) els.statusChips.querySelectorAll('[data-status]').forEach((c) => c.classList.remove('chip-active'));
+    if (els.watchedChips) els.watchedChips.querySelectorAll('[data-watched]').forEach((c) => c.classList.remove('chip-active'));
+    applyFilters();
+  }
+
+  if (els.filterToggle && els.filterPanel) {
+    els.filterToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setFilterPanel(!els.filterPanel.classList.contains('filter-open'));
+    });
+
+    // Buitenom klikken sluit het paneel — zowel met de muis als met een vinger.
+    document.addEventListener('click', (e) => {
+      if (!els.filterPanel.classList.contains('filter-open')) return;
+      if (els.filterPanel.contains(e.target) || els.filterToggle.contains(e.target)) return;
+      setFilterPanel(false);
+    });
+
+    if (els.clearFilters) {
+      els.clearFilters.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearAllFilters();
+      });
+    }
+
+    updateFilterButton();
   }
 
   // ---------- Klikbaar filteren (fase 13) ----------
@@ -3058,6 +3144,10 @@ function initCollectionApp(config) {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (els.filterPanel && els.filterPanel.classList.contains('filter-open')) {
+        setFilterPanel(false);
+        return;
+      }
       if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
       else if (els.episodeModal && !els.episodeModal.classList.contains('hidden')) closeEpisodeModal();
       else if (els.pickModal && !els.pickModal.classList.contains('hidden')) closePickModal();
