@@ -193,6 +193,9 @@ async function initStatsPage() {
     growthNote: document.getElementById('growth-note'),
     watched: document.getElementById('chart-watched'),
     watchedPerFormat: document.getElementById('chart-watched-format'),
+    watchKpis: document.getElementById('watch-kpis'),
+    watchYear: document.getElementById('chart-watch-year'),
+    myRatings: document.getElementById('chart-my-ratings'),
     value: document.getElementById('value-block'),
     scopeChips: document.getElementById('scope-chips'),
   };
@@ -372,6 +375,70 @@ async function initStatsPage() {
     els.watchedPerFormat.innerHTML = statsBarChart(rows, { keepZero: true });
   }
 
+  // Kijkgedrag: alleen zinvol zodra je kijkdatums of eigen scores hebt.
+  function renderWatchBehaviour(list) {
+    if (!els.watchKpis) return;
+
+    const entries = [];
+    list.forEach((m) => {
+      (m.watch_log || []).forEach((e) => entries.push({ date: e.date, title: m.title }));
+    });
+
+    const rated = list.filter((m) => m.my_rating != null);
+    const rewatched = list.filter((m) => (m.watch_log || []).length > 1);
+
+    if (!entries.length && !rated.length) {
+      els.watchKpis.innerHTML =
+        '<p class="col-span-full text-sm text-muted">Nog geen kijkdatums of eigen scores. Vanaf nu wordt bij elke titel die je als bekeken markeert de datum bewaard.</p>';
+      els.watchYear.innerHTML = '';
+      els.myRatings.innerHTML = '';
+      return;
+    }
+
+    const thisYear = String(new Date().getFullYear());
+    const thisYearCount = entries.filter((e) => String(e.date).startsWith(thisYear)).length;
+    const avgRating = rated.length
+      ? rated.reduce((sum, m) => sum + Number(m.my_rating), 0) / rated.length
+      : null;
+
+    els.watchKpis.innerHTML = [
+      statsKpi('Kijkmomenten', String(entries.length), 'sinds je datums bijhoudt'),
+      statsKpi('Dit jaar', String(thisYearCount), thisYear),
+      statsKpi('Herzien', String(rewatched.length), 'titels meer dan één keer'),
+      statsKpi('Jouw gemiddelde', avgRating != null ? avgRating.toFixed(1) : '—', `${rated.length} titels beoordeeld`),
+    ].join('');
+
+    // Per jaar
+    const perYear = {};
+    entries.forEach((e) => {
+      const y = String(e.date).slice(0, 4);
+      if (/^\d{4}$/.test(y)) perYear[y] = (perYear[y] || 0) + 1;
+    });
+    const years = Object.keys(perYear).sort();
+    els.watchYear.innerHTML = years.length
+      ? statsBarChart(years.map((y) => ({ label: y, value: perYear[y], color: '#2FA4A9' })))
+      : '<p class="text-sm text-muted py-3">Nog geen kijkdatums.</p>';
+
+    // Verdeling van je eigen scores
+    const perScore = {};
+    rated.forEach((m) => {
+      const s = String(m.my_rating);
+      perScore[s] = (perScore[s] || 0) + 1;
+    });
+    const scores = Object.keys(perScore)
+      .map(Number)
+      .sort((a, b) => b - a);
+    els.myRatings.innerHTML = scores.length
+      ? statsBarChart(
+          scores.map((s) => ({
+            label: `${s}/10`,
+            value: perScore[String(s)],
+            color: s >= 8 ? '#C9A227' : s >= 6 ? '#2FA4A9' : '#8B8A92',
+          }))
+        )
+      : '<p class="text-sm text-muted py-3">Nog geen eigen scores gegeven.</p>';
+  }
+
   function renderValue(list) {
     const byId = {};
     prices.forEach((p) => { byId[p.id] = p; });
@@ -505,6 +572,7 @@ async function initStatsPage() {
     renderGenres(list);
     renderGrowth(list);
     renderWatched(list);
+    renderWatchBehaviour(list);
     renderValue(list);
   }
 
