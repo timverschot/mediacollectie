@@ -772,10 +772,19 @@ function initCollectionApp(config) {
     });
   }
 
-  // Sfeerlicht koppelen aan de kaarten van de huidige weergave.
+  // Sfeerlicht koppelen aan de kaarten van de huidige weergave: bij hover toont
+  // de achtergrond de vervaagde poster van die titel. Voor een reeks (groep)
+  // pakken we de poster van het eerste deel.
   function wireAmbient(container) {
     container.querySelectorAll('[data-accent-id]').forEach((el) => {
-      el.addEventListener('mouseenter', () => setAmbient(el.dataset.accentId, false));
+      el.addEventListener('mouseenter', () => {
+        const openId = el.dataset.openId;
+        const groupKey = el.dataset.openGroup;
+        let item = null;
+        if (openId) item = state.all.find((m) => m.id === openId);
+        else if (groupKey) item = state.all.find((m) => sagaOf(m) === groupKey) || null;
+        setAmbient(item, false, groupKey || el.dataset.accentId);
+      });
     });
     container.addEventListener('mouseleave', clearAmbient);
   }
@@ -940,7 +949,9 @@ function initCollectionApp(config) {
       els.shelfMeta.innerHTML = `<p class="font-display text-3xl tracking-wide text-ink">${escapeHtml(
         title
       )}</p><p class="font-mono text-xs text-muted mt-1">${escapeHtml(sub)}</p>`;
-      setAmbient(u.type === 'group' ? u.saga : item.id, true);
+      // De achtergrond baadt in de vervaagde poster van de gecentreerde titel
+      // (voor een reeks: de poster van het eerste deel).
+      setAmbient(item, true, u.type === 'group' ? u.saga : item.id);
     }
   }
 
@@ -1051,25 +1062,40 @@ function initCollectionApp(config) {
       .join('');
   }
 
-  // ---------- Sfeerkleur (fase 20) ----------
-  // Een stabiele, filmische accentkleur per titel, uit een gecureerd palet.
-  // Bewust deterministisch uit het id: dat werkt meteen, offline, en kost niets.
+  // ---------- Sfeerlicht (fase 20 + 21) ----------
+  //
+  // De achtergrond neemt de sfeer van de poster over: een sterk vervaagde,
+  // uitvergrote kopie van de poster zelf. Zo zie je altijd de échte filmkleuren.
+  // Anders dan pixels uitlezen heeft dit géén CORS-toestemming van TMDb nodig —
+  // een afbeelding tónen mag altijd — dus het werkt voor elke poster.
+  // Alleen als een titel helemaal geen poster heeft, valt het terug op een
+  // zachte kleurgloed uit een vast palet.
+
   const ACCENTS = ['#C9A227', '#2FA4A9', '#C14B3A', '#2A6FB0', '#639922', '#7F77DD', '#C14B7E', '#B8935C', '#1F9E6E', '#4FB3C9'];
-  const accentCache = {};
-  function accentFor(id) {
-    if (accentCache[id]) return accentCache[id];
+  const AMBIENT_BASE = 'https://image.tmdb.org/t/p/w342'; // klein, want het beeld wordt toch vervaagd
+
+  function paletteAccent(key) {
     let h = 0;
-    const s = String(id || '');
+    const s = String(key || '');
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return (accentCache[id] = ACCENTS[h % ACCENTS.length]);
+    return ACCENTS[h % ACCENTS.length];
   }
 
-  function setAmbient(id, strong) {
+  // item = het titel-object (of null). strong = sterker voor de plank.
+  // fallbackKey bepaalt de palet-kleur als er geen poster is (bv. reeksnaam).
+  function setAmbient(item, strong, fallbackKey) {
     if (!els.ambient) return;
-    const c = accentFor(id);
-    els.ambient.style.setProperty('--amb', c + (strong ? 'cc' : '77'));
-    els.ambient.style.background = `radial-gradient(55% 45% at 50% 22%, ${c}${strong ? 'cc' : '77'}, transparent 70%)`;
-    els.ambient.style.opacity = strong ? '0.85' : '0.7';
+    const path = item && (item.custom_poster_path || item.poster_path);
+    if (path) {
+      els.ambient.style.backgroundImage = `url("${AMBIENT_BASE + path}")`;
+      els.ambient.classList.add('has-poster');
+      els.ambient.style.opacity = strong ? '0.6' : '0.42';
+    } else {
+      const c = paletteAccent(fallbackKey || (item && item.id));
+      els.ambient.style.backgroundImage = `radial-gradient(55% 45% at 50% 22%, ${c}, transparent 70%)`;
+      els.ambient.classList.remove('has-poster');
+      els.ambient.style.opacity = strong ? '0.8' : '0.65';
+    }
   }
   function clearAmbient() {
     if (els.ambient) els.ambient.style.opacity = '0';
