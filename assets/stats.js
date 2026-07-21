@@ -36,13 +36,31 @@ function statsMoney(value, currency) {
   return symbol + value.toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Laatste prijsnotering met een bruikbaar gemiddelde.
+// Laatste prijsnotering met een bruikbaar cijfer.
 function statsLatestPrice(entry) {
   const history = (entry && entry.history) || [];
   for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i] && history[i].ebay_avg != null) return history[i];
+    const h = history[i];
+    if (h && (h.ebay_median != null || h.ebay_avg != null)) return h;
   }
   return null;
+}
+
+// Richtwaarde van een meting: mediaan sinds fase 9, anders het oude gemiddelde.
+function statsPointValue(h) {
+  if (!h) return null;
+  return h.ebay_median != null ? h.ebay_median : h.ebay_avg;
+}
+
+// Voorzichtige ondergrens: het eerste kwartiel — een kwart van het vergelijkbare
+// aanbod staat lager geprijsd. Robuuster dan de absolute laagste prijs, die op
+// één beschadigd exemplaar kan slaan. Ontbreekt het kwartiel (oude metingen),
+// dan vallen we terug op de laagste prijs en anders op de richtwaarde zelf.
+function statsLowValue(h) {
+  if (!h) return null;
+  if (h.ebay_q1 != null) return h.ebay_q1;
+  if (h.ebay_low != null) return h.ebay_low;
+  return statsPointValue(h);
 }
 
 // ---------- Grafiek-bouwstenen ----------
@@ -362,7 +380,22 @@ async function initStatsPage() {
     // fase 10 per seizoen (`titel|formaat|sN`). De oude sleutel (enkel het
     // titel-id) blijft werken zolang je nog niet opnieuw ververst hebt.
     const valued = [];
-    let currency = 'EUR';
+
+    const addValued = (title, year, format, last) => {
+      const value = statsPointValue(last);
+      if (value == null) return;
+      valued.push({
+        title,
+        year,
+        format,
+        value: Number(value),
+        low: Number(statsLowValue(last)),
+        // Munt per meting bewaren: sommige obscure titels hebben alleen Brits
+        // aanbod, en ponden bij euro's optellen zou onzin opleveren.
+        currency: last.ebay_currency || 'EUR',
+        date: last.date,
+      });
+    };
 
     list.forEach((m) => {
       const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
@@ -372,15 +405,7 @@ async function initStatsPage() {
           const fmt = s.format || m.format;
           const entry = byId[`${m.id}|${fmt}|s${s.season_number}`] || byId[`${m.id}|${fmt}`] || byId[m.id];
           const last = statsLatestPrice(entry);
-          if (!last) return;
-          if (last.ebay_currency) currency = last.ebay_currency;
-          valued.push({
-            title: `${m.title} — seizoen ${s.season_number}`,
-            year: m.release_year,
-            format: fmt,
-            value: Number(last.ebay_median != null ? last.ebay_median : last.ebay_avg),
-            date: last.date,
-          });
+          if (last) addValued(`${m.title} — seizoen ${s.season_number}`, m.release_year, fmt, last);
         });
         return;
       }
@@ -390,15 +415,7 @@ async function initStatsPage() {
         if (ed.wishlist) return;
         const entry = byId[`${m.id}|${ed.format}`] || byId[m.id];
         const last = statsLatestPrice(entry);
-        if (!last) return;
-        if (last.ebay_currency) currency = last.ebay_currency;
-        valued.push({
-          title: m.title,
-          year: m.release_year,
-          format: ed.format,
-          value: Number(last.ebay_median != null ? last.ebay_median : last.ebay_avg),
-          date: last.date,
-        });
+        if (last) addValued(m.title, m.release_year, ed.format, last);
       });
     });
 
@@ -421,20 +438,44 @@ async function initStatsPage() {
     });
     ownedItems = ownedItems || list.length;
 
-    const total = valued.reduce((sum, v) => sum + v.value, 0);
-    const average = total / valued.length;
-    const coverage = Math.round((valued.length / ownedItems) * 100);
+    // Per munt apart optellen. De hoofdmunt is die met de meeste exemplaren;
+    // wat in een andere munt geprijsd staat, melden we los in plaats van het
+    // er stilzwijgend bij te tellen.
+    const byCurrency = {};
+    valued.forEach((v) => {
+      const c = (byCurrency[v.currency] = byCurrency[v.currency] || { items: [], total: 0, low: 0 });
+      c.items.push(v);
+      c.total += v.value;
+      c.low += v.low;
+    });
+    const currencies = Object.keys(byCurrency).sort((a, b) => byCurrency[b].items.length - byCurrency[a].items.length);
+    const currency = currencies[0] || 'EUR';
+    const main = byCurrency[currency];
+    const others = currencies.slice(1);
+
+    const total = main.total;
+    const lowTotal = main.low;
+    const average = total / main.items.length;
+    const coverage = Math.round((main.items.length / ownedItems) * 100);
     // Ruwe extrapolatie naar alle exemplaren, op basis van het gemiddelde.
     const projected = average * ownedItems;
-    const top = [...valued].sort((a, b) => b.value - a.value).slice(0, 5);
-    const oldest = valued.reduce((o, v) => (String(v.date) < String(o.date) ? v : o), valued[0]);
+    const top = [...main.items].sort((a, b) => b.value - a.value).slice(0, 5);
+    const oldest = main.items.reduce((o, v) => (String(v.date) < String(o.date) ? v : o), main.items[0]);
 
     els.value.innerHTML = `
       <div class="grid sm:grid-cols-3 gap-4 mb-5">
-        ${statsKpi('Waarde met prijsdata', statsMoney(total, currency), `${valued.length} van ${ownedItems} exemplaren (${coverage}%)`)}
-        ${statsKpi('Gemiddeld per exemplaar', statsMoney(average, currency), 'op basis van eBay-vraagprijzen')}
+        ${statsKpi('Richtwaarde', statsMoney(total, currency), `${main.items.length} van ${ownedItems} exemplaren (${coverage}%)`)}
+        ${statsKpi('Voorzichtige ondergrens', statsMoney(lowTotal, currency), 'een kwart van het aanbod ligt lager')}
         ${statsKpi('Geschat totaal', statsMoney(projected, currency), 'alle exemplaren, geëxtrapoleerd')}
       </div>
+
+      ${
+        others.length
+          ? `<p class="text-xs text-gold font-mono mb-3">Niet meegeteld: ${others
+              .map((c) => `${byCurrency[c].items.length} exemplaren in ${statsEsc(c)} (${statsMoney(byCurrency[c].total, c)})`)
+              .join(' · ')} — andere munt, niet omgerekend.</p>`
+          : ''
+      }
 
       <p class="text-xs font-mono uppercase text-muted mb-2">Duurste titels</p>
       ${statsBarChart(
@@ -448,8 +489,10 @@ async function initStatsPage() {
 
       <p class="text-xs text-muted mt-4 leading-relaxed">
         Schatting op basis van actieve eBay-vraagprijzen, niet van bevestigde verkopen — beschouw dit als een
-        indicatie, geen taxatie. Oudste gebruikte notering: ${statsEsc(oldest.date || 'onbekend')}.
-        Het geschatte totaal rekent het gemiddelde door naar titels zonder prijsdata en is dus het minst betrouwbare cijfer.
+        indicatie, geen taxatie. De <strong class="text-ink">richtwaarde</strong> telt de mediaanprijzen op;
+        de <strong class="text-ink">ondergrens</strong> telt per exemplaar het eerste kwartiel, dus wat je
+        realistisch minstens zou krijgen. Oudste gebruikte notering: ${statsEsc(oldest.date || 'onbekend')}.
+        Het geschatte totaal rekent het gemiddelde door naar exemplaren zonder prijsdata en is het minst betrouwbare cijfer.
       </p>`;
   }
 
