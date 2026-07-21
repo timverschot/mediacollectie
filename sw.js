@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `mediacollectie-shell-${VERSION}`;
 const IMAGE_CACHE = `mediacollectie-images-${VERSION}`;
 const MAX_IMAGES = 600;
@@ -41,6 +41,7 @@ const SHELL_ASSETS = [
   './assets/price-app.js',
   './assets/universes.js',
   './assets/universes-page.js',
+  './assets/bulk-import.js',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
 ];
