@@ -101,9 +101,32 @@
     scrollbar-width: thin;
   }
 
-  /* Geen dubbele scrollbalk in de pop-up op smalle schermen */
+  /* Pop-ups staan 'fixed' en negeren daardoor de padding op <body>. Zonder
+     deze regel raakt inhoud de rand van het scherm op toestellen met een
+     notch of afgeronde hoeken. */
+  #detail-modal, #person-modal, #episode-modal, #pick-modal,
+  #dupes-modal, #group-modal, #add-title-modal {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
   @media (max-width: 639px) {
-    #detail-modal > div { padding-bottom: env(safe-area-inset-bottom); }
+    /* Geen dubbele scrollbalk, en ruimte vrij onder de home-balk */
+    #detail-modal > div, #person-modal > div, #episode-modal > div,
+    #pick-modal > div, #dupes-modal > div, #add-title-modal > div {
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+    }
+
+    /* De sluitknop stond absoluut bovenaan en scrolde dus weg zodra je in een
+       lange pop-up naar beneden ging. Op kleine schermen zetten we hem vast,
+       zodat hij altijd binnen duimbereik blijft. */
+    .modal-close-fixed {
+      position: fixed !important;
+      top: calc(0.75rem + env(safe-area-inset-top)) !important;
+      right: calc(0.75rem + env(safe-area-inset-right)) !important;
+      z-index: 100;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    }
   }
 
   /* Subtiele filmperforatie-rand bovenaan als sfeerdetail */
@@ -509,7 +532,7 @@
           <div class="absolute inset-0 sm:rounded-t-xl bg-gradient-to-t from-surface via-surface/60 to-transparent"></div>
         </div>
         <button id="modal-close" aria-label="Sluiten"
-          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+          class="modal-close-fixed absolute top-3 right-3 z-10 w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
       </div>
       <div data-detail-body class="px-4 sm:px-6 pb-8 grid sm:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] gap-5 sm:gap-6">
         <div class="min-w-0">
@@ -660,7 +683,7 @@
                 <button type="button" data-edit-poster-load class="btn btn-secondary !py-1.5 !px-3 text-xs">Andere poster kiezen</button>
                 <button type="button" data-edit-poster-reset class="hidden btn btn-secondary !py-1.5 !px-3 text-xs">Terug naar standaardposter</button>
               </div>
-              <div data-edit-poster-grid class="hidden grid grid-cols-4 sm:grid-cols-6 gap-2 mt-2 max-h-56 overflow-y-auto"></div>
+              <div data-edit-poster-grid class="hidden grid grid-cols-3 sm:grid-cols-5 gap-2 mt-2 max-h-72 overflow-y-auto pr-1"></div>
             </div>
             <div class="grid sm:grid-cols-2 gap-3">
               <div>
@@ -721,7 +744,8 @@
     <div class="bg-surface rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="font-display text-2xl tracking-wide">Titel toevoegen</h2>
-        <button id="close-add-title-btn" aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+        <button id="close-add-title-btn" aria-label="Sluiten"
+          class="modal-close-fixed w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
       </div>
 
       <div class="flex gap-3 mb-4">
@@ -729,7 +753,34 @@
         <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
       </div>
 
-      <div id="search-results" class="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-6"></div>
+      <div id="search-results" class="grid grid-cols-3 sm:grid-cols-4 gap-3 mb-3"></div>
+
+      <!-- Meerdere resultaten tegelijk toevoegen, bv. alle Ace Ventura-films -->
+      <div id="bulk-add-bar" class="hidden bg-bg rounded-lg p-3 mb-6 space-y-3">
+        <p class="text-sm"><span id="bulk-add-count" class="text-gold font-semibold"></span> geselecteerd — ze krijgen allemaal dezelfde instellingen:</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label>Formaat</label>
+            <select id="bulk-format"></select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="bulk-owned">
+              <option value="owned" selected>In bezit</option>
+              <option value="wishlist">Verlanglijst</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label>Uit welke boxset? (optioneel)</label>
+          <input type="text" id="bulk-boxset" placeholder="Bv. Ace Ventura Collection">
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button type="button" id="bulk-add-btn" class="btn btn-primary">Alle geselecteerde toevoegen</button>
+          <button type="button" id="bulk-clear-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Selectie wissen</button>
+        </div>
+        <p id="bulk-add-status" class="text-sm font-mono"></p>
+      </div>
 
       <form id="add-form" class="hidden bg-bg rounded-lg p-4 space-y-4">
         <div class="flex gap-4">
@@ -827,7 +878,8 @@
     <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="font-display text-2xl tracking-wide">Wat zullen we kijken?</h2>
-        <button data-pick-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+        <button data-pick-close aria-label="Sluiten"
+          class="modal-close-fixed w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -863,7 +915,8 @@
     <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-2xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
       <div class="flex items-center justify-between mb-2">
         <h2 class="font-display text-2xl tracking-wide">Dubbels</h2>
-        <button data-dupes-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+        <button data-dupes-close aria-label="Sluiten"
+          class="modal-close-fixed w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
       </div>
       <p class="text-xs text-muted mb-4">Titels waarvan je meer dan één exemplaar in hetzelfde formaat hebt, of die twee keer onder een bijna gelijke naam in je collectie staan.</p>
       <div data-dupes-list class="space-y-2"></div>
@@ -879,7 +932,7 @@
           <div class="absolute inset-0 sm:rounded-t-xl bg-gradient-to-t from-surface via-surface/50 to-transparent"></div>
         </div>
         <button data-ep-close aria-label="Sluiten"
-          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+          class="modal-close-fixed absolute top-3 right-3 z-10 w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
       </div>
 
       <div class="px-5 sm:px-8 pb-8 pt-4 space-y-4">
@@ -917,7 +970,7 @@
     <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-4xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
       <div class="relative">
         <button data-person-close aria-label="Sluiten"
-          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+          class="modal-close-fixed absolute top-3 right-3 z-10 w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
       </div>
 
       <div class="px-4 sm:px-6 pt-4 pb-8">
