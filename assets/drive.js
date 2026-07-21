@@ -653,6 +653,21 @@ async function driveUploadCoverImage(base64Jpeg, slug, side) {
   return `data:image/jpeg;base64,${base64Jpeg}`;
 }
 
+// ---------- Universums (fase 11) ----------
+// Overkoepelende franchises zoals het MCU. Elk universum verwijst naar een
+// TMDb-trefwoord; de ledenlijst wordt live opgehaald en niet bewaard, zodat
+// nieuwe releases vanzelf meetellen.
+
+async function driveLoadUniverses() {
+  const fileId = await driveGetOrCreateFileId('universes.json', []);
+  const data = await driveReadJsonFile(fileId);
+  return { universes: Array.isArray(data) ? data : [] };
+}
+
+async function driveSaveUniverses(universes) {
+  return withWriteLock(() => driveSaveNamedFile('universes.json', universes || []));
+}
+
 // ---------- Prijzen ----------
 
 async function driveLoadPrices() {
