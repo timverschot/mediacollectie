@@ -190,7 +190,22 @@ function driveOnReady(cb) {
   else readyCallbacks.push(cb);
 }
 
+let sessionRestoreAttempted = false;
+
+/**
+ * Herstelt je sessie uit de lokale opslag.
+ *
+ * Belangrijk: dit gebeurt METEEN bij het laden van dit bestand, zonder te
+ * wachten op de Google-bibliotheek. Die bibliotheek wordt bij elke paginawissel
+ * opnieuw van Google opgehaald, en zolang dat duurde stond het inlogscherm er
+ * terwijl je token gewoon geldig in de browser lag. De bibliotheek is alleen
+ * nodig om opnieuw in te loggen of een verlopen token te vernieuwen — niet om
+ * vast te stellen dat je al ingelogd bent.
+ */
 function tryRestoreSession() {
+  if (sessionRestoreAttempted) return;
+  sessionRestoreAttempted = true;
+
   // Als je op een andere pagina van deze site al was ingelogd, hoef je niet
   // opnieuw in te loggen (localStorage werkt over alle tabbladen/pagina's heen).
   try {
@@ -211,6 +226,10 @@ function tryRestoreSession() {
   // geblokkeerd. Eén klik op de knop is genoeg, en die toont dankzij de lege
   // prompt meestal helemaal geen scherm.
 }
+
+// Meteen proberen, nog voor de Google-bibliotheek geladen is. Dit is wat het
+// kortstondig verschijnen van het inlogscherm bij paginawissels wegneemt.
+tryRestoreSession();
 
 // Stuurt het "ingelogd"-sein pas zodra de hele pagina geparsed is. Dit
 // voorkomt dat het sein verloren gaat wanneer de Google-bibliotheek
@@ -314,15 +333,34 @@ function onTokenResponse(resp) {
 // Zorgt dat er altijd een geldig (niet-verlopen) token is vóór een Drive-aanroep.
 // Vraagt zo nodig stilletjes een nieuw token aan (zonder inlogscherm) als je al
 // eerder toestemming gaf.
-function ensureToken() {
-  if (accessToken && tokenExpiresAt > Date.now() + 30000) {
-    return Promise.resolve(accessToken);
-  }
+/**
+ * Wacht tot de Google-bibliotheek klaar is. Nodig omdat we de sessie nu al
+ * herstellen vóór die bibliotheek geladen is: een Drive-aanroep vlak na het
+ * openen van de pagina zou anders stuklopen op een tokenClient die er nog
+ * niet is.
+ */
+function whenTokenClientReady(timeoutMs) {
+  if (tokenClient) return Promise.resolve(tokenClient);
+  const limit = timeoutMs || 15000;
   return new Promise((resolve, reject) => {
-    if (!tokenClient) {
-      reject(new Error('Google-inlogbibliotheek niet klaar.'));
-      return;
-    }
+    const started = Date.now();
+    const check = () => {
+      if (tokenClient) return resolve(tokenClient);
+      if (Date.now() - started > limit) {
+        return reject(new Error('De Google-inlogbibliotheek kon niet geladen worden. Controleer je verbinding.'));
+      }
+      setTimeout(check, 100);
+    };
+    check();
+  });
+}
+
+async function ensureToken() {
+  if (accessToken && tokenExpiresAt > Date.now() + 30000) {
+    return accessToken;
+  }
+  await whenTokenClientReady();
+  return new Promise((resolve, reject) => {
     const previousCallback = tokenClient.callback;
     tokenClient.callback = (resp) => {
       tokenClient.callback = previousCallback;
