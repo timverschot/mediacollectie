@@ -2,8 +2,16 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Beheer — Mijn Mediacollectie</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#14141A">
+<link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mediacollectie">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -263,6 +271,12 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
   <script src="assets/admin.js"></script>
   <script src="assets/add-title.js"></script>
   <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
     function cfg() { return getConfig(); }
     function cfgReady(c) { return !!c.tmdbKey; }
 
