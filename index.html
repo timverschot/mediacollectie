@@ -371,6 +371,11 @@
         <div id="decade-chips" class="flex flex-wrap gap-2"></div>
       </div>
 
+      <div id="cert-row" class="hidden flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Leeftijd</span>
+        <div id="cert-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+
       </div><!-- /#filter-panel -->
     </div>
   </div>
@@ -395,8 +400,14 @@
   <!-- Detailmodal -->
   <div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
     <div class="bg-surface rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10">
-      <div class="flex justify-end p-3">
-        <button id="modal-close" aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+      <!-- Kop met brede achtergrondafbeelding (TMDb-backdrop), indien beschikbaar -->
+      <div class="relative min-h-[3.25rem]">
+        <div data-backdrop-wrap class="hidden">
+          <img data-backdrop src="" alt="" class="w-full h-32 sm:h-48 object-cover rounded-t-xl">
+          <div class="absolute inset-0 rounded-t-xl bg-gradient-to-t from-surface via-surface/50 to-transparent"></div>
+        </div>
+        <button id="modal-close" aria-label="Sluiten"
+          class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
       </div>
       <div class="px-6 pb-8 grid sm:grid-cols-[220px_1fr] gap-6">
         <div>
@@ -418,15 +429,30 @@
         </div>
         <div class="space-y-3">
           <h2 data-field="title" class="font-display text-4xl tracking-wide text-ink"></h2>
-          <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted font-mono">
+          <p data-field="original-title" class="hidden text-sm text-muted italic -mt-2"></p>
+          <p data-field="tagline" class="hidden text-sm text-gold italic"></p>
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted font-mono items-center">
             <span data-field="year"></span>
             <span data-field="runtime"></span>
-            <span>TMDb: <span data-field="rating"></span></span>
+            <span>TMDb: <span data-field="rating"></span><span data-field="votes" class="text-xs"></span></span>
+            <span data-field="cert" class="hidden px-1.5 py-0.5 rounded border border-white/25 text-ink text-xs"></span>
+            <span data-field="tv-status" class="hidden"></span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <a data-field="trailer-link" href="#" target="_blank" rel="noopener" class="hidden chip">▶ Trailer</a>
+            <a data-field="imdb-link" href="#" target="_blank" rel="noopener" class="hidden chip">IMDb</a>
           </div>
           <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Genres</span><br><span data-field="genres"></span></p>
-          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Regisseur</span><br><span data-field="director"></span></p>
-          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Reeks</span><br><span data-field="saga"></span></p>
-          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Hoofdrolspelers</span><br><span data-field="cast"></span></p>
+          <div class="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+            <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Regisseur</span><br><span data-field="director"></span></p>
+            <p class="text-sm" data-field="writers-wrap"><span class="text-muted font-mono uppercase text-xs">Scenario</span><br><span data-field="writers"></span></p>
+            <p class="text-sm" data-field="composer-wrap"><span class="text-muted font-mono uppercase text-xs">Muziek</span><br><span data-field="composer"></span></p>
+            <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Reeks</span><br><span data-field="saga"></span></p>
+          </div>
+          <div>
+            <p class="text-muted font-mono uppercase text-xs mb-2">Cast</p>
+            <div data-field="cast-list" class="flex gap-3 overflow-x-auto pb-1"></div>
+          </div>
           <p class="text-sm leading-relaxed" data-field="overview"></p>
           <div class="pt-3 border-t border-white/10 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <p><span class="text-muted font-mono uppercase text-xs">Formaat</span><br><span data-field="format" class="text-gold font-semibold"></span></p>
@@ -478,6 +504,17 @@
               <label>Reeks (houdt samenhorende titels bij elkaar)</label>
               <input type="text" data-edit-saga placeholder="Bv. Harry Potter Collection, of je eigen groepsnaam">
             </div>
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <label>Poster</label>
+                <span data-edit-poster-status class="!normal-case text-xs text-muted font-mono"></span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" data-edit-poster-load class="btn btn-secondary !py-1.5 !px-3 text-xs">Andere poster kiezen</button>
+                <button type="button" data-edit-poster-reset class="hidden btn btn-secondary !py-1.5 !px-3 text-xs">Terug naar standaardposter</button>
+              </div>
+              <div data-edit-poster-grid class="hidden grid grid-cols-4 sm:grid-cols-6 gap-2 mt-2 max-h-56 overflow-y-auto"></div>
+            </div>
             <div class="grid sm:grid-cols-2 gap-3">
               <div>
                 <label>Nieuwe voorkant-foto</label>
@@ -500,6 +537,15 @@
               <button type="button" data-edit-refresh class="btn btn-secondary" title="Metadata en reeks opnieuw ophalen van TMDb">↻ TMDb verversen</button>
               <span data-edit-status class="text-sm font-mono"></span>
             </div>
+          </div>
+
+          <!-- Fase 5: alle delen van de reeks, met wat je nog mist -->
+          <div data-field="saga-section" class="hidden pt-3 border-t border-white/10">
+            <div class="flex items-center justify-between mb-2 gap-2">
+              <p class="text-muted font-mono uppercase text-xs">Delen van deze reeks</p>
+              <p data-field="saga-progress" class="font-mono text-xs text-gold"></p>
+            </div>
+            <div data-field="saga-parts" class="space-y-1"></div>
           </div>
 
           <div data-field="seasons-section" class="hidden pt-3 border-t border-white/10">
