@@ -175,6 +175,19 @@
     <section class="panel">
       <h2>Geschatte collectiewaarde</h2>
       <div id="value-block"></div>
+
+      <div class="mt-5 pt-4 border-t border-white/10">
+        <p class="text-xs font-mono uppercase text-muted mb-1">Verzekeringsoverzicht</p>
+        <p class="text-xs text-muted mb-3 leading-relaxed">
+          Eén regel per fysiek exemplaar, met de laatst bekende richtprijs. Bewaar dit samen met je
+          aankoopbewijzen — handig na brand, diefstal of waterschade.
+        </p>
+        <div class="flex flex-wrap gap-3 items-center">
+          <button id="insurance-print" class="chip">Afdrukken of als PDF bewaren</button>
+          <button id="insurance-csv" class="chip">Downloaden als CSV</button>
+          <span id="insurance-status" class="text-xs font-mono text-muted"></span>
+        </div>
+      </div>
     </section>
 
     <p id="stats-error" class="hidden text-center text-red-400 font-mono text-sm py-6"></p>
@@ -196,6 +209,7 @@
   </div>
 
   <script src="assets/drive.js"></script>
+  <script src="assets/price-app.js"></script>
   <script src="assets/stats.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
@@ -210,8 +224,27 @@
       document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
     };
 
+    function wireInsuranceButtons() {
+      var status = document.getElementById('insurance-status');
+      var run = function (fn, bezig) {
+        return function () {
+          status.textContent = bezig;
+          fn()
+            .then(function (t) {
+              status.textContent = '✓ ' + t.items + ' exemplaren, ' + t.priced + ' met prijsgegevens';
+            })
+            .catch(function (e) {
+              status.textContent = '✗ ' + e.message;
+            });
+        };
+      };
+      document.getElementById('insurance-print').addEventListener('click', run(openInsurancePrintView, 'Overzicht opmaken…'));
+      document.getElementById('insurance-csv').addEventListener('click', run(downloadInsuranceCsv, 'Bestand maken…'));
+    }
+
     window._driveAuthenticated = function () {
       document.getElementById('login-gate').remove();
+      wireInsuranceButtons();
       initStatsPage().catch(function (err) {
         console.error(err);
         var box = document.getElementById('stats-error');
