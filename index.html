@@ -91,9 +91,9 @@
     background-repeat: no-repeat;
   }
   /* Alleen bij een echte poster vervagen; de palet-terugval is al zacht. */
-  #ambient-glow.has-poster { filter: blur(64px) saturate(1.15); transform: scale(1.12); }
+  #ambient-glow.has-poster { filter: blur(64px) saturate(1.6); transform: scale(1.12); }
   @media (max-width: 640px) {
-    #ambient-glow.has-poster { filter: blur(44px) saturate(1.15); }
+    #ambient-glow.has-poster { filter: blur(44px) saturate(1.6); }
   }
   @media (prefers-reduced-motion: reduce) {
     #ambient-glow { transition: none; }
@@ -145,9 +145,9 @@
   @media (prefers-reduced-motion: reduce) { #detail-modal>div,#person-modal>div,#episode-modal>div { animation: none !important; } }
 
   /* Plankweergave (cover-flow). Slidebreedte via variabele, kleiner op gsm. */
-  :root { --shelf-item: 220px; }
-  @media (max-width: 640px) { :root { --shelf-item: 150px; } #shelf-stage { height: 360px !important; } }
-  #shelf-stage { position: relative; z-index: 1; height: 460px; display: flex; align-items: center; overflow: hidden; }
+  :root { --shelf-item: 440px; }
+  @media (max-width: 640px) { :root { --shelf-item: 280px; } #shelf-stage { height: 460px !important; } }
+  #shelf-stage { position: relative; z-index: 1; height: 680px; display: flex; align-items: center; overflow: hidden; }
   #shelf-track { display: flex; align-items: center; transition: transform .45s cubic-bezier(.2,.7,.2,1); will-change: transform; }
   .shelf-slide { flex: 0 0 var(--shelf-item); padding: 0 10px; transition: transform .45s cubic-bezier(.2,.7,.2,1), opacity .45s ease; transform-origin: center; cursor: pointer; }
   .shelf-nav { position:absolute; top:50%; transform:translateY(-50%); z-index:4; width:44px; height:44px; border-radius:9999px; background:rgba(20,20,26,.72); border:1px solid rgba(242,240,234,.15); color:#F2F0EA; font-size:24px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
