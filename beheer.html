@@ -5,13 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Beheer — Mijn Mediacollectie</title>
 
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json" id="app-manifest">
 <meta name="theme-color" content="#14141A">
 <link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
 <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mediacollectie">
+<script>
+  // Zie index.html: op iOS geen standalone-installatie, anders breekt het
+  // inloggen met Google.
+  (function () {
+    var isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      var link = document.getElementById('app-manifest');
+      if (link) link.remove();
+    }
+  })();
+</script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
