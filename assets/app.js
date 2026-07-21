@@ -2434,7 +2434,13 @@ function initCollectionApp(config) {
         } else if (onWishlist) {
           right = '<span class="font-mono text-xs text-gold">verlanglijst</span>';
         } else {
-          right = `<button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ verlanglijst</button>`;
+          // Twee wegen: snel op de verlanglijst, of het volledige formulier
+          // met formaat, hoesfoto's en boxset — voor als je hem net gekocht hebt.
+          right = `
+            <span class="flex gap-2 shrink-0">
+              <button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ wens</button>
+              <button type="button" class="text-teal hover:text-white text-xs underline" data-saga-own="${escapeAttr(p.tmdb_id)}">+ in bezit…</button>
+            </span>`;
         }
 
         return `
@@ -2467,6 +2473,21 @@ function initCollectionApp(config) {
       btn.addEventListener('click', () => {
         const part = parts.find((p) => String(p.tmdb_id) === btn.dataset.sagaAdd);
         if (part) addSagaPartToWishlist(part, btn);
+      });
+    });
+
+    // Volledig toevoegformulier openen voor een ontbrekend deel.
+    listEl.querySelectorAll('[data-saga-own]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (typeof addTitleOpenForTmdb !== 'function') return;
+        closeModal();
+        const addModal = document.getElementById('add-title-modal');
+        if (addModal) addModal.classList.remove('hidden');
+        try {
+          await addTitleOpenForTmdb(btn.dataset.sagaOwn, 'movie');
+        } catch (err) {
+          alert('Kon de gegevens niet ophalen: ' + err.message);
+        }
       });
     });
   }
@@ -2838,14 +2859,18 @@ function initCollectionApp(config) {
           return;
         }
         grid.classList.remove('hidden');
+        // Vaste hoogtes in plaats van aspect-ratio: dat laatste liep op smalle
+        // schermen over elkaar heen. Minder kolommen op gsm, zodat elke poster
+        // groot genoeg blijft om te herkennen.
         grid.innerHTML = posters
           .map(
             (p) => `
               <button type="button" data-poster-option="${escapeAttr(p.file_path)}"
-                class="rounded overflow-hidden aspect-[2/3] bg-bg ring-1 ring-white/10 ${
+                class="block w-full h-32 sm:h-36 rounded overflow-hidden bg-bg ring-1 ring-white/10 ${
                   item.custom_poster_path === p.file_path ? 'ring-2 ring-gold' : ''
-                }">
-                <img src="${escapeAttr('https://image.tmdb.org/t/p/w185' + p.file_path)}" loading="lazy" class="w-full h-full object-cover" alt="Poster${p.language ? ' (' + escapeAttr(p.language) + ')' : ''}">
+                }" title="Poster${p.language ? ' (' + escapeAttr(p.language) + ')' : ''}">
+                <img src="${escapeAttr('https://image.tmdb.org/t/p/w185' + p.file_path)}" loading="lazy"
+                  class="block w-full h-full object-contain bg-black/30" alt="Poster">
               </button>`
           )
           .join('');
