@@ -76,16 +76,27 @@
 
   /* ---------- Fase 20: beweging, diepte en sfeer ---------- */
 
-  /* Sfeerlicht dat meekleurt met de poster waar je overheen zweeft. Eén laag
-     achter het raster; puur CSS-kleur, dus geen invloed op de snelheid. */
+  /* Sfeerlicht dat meekleurt met de poster waar je overheen zweeft: een sterk
+     vervaagde, uitvergrote kopie van de poster zelf, achter het raster. Toont
+     de échte filmkleuren en heeft geen CORS nodig (een beeld tónen mag altijd). */
   #ambient-glow {
     position: fixed;
-    inset: 0;
+    inset: -8%;
     z-index: 0;
     pointer-events: none;
     opacity: 0;
-    transition: opacity .55s ease, background .55s ease;
-    background: radial-gradient(55% 45% at 50% 22%, var(--amb, #C9A22700), transparent 70%);
+    transition: opacity .55s ease;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  /* Alleen bij een echte poster vervagen; de palet-terugval is al zacht. */
+  #ambient-glow.has-poster { filter: blur(64px) saturate(1.15); transform: scale(1.12); }
+  @media (max-width: 640px) {
+    #ambient-glow.has-poster { filter: blur(44px) saturate(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #ambient-glow { transition: none; }
   }
   main, header, .sticky { position: relative; z-index: 1; }
 
