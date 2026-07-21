@@ -105,6 +105,7 @@ function initCollectionApp(config) {
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
     activeBoxsets: new Set(),  // namen van boxsets
     activeLocations: new Set(), // waar de schijf fysiek ligt
+    activeUniverses: new Set(), // universum-id's (bv. MCU)
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
@@ -129,6 +130,8 @@ function initCollectionApp(config) {
     boxsetRow: document.getElementById('boxset-row'),
     locationChips: document.getElementById('location-chips'),
     locationRow: document.getElementById('location-row'),
+    universeChips: document.getElementById('universe-chips'),
+    universeRow: document.getElementById('universe-row'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
@@ -297,6 +300,13 @@ function initCollectionApp(config) {
       state.all = data;
       buildFacetChips(data);
       applyFilters();
+
+      // Universums op de achtergrond laden zodat het universumfilter kan
+      // verschijnen. Heb je er geen, dan gebeurt er niets. De ledenlijsten
+      // komen live van TMDb, dus dit mag de collectie niet ophouden.
+      if (typeof loadUniverseData === 'function') {
+        loadUniverseData().catch((e) => console.warn('Universums niet geladen:', e));
+      }
     });
   }
   window.__collectionReload = reload;
@@ -492,6 +502,44 @@ function initCollectionApp(config) {
     buildEditionFieldChips(data, 'location', state.activeLocations, els.locationChips, els.locationRow);
   }
 
+  // Universumchips: op basis van de geladen ledenlijsten. Tonen enkel universums
+  // waarvan je ook echt een titel bezit of op je verlanglijst hebt.
+  function buildUniverseChips() {
+    if (!els.universeChips || !universeData) return;
+
+    const counts = {};
+    Object.values(universeByMovieId).forEach((set) => {
+      set.forEach((uid) => {
+        counts[uid] = (counts[uid] || 0) + 1;
+      });
+    });
+
+    const universes = universeData.universes.filter((u) => counts[u.id]);
+    if (els.universeRow) {
+      els.universeRow.classList.toggle('hidden', universes.length === 0);
+      if (universes.length) els.universeRow.classList.add('flex');
+    }
+
+    els.universeChips.innerHTML = '';
+    universes.forEach((u) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeUniverses.has(u.id) ? ' chip-active' : '');
+      chip.textContent = u.name;
+      chip.title = `${counts[u.id]} titel(s) uit dit universum`;
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeUniverses, u.id);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.universeChips.appendChild(chip);
+    });
+
+    [...state.activeUniverses].forEach((uid) => {
+      if (!universes.some((u) => u.id === uid)) state.activeUniverses.delete(uid);
+    });
+  }
+
   // Alle chips die uit de data zelf worden afgeleid, in één keer opnieuw opbouwen.
   function buildFacetChips(data) {
     buildFormatChips(data);
@@ -500,6 +548,12 @@ function initCollectionApp(config) {
     buildCertChips(data);
     buildBoxsetChips(data);
     buildLocationChips(data);
+    // Universumchips hangen af van live TMDb-data die apart geladen wordt.
+    // Is die er al, dan de index verversen (een bewerkte of nieuwe titel kan
+    // intussen bij een universum horen); anders vult loadUniverseData de index
+    // vanzelf zodra de data binnen is.
+    if (universeData) buildUniverseIndex();
+    else buildUniverseChips();
   }
 
   function buildLetterChips() {
@@ -547,6 +601,7 @@ function initCollectionApp(config) {
       s(state.activeCerts),
       s(state.activeBoxsets),
       s(state.activeLocations),
+      s(state.activeUniverses),
       state.activeLetter || '',
       state.sort,
       state.view,
@@ -574,6 +629,10 @@ function initCollectionApp(config) {
       if (state.activeLocations.size) {
         const locs = (item.editions || []).map((e) => (e.location || '').trim()).filter(Boolean);
         if (!locs.some((l) => state.activeLocations.has(l))) return false;
+      }
+      if (state.activeUniverses.size) {
+        const belongs = universeByMovieId[item.id];
+        if (!belongs || ![...state.activeUniverses].some((u) => belongs.has(u))) return false;
       }
       if (state.activeTypes.size && !state.activeTypes.has(item.content_type)) return false;
       if (state.activeGenres.size) {
@@ -1323,10 +1382,36 @@ function initCollectionApp(config) {
         }
       }
       universeData = { universes, members };
+      buildUniverseIndex();
       return universeData;
     })();
 
     return universeLoading;
+  }
+
+  // Index per titel-id → set van universum-id's waar die titel bij hoort.
+  // Wordt gebruikt door het universumfilter op de collectiepagina en één keer
+  // opgebouwd nadat de ledenlijsten geladen zijn.
+  const universeByMovieId = {};
+
+  function buildUniverseIndex() {
+    if (!universeData) return;
+    Object.keys(universeByMovieId).forEach((k) => delete universeByMovieId[k]);
+
+    universeData.universes.forEach((u) => {
+      const members = universeData.members[u.id];
+      if (!members) return;
+      const matcher = buildOwnedMatcher(state.all);
+      members.items.forEach((part) => {
+        const mine = matcher(part);
+        if (!mine) return;
+        (universeByMovieId[mine.id] = universeByMovieId[mine.id] || new Set()).add(u.id);
+      });
+    });
+
+    // Nu de index klaar is: de filterchips opbouwen en het filter toepassen.
+    buildUniverseChips();
+    if (state.activeUniverses.size) applyFilters();
   }
 
   async function showUniverses(item) {
@@ -1384,6 +1469,7 @@ function initCollectionApp(config) {
       state.activeCerts.size +
       state.activeBoxsets.size +
       state.activeLocations.size +
+      state.activeUniverses.size +
       (state.activeLetter ? 1 : 0) +
       (state.search.trim() ? 1 : 0)
     );
@@ -1415,6 +1501,7 @@ function initCollectionApp(config) {
     state.activeCerts.clear();
     state.activeBoxsets.clear();
     state.activeLocations.clear();
+    state.activeUniverses.clear();
     state.activeLetter = null;
     state.search = '';
     if (els.search) els.search.value = '';
