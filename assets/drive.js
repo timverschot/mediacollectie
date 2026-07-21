@@ -20,6 +20,122 @@
  *   <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
  */
 
+/* ==========================================================================
+ * Gedeelde gegevensstructuur (fase 8)
+ * ==========================================================================
+ * Een titel kan meerdere fysieke exemplaren hebben: dezelfde film op DVD én
+ * op 4K. Die staan in `editions`. Alles wat bij de FILM hoort (titel, cast,
+ * bekeken, seizoenen) blijft op het hoofdniveau; alles wat bij een SCHIJF
+ * hoort (formaat, opmerkingen, hoesfoto's, boxset, verlanglijst) zit per
+ * exemplaar.
+ *
+ * Oude titels hebben nog geen `editions`. Die worden bij het laden in het
+ * geheugen omgezet (normalizeMovieEntry). Er wordt pas naar Drive geschreven
+ * wanneer je die titel effectief bewerkt — zo gebeurt de overgang geleidelijk
+ * en kan een fout nooit je hele collectie in één keer raken.
+ * ========================================================================== */
+
+// Alle formaten, van hoogste naar laagste kwaliteit.
+const MEDIA_FORMATS = [
+  { value: '4k', label: '4K UHD', short: '4K', rank: 6, color: '#C9A227' },
+  { value: 'bluray3d', label: '3D Blu-ray', short: '3D', rank: 5, color: '#4FB3C9' },
+  { value: 'bluray', label: 'Blu-ray', short: 'BD', rank: 4, color: '#2FA4A9' },
+  { value: 'dvd', label: 'DVD', short: 'DVD', rank: 3, color: '#8B8A92' },
+  { value: 'laserdisc', label: 'Laserdisc', short: 'LD', rank: 2, color: '#9C7B5C' },
+  { value: 'vhs', label: 'VHS', short: 'VHS', rank: 1, color: '#7A6E62' },
+];
+
+const FORMAT_BY_VALUE = {};
+MEDIA_FORMATS.forEach((f) => { FORMAT_BY_VALUE[f.value] = f; });
+
+function formatLabel(value) {
+  return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].label) || value || '';
+}
+function formatShort(value) {
+  return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].short) || value || '';
+}
+function formatColor(value) {
+  return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].color) || '#8B8A92';
+}
+function formatRank(value) {
+  return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].rank) || 0;
+}
+
+// Zorgt dat een titel altijd een `editions`-lijst heeft. Wijzigt het object
+// ter plaatse en geeft het terug. Veilig om meermaals aan te roepen.
+function normalizeMovieEntry(m) {
+  if (!m || typeof m !== 'object') return m;
+
+  if (!Array.isArray(m.editions) || m.editions.length === 0) {
+    // Omzetten van de oude structuur: de losse velden vormen samen één exemplaar.
+    m.editions = [
+      {
+        eid: 'e1',
+        format: m.format || 'bluray',
+        notes: m.notes || '',
+        boxset: '',
+        steelbook: false,
+        wishlist: !!m.wishlist,
+        date_added: m.date_added || '',
+        custom_front_cover_id: m.custom_front_cover_id || '',
+        custom_back_cover_id: m.custom_back_cover_id || '',
+        custom_front_cover: m.custom_front_cover || '',
+        custom_back_cover: m.custom_back_cover || '',
+      },
+    ];
+  } else {
+    // Ontbrekende velden binnen bestaande exemplaren aanvullen.
+    m.editions.forEach((ed, i) => {
+      if (!ed.eid) ed.eid = 'e' + (i + 1);
+      if (!ed.format) ed.format = 'bluray';
+      if (typeof ed.wishlist !== 'boolean') ed.wishlist = false;
+      if (typeof ed.steelbook !== 'boolean') ed.steelbook = false;
+      if (ed.notes == null) ed.notes = '';
+      if (ed.boxset == null) ed.boxset = '';
+    });
+  }
+
+  // De oude velden blijven meelopen als spiegel van het 'beste' exemplaar,
+  // zodat oudere code en bestaande prijsgegevens blijven kloppen.
+  syncLegacyFieldsFromEditions(m);
+  return m;
+}
+
+// Het representatieve exemplaar: het beste formaat dat je écht bezit,
+// anders het beste van de verlanglijst.
+function primaryEdition(m) {
+  const eds = (m && m.editions) || [];
+  if (!eds.length) return null;
+  const owned = eds.filter((e) => !e.wishlist);
+  const pool = owned.length ? owned : eds;
+  return pool.reduce((best, e) => (formatRank(e.format) > formatRank(best.format) ? e : best), pool[0]);
+}
+
+function syncLegacyFieldsFromEditions(m) {
+  const p = primaryEdition(m);
+  if (!p) return;
+  m.format = p.format;
+  m.notes = p.notes;
+  m.custom_front_cover_id = p.custom_front_cover_id || '';
+  m.custom_back_cover_id = p.custom_back_cover_id || '';
+  m.custom_front_cover = p.custom_front_cover || '';
+  m.custom_back_cover = p.custom_back_cover || '';
+  // Een titel staat op de verlanglijst zolang je er geen enkel exemplaar van bezit.
+  m.wishlist = m.editions.every((e) => e.wishlist);
+  if (!m.date_added) {
+    const dates = m.editions.map((e) => e.date_added).filter(Boolean).sort();
+    if (dates.length) m.date_added = dates[0];
+  }
+}
+
+// Volgend vrij exemplaar-id binnen een titel.
+function nextEditionId(m) {
+  const used = new Set(((m && m.editions) || []).map((e) => e.eid));
+  let n = 1;
+  while (used.has('e' + n)) n++;
+  return 'e' + n;
+}
+
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_TOKEN_CACHE_KEY = 'mediacollectie_drive_token';
 
@@ -344,7 +460,11 @@ async function driveSaveNamedFile(name, obj) {
 async function driveLoadMovies() {
   const fileId = await driveGetOrCreateFileId('movies.json', []);
   const movies = await driveReadJsonFile(fileId);
-  return { movies: Array.isArray(movies) ? movies : [] };
+  const list = Array.isArray(movies) ? movies : [];
+  // Altijd normaliseren: elke titel krijgt een exemplarenlijst. Dit gebeurt
+  // enkel in het geheugen — naar Drive wordt pas geschreven bij een bewerking.
+  list.forEach(normalizeMovieEntry);
+  return { movies: list };
 }
 
 // ---------- Offline-kopie van de collectie (fase 6) ----------
