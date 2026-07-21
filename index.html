@@ -74,6 +74,75 @@
 <style>
   body { background-color: #14141A; }
 
+  /* ---------- Fase 20: beweging, diepte en sfeer ---------- */
+
+  /* Sfeerlicht dat meekleurt met de poster waar je overheen zweeft. Eén laag
+     achter het raster; puur CSS-kleur, dus geen invloed op de snelheid. */
+  #ambient-glow {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .55s ease, background .55s ease;
+    background: radial-gradient(55% 45% at 50% 22%, var(--amb, #C9A22700), transparent 70%);
+  }
+  main, header, .sticky { position: relative; z-index: 1; }
+
+  /* Getrapte verschijning: kaarten komen zacht omhoog i.p.v. hard in te ploppen. */
+  .reveal { opacity: 0; transform: translateY(14px); }
+  .reveal.in { opacity: 1; transform: none; transition: opacity .5s ease, transform .5s cubic-bezier(.2,.7,.2,1); }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal, .reveal.in { opacity: 1 !important; transform: none !important; transition: none !important; }
+  }
+
+  /* Poster licht op en vergroot licht bij hover. */
+  .case-card .poster-wrap { transition: transform .28s cubic-bezier(.2,.7,.2,1), box-shadow .28s ease; will-change: transform; }
+  @media (hover: hover) {
+    .case-card:hover .poster-wrap { transform: translateY(-7px) scale(1.035); box-shadow: 0 16px 32px rgba(0,0,0,.5); }
+  }
+
+  /* Skeleton-shimmer terwijl een poster laadt. */
+  .poster-skel {
+    position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(100deg,#1c1c24 30%,#2a2a34 50%,#1c1c24 70%);
+    background-size: 200% 100%; animation: posterShimmer 1.15s linear infinite;
+  }
+  @keyframes posterShimmer { 0%{background-position:180% 0} 100%{background-position:-80% 0} }
+
+  /* Snelblik: score, formaten en status schuiven omhoog bij hover. */
+  .peek {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    padding: 10px 9px 9px;
+    background: linear-gradient(to top, rgba(8,8,12,.96), rgba(8,8,12,.72) 62%, transparent);
+    transform: translateY(101%);
+    transition: transform .28s cubic-bezier(.2,.7,.2,1);
+  }
+  @media (hover: hover) { .case-card:hover .peek { transform: translateY(0); } }
+  @media (hover: none) { .peek { display: none; } }
+  .peek-top { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px; }
+  .peek-star { font-family:'JetBrains Mono',monospace; font-size:11px; color:#C9A227; font-weight:600; }
+  .peek-fmt { font-family:'JetBrains Mono',monospace; font-size:9.5px; color:#F2F0EA; }
+  .peek-tag { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:8.5px; text-transform:uppercase; letter-spacing:.04em; border:1px solid rgba(47,164,169,.55); color:#2FA4A9; border-radius:9999px; padding:2px 7px; }
+  .peek-tag.unseen { border-color: rgba(139,138,146,.5); color:#8B8A92; }
+
+  /* Pop-ups openen met een korte veerbeweging. */
+  #detail-modal:not(.hidden) > div,
+  #person-modal:not(.hidden) > div,
+  #episode-modal:not(.hidden) > div { animation: modalPop .3s cubic-bezier(.2,.8,.2,1); }
+  @keyframes modalPop { from { opacity:0; transform: translateY(10px) scale(.985); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { #detail-modal>div,#person-modal>div,#episode-modal>div { animation: none !important; } }
+
+  /* Plankweergave (cover-flow). Slidebreedte via variabele, kleiner op gsm. */
+  :root { --shelf-item: 220px; }
+  @media (max-width: 640px) { :root { --shelf-item: 150px; } #shelf-stage { height: 360px !important; } }
+  #shelf-stage { position: relative; z-index: 1; height: 460px; display: flex; align-items: center; overflow: hidden; }
+  #shelf-track { display: flex; align-items: center; transition: transform .45s cubic-bezier(.2,.7,.2,1); will-change: transform; }
+  .shelf-slide { flex: 0 0 var(--shelf-item); padding: 0 10px; transition: transform .45s cubic-bezier(.2,.7,.2,1), opacity .45s ease; transform-origin: center; cursor: pointer; }
+  .shelf-nav { position:absolute; top:50%; transform:translateY(-50%); z-index:4; width:44px; height:44px; border-radius:9999px; background:rgba(20,20,26,.72); border:1px solid rgba(242,240,234,.15); color:#F2F0EA; font-size:24px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .shelf-nav.prev { left:12px; } .shelf-nav.next { right:12px; }
+  #shelf-meta { position:absolute; left:0; right:0; bottom:14px; z-index:3; text-align:center; padding:0 1rem; }
+
   /* ---------- Mobiel & geïnstalleerde app (fase 6) ---------- */
 
   /* Ruimte vrijhouden voor de notch en de home-balk wanneer de app
@@ -397,6 +466,10 @@
 </head>
 <body class="font-body text-ink min-h-screen">
 
+  <!-- Sfeerlicht: kleurt mee met de poster waar je overheen zweeft -->
+  <div id="ambient-glow"></div>
+
+
   <!-- Kop -->
   <header class="border-b border-white/5">
     <div class="sprocket-strip h-2 w-full opacity-60"></div>
@@ -444,6 +517,7 @@
         </select>
         <div id="view-chips" class="flex gap-1 shrink-0" role="group" aria-label="Weergave">
           <button type="button" class="chip" data-view="grid" title="Posterraster">▦</button>
+          <button type="button" class="chip" data-view="shelf" title="Plank — filmische cover-flow">▤▤</button>
           <button type="button" class="chip" data-view="compact" title="Compacte lijst met kleine afbeeldingen">▤</button>
           <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen">≡</button>
         </div>
@@ -517,6 +591,14 @@
   <!-- Grid -->
   <main class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-6 2xl:px-10 py-10">
     <div id="grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-5 gap-y-8"></div>
+
+    <!-- Plankweergave (cover-flow), verborgen tot je erop schakelt -->
+    <div id="shelf-stage" class="hidden">
+      <button type="button" class="shelf-nav prev" data-shelf-prev aria-label="Vorige">‹</button>
+      <div id="shelf-track"></div>
+      <button type="button" class="shelf-nav next" data-shelf-next aria-label="Volgende">›</button>
+      <div id="shelf-meta"></div>
+    </div>
 
     <p id="empty-state" class="hidden text-center text-muted py-20 font-body">
       Geen titels gevonden met deze filters. Pas je zoekopdracht of filters aan.
