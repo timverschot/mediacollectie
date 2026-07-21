@@ -30,6 +30,38 @@ function initAddTitleUI(onSaved) {
     if (e.key === 'Enter') addTitleDoSearch();
   });
   document.getElementById('add-form').addEventListener('submit', addTitleSubmit);
+
+  // Formaatkeuze opbouwen uit de gedeelde lijst (drive.js), zodat er maar één
+  // plek is waar formaten gedefinieerd staan.
+  const formatSel = document.getElementById('form-format');
+  if (formatSel && typeof MEDIA_FORMATS !== 'undefined') {
+    formatSel.innerHTML = MEDIA_FORMATS.map(
+      (f) => `<option value="${f.value}"${f.value === 'bluray' ? ' selected' : ''}>${addTitleEscapeHtml(f.label)}</option>`
+    ).join('');
+  }
+
+  const bulkBtn = document.getElementById('saga-bulk-btn');
+  if (bulkBtn) bulkBtn.addEventListener('click', addTitleAddWholeSaga);
+}
+
+// Bouwt één exemplaar op basis van wat er in het formulier staat.
+function addTitleBuildEdition(eid, coverIds) {
+  const boxsetEl = document.getElementById('form-boxset');
+  const steelEl = document.getElementById('form-steelbook');
+  const ownedSelect = document.getElementById('form-owned');
+  return {
+    eid: eid || 'e1',
+    format: document.getElementById('form-format').value,
+    notes: document.getElementById('form-notes').value.trim(),
+    boxset: boxsetEl ? boxsetEl.value.trim() : '',
+    steelbook: steelEl ? steelEl.checked : false,
+    wishlist: ownedSelect ? ownedSelect.value === 'wishlist' : false,
+    date_added: new Date().toISOString().slice(0, 10),
+    custom_front_cover_id: (coverIds && coverIds.front) || '',
+    custom_back_cover_id: (coverIds && coverIds.back) || '',
+    custom_front_cover: '',
+    custom_back_cover: '',
+  };
 }
 
 function addTitleEscapeHtml(str) {
@@ -104,15 +136,32 @@ async function addTitleSelectResult(r) {
     const existing = movies.find((m) => m.id === slug);
     if (existing && addTitleSelectedDetails && slugify(addTitleSelectedDetails.title, addTitleSelectedDetails.release_year) === slug) {
       addTitleExistingEntry = existing;
-      statusEl.textContent = `⚠ Staat al in je collectie (toegevoegd op ${existing.date_added || 'onbekende datum'}). Opslaan werkt de bestaande titel bij.`;
+      normalizeMovieEntry(existing);
+      const have = existing.editions.map((e) => formatLabel(e.format)).join(', ');
+      statusEl.textContent =
+        `⚠ Deze titel heb je al op ${have}. Kies hieronder een ánder formaat om een tweede exemplaar toe te voegen ` +
+        `— of hetzelfde formaat om dat exemplaar bij te werken.`;
       statusEl.className = 'text-sm font-mono text-gold';
-      // Formulier alvast invullen met de bestaande gegevens, zodat je niets kwijtraakt.
-      document.getElementById('form-format').value = existing.format || 'bluray';
+
+      // Een formaat voorstellen dat je nog niet hebt.
+      const used = new Set(existing.editions.map((e) => e.format));
+      const suggestion = MEDIA_FORMATS.map((f) => f.value).find((v) => !used.has(v));
+      if (suggestion) document.getElementById('form-format').value = suggestion;
+
       document.getElementById('form-content-type').value = existing.content_type || document.getElementById('form-content-type').value;
       document.getElementById('form-watched').checked = !!existing.watched;
-      document.getElementById('form-notes').value = existing.notes || '';
-      const ownedSelect = document.getElementById('form-owned');
-      if (ownedSelect) ownedSelect.value = existing.wishlist ? 'wishlist' : 'owned';
+    }
+
+    // Hoort deze titel bij een officiële reeks? Dan kan je alle delen in
+    // één keer toevoegen.
+    const bulk = document.getElementById('saga-bulk');
+    if (bulk) {
+      const hasSaga = !!(addTitleSelectedDetails && addTitleSelectedDetails.saga_id);
+      bulk.classList.toggle('hidden', !hasSaga);
+      if (hasSaga) {
+        document.getElementById('saga-bulk-name').textContent = addTitleSelectedDetails.saga || 'deze reeks';
+        document.getElementById('saga-bulk-status').textContent = '';
+      }
     }
   } catch (err) {
     console.warn('Duplicaat-check mislukt:', err);
@@ -151,17 +200,112 @@ function addTitleRenderSeasonPicker(seasons) {
   });
 }
 
+/**
+ * Voegt alle delen van de reeks waartoe de gekozen titel behoort in één keer
+ * toe. Handig voor boxsets: je scant niet vier keer hetzelfde doosje.
+ *
+ * Delen die je al hebt worden overgeslagen. Het formaat, de boxsetnaam en de
+ * status komen uit het formulier hierboven, zodat je die maar één keer invult.
+ */
+async function addTitleAddWholeSaga() {
+  const details = addTitleSelectedDetails;
+  if (!details || !details.saga_id) return;
+
+  const c = getConfig();
+  const btn = document.getElementById('saga-bulk-btn');
+  const status = document.getElementById('saga-bulk-status');
+  const setStatus = (text, cls) => {
+    status.textContent = text;
+    status.className = 'text-xs font-mono mt-2 ' + (cls || 'text-muted');
+  };
+
+  btn.disabled = true;
+  setStatus('Delen van de reeks ophalen…');
+
+  try {
+    const collection = await tmdbCollection(details.saga_id, c.tmdbKey);
+    const parts = collection.parts || [];
+    if (!parts.length) {
+      setStatus('Geen delen gevonden.', 'text-gold');
+      return;
+    }
+
+    const { movies } = await driveLoadMovies();
+    const haveByTmdb = {};
+    movies.forEach((m) => {
+      if (m.tmdb_id) haveByTmdb[String(m.tmdb_id)] = m;
+    });
+
+    const todo = parts.filter((p) => !haveByTmdb[String(p.tmdb_id)]);
+    if (!todo.length) {
+      setStatus('Je hebt alle delen van deze reeks al.', 'text-teal');
+      return;
+    }
+
+    if (!confirm(
+      `${todo.length} van de ${parts.length} delen ontbreken nog:\n\n` +
+      todo.map((p) => `• ${p.title}${p.release_year ? ' (' + p.release_year + ')' : ''}`).join('\n') +
+      `\n\nAlle ${todo.length} toevoegen met het formaat en de boxset uit het formulier?`
+    )) {
+      return;
+    }
+
+    const entries = [];
+    for (let i = 0; i < todo.length; i++) {
+      const part = todo[i];
+      setStatus(`(${i + 1}/${todo.length}) ${part.title}…`);
+      try {
+        const partDetails = await tmdbDetails(part.tmdb_id, 'movie', c.tmdbKey);
+        const entry = {
+          id: slugify(partDetails.title, partDetails.release_year),
+          content_type: 'movie',
+          date_added: new Date().toISOString().slice(0, 10),
+          watched: false,
+          editions: [addTitleBuildEdition('e1', null)],
+          ...partDetails,
+          seasons: [],
+        };
+        normalizeMovieEntry(entry);
+        entries.push(entry);
+      } catch (err) {
+        console.warn('Deel overslaan:', part.title, err);
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    if (!entries.length) {
+      setStatus('Geen enkel deel kon opgehaald worden.', 'text-red-400');
+      return;
+    }
+
+    setStatus('Opslaan naar Drive…');
+    await upsertMoviesBatchInDrive(entries);
+    setStatus(`✓ ${entries.length} delen toegevoegd.`, 'text-teal');
+    if (addTitleOnSaved) addTitleOnSaved(entries[0]);
+  } catch (err) {
+    setStatus('✗ ' + err.message, 'text-red-400');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function addTitleSubmit(e) {
   e.preventDefault();
   const statusEl = document.getElementById('form-status');
   const submitBtn = document.getElementById('submit-btn');
 
-  // Duplicaat: expliciete bevestiging vóór overschrijven.
+  // Titel bestaat al: bevestigen of we een exemplaar toevoegen dan wel bijwerken.
   if (addTitleExistingEntry) {
+    normalizeMovieEntry(addTitleExistingEntry);
+    const chosen = document.getElementById('form-format').value;
+    const already = addTitleExistingEntry.editions.some((e) => e.format === chosen);
     const ok = confirm(
-      `"${addTitleSelectedDetails.title}" staat al in je collectie.\n\n` +
-      `Wil je de bestaande gegevens bijwerken met wat nu in het formulier staat?\n` +
-      `(Bestaande hoesfoto's blijven behouden als je geen nieuwe koos; de oorspronkelijke toevoegdatum blijft staan.)`
+      already
+        ? `Je hebt "${addTitleSelectedDetails.title}" al op ${formatLabel(chosen)}.\n\n` +
+            `Dat exemplaar bijwerken met wat nu in het formulier staat?`
+        : `"${addTitleSelectedDetails.title}" staat al in je collectie.\n\n` +
+            `${formatLabel(chosen)} toevoegen als extra exemplaar?\n` +
+            `(Je bestaande exemplaren en hun hoesfoto's blijven ongemoeid.)`
     );
     if (!ok) return;
   }
@@ -205,24 +349,45 @@ async function addTitleSubmit(e) {
     }
 
     const existing = addTitleExistingEntry;
-    const ownedSelect = document.getElementById('form-owned');
-    const entry = {
-      id: slug,
-      content_type: document.getElementById('form-content-type').value,
-      format: document.getElementById('form-format').value,
-      wishlist: ownedSelect ? ownedSelect.value === 'wishlist' : false,
-      // Bij bijwerken blijft de oorspronkelijke toevoegdatum behouden.
-      date_added: (existing && existing.date_added) || new Date().toISOString().slice(0, 10),
-      watched: document.getElementById('form-watched').checked,
-      notes: document.getElementById('form-notes').value.trim(),
-      // Geen nieuwe foto gekozen? Dan blijven eventuele bestaande hoesfoto's staan.
-      custom_front_cover_id: frontCoverId || (existing && existing.custom_front_cover_id) || '',
-      custom_back_cover_id: backCoverId || (existing && existing.custom_back_cover_id) || '',
-      custom_front_cover: frontCoverId ? '' : (existing && existing.custom_front_cover) || '',
-      custom_back_cover: backCoverId ? '' : (existing && existing.custom_back_cover) || '',
-      ...addTitleSelectedDetails,
-      seasons,
-    };
+    let entry;
+
+    if (existing) {
+      // Titel bestaat al: het formulier voegt een EXTRA exemplaar toe
+      // (bv. je had de DVD, nu koop je de 4K) in plaats van alles te
+      // overschrijven. Bestaat dat formaat al, dan werken we dat exemplaar bij.
+      normalizeMovieEntry(existing);
+      const newEdition = addTitleBuildEdition(nextEditionId(existing), { front: frontCoverId, back: backCoverId });
+      const sameFormat = existing.editions.find((e) => e.format === newEdition.format);
+      if (sameFormat) {
+        sameFormat.notes = newEdition.notes;
+        sameFormat.boxset = newEdition.boxset;
+        sameFormat.steelbook = newEdition.steelbook;
+        sameFormat.wishlist = newEdition.wishlist;
+        if (frontCoverId) sameFormat.custom_front_cover_id = frontCoverId;
+        if (backCoverId) sameFormat.custom_back_cover_id = backCoverId;
+      } else {
+        existing.editions.push(newEdition);
+      }
+
+      entry = existing;
+      entry.content_type = document.getElementById('form-content-type').value;
+      entry.watched = document.getElementById('form-watched').checked;
+      if (seasons.length) entry.seasons = seasons;
+      // TMDb-gegevens verversen, persoonlijke keuzes behouden.
+      if (typeof applyTmdbFields === 'function') applyTmdbFields(entry, addTitleSelectedDetails);
+      syncLegacyFieldsFromEditions(entry);
+    } else {
+      entry = {
+        id: slug,
+        content_type: document.getElementById('form-content-type').value,
+        date_added: new Date().toISOString().slice(0, 10),
+        watched: document.getElementById('form-watched').checked,
+        editions: [addTitleBuildEdition('e1', { front: frontCoverId, back: backCoverId })],
+        ...addTitleSelectedDetails,
+        seasons,
+      };
+      normalizeMovieEntry(entry);
+    }
 
     statusEl.textContent = 'movies.json bijwerken in Drive...';
     const status = await upsertMovieInDrive(entry);
