@@ -400,6 +400,11 @@
           <option value="year_desc">Releasejaar (nieuw–oud)</option>
           <option value="year_asc">Releasejaar (oud–nieuw)</option>
         </select>
+        <div id="view-chips" class="flex gap-1 shrink-0" role="group" aria-label="Weergave">
+          <button type="button" class="chip" data-view="grid" title="Posterraster">▦</button>
+          <button type="button" class="chip" data-view="compact" title="Compacte lijst met kleine afbeeldingen">▤</button>
+          <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen">≡</button>
+        </div>
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
         <button id="filter-toggle" type="button" class="chip sm:hidden">Filters ▾</button>
       </div>
@@ -518,12 +523,21 @@
             <a data-field="imdb-link" href="#" target="_blank" rel="noopener" class="hidden chip">IMDb</a>
           </div>
           <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Genres</span><br><span data-field="genres"></span></p>
-          <div class="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+          <!-- Terugval voor titels die nog niet ververst zijn: platte tekst -->
+          <div data-field="crew-fallback" class="grid sm:grid-cols-2 gap-x-4 gap-y-2">
             <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Regisseur</span><br><span data-field="director"></span></p>
             <p class="text-sm" data-field="writers-wrap"><span class="text-muted font-mono uppercase text-xs">Scenario</span><br><span data-field="writers"></span></p>
             <p class="text-sm" data-field="composer-wrap"><span class="text-muted font-mono uppercase text-xs">Muziek</span><br><span data-field="composer"></span></p>
-            <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Reeks</span><br><span data-field="saga"></span></p>
           </div>
+
+          <!-- Klikbare crew (na een TMDb-verversing) -->
+          <div data-field="crew-block" class="hidden">
+            <p class="text-muted font-mono uppercase text-xs mb-2">Crew</p>
+            <div data-field="crew-list" class="flex flex-wrap gap-x-5 gap-y-1.5"></div>
+          </div>
+
+          <p class="text-sm"><span class="text-muted font-mono uppercase text-xs">Reeks</span><br><span data-field="saga"></span></p>
+
           <div>
             <p class="text-muted font-mono uppercase text-xs mb-2">Cast</p>
             <div data-field="cast-list" class="flex gap-3 overflow-x-auto pb-1"></div>
@@ -727,6 +741,48 @@
         <button data-group-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
       </div>
       <div data-group-grid class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3"></div>
+    </div>
+  </div>
+
+  <!-- Personenmodaal: profiel + volledige filmografie, met wat je ervan bezit -->
+  <div id="person-modal" class="hidden fixed inset-0 z-[55] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-4xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
+      <div class="relative">
+        <button data-person-close aria-label="Sluiten"
+          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+      </div>
+
+      <div class="px-4 sm:px-6 pt-4 pb-8">
+        <div class="grid sm:grid-cols-[150px_minmax(0,1fr)] gap-5">
+          <div class="min-w-0">
+            <div class="w-32 sm:w-full max-w-[150px] aspect-[2/3] rounded-lg overflow-hidden bg-bg ring-1 ring-white/10 mx-auto sm:mx-0">
+              <img data-person-photo src="" alt="" class="w-full h-full object-cover">
+            </div>
+          </div>
+          <div class="min-w-0 space-y-2">
+            <h2 data-person-name class="font-display text-3xl sm:text-4xl tracking-wide text-ink"></h2>
+            <p data-person-meta class="text-sm text-muted font-mono"></p>
+            <p data-person-owned class="font-mono text-sm text-gold"></p>
+            <p data-person-bio class="text-sm leading-relaxed text-ink/90"></p>
+            <button type="button" data-person-bio-toggle class="hidden chip">Meer lezen</button>
+          </div>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-white/10">
+          <div class="flex flex-wrap gap-2 items-center mb-3">
+            <span class="text-xs font-mono text-muted uppercase mr-1">Filmografie</span>
+            <button type="button" class="chip chip-active" data-person-filter="all">Alles</button>
+            <button type="button" class="chip" data-person-filter="owned">In bezit</button>
+            <button type="button" class="chip" data-person-filter="missing">Nog niet</button>
+          </div>
+          <div data-person-credits class="space-y-1"></div>
+          <button type="button" data-person-more class="hidden chip mt-3">Toon meer</button>
+          <div data-person-appearances-wrap class="hidden mt-4 pt-3 border-t border-white/5">
+            <button type="button" data-person-appearances-toggle class="chip">Gastoptredens als zichzelf tonen</button>
+            <div data-person-appearances class="hidden space-y-1 mt-2"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
