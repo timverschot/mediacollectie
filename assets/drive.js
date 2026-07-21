@@ -284,6 +284,55 @@ async function driveLoadMovies() {
   return { movies: Array.isArray(movies) ? movies : [] };
 }
 
+// ---------- Offline-kopie van de collectie (fase 6) ----------
+// Na elke geslaagde download bewaren we de collectie lokaal. Kan de app Drive
+// niet bereiken (geen verbinding, of net geen geldig token), dan tonen we die
+// kopie in plaats van een foutmelding.
+//
+// Belangrijk: deze kopie wordt UITSLUITEND gebruikt om te tónen. Alle
+// schrijfacties gaan via driveLoadMovies() en dus altijd langs de echte Drive —
+// zo kan een verouderde kopie nooit je collectie overschrijven.
+
+const MOVIES_CACHE_KEY = 'mediacollectie_movies_cache';
+
+function _cacheMoviesLocally(movies) {
+  try {
+    localStorage.setItem(
+      MOVIES_CACHE_KEY,
+      JSON.stringify({ saved_at: new Date().toISOString(), movies })
+    );
+  } catch {
+    // Opslag vol of geblokkeerd: offline tonen werkt dan niet, verder niets aan de hand.
+  }
+}
+
+function driveCachedMovies() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MOVIES_CACHE_KEY) || 'null');
+    if (raw && Array.isArray(raw.movies)) return raw;
+  } catch {}
+  return null;
+}
+
+/**
+ * Laadt de collectie om te tónen: eerst van Drive, met terugval op de laatst
+ * bewaarde kopie. Geeft { movies, offline, saved_at } terug.
+ */
+async function driveLoadMoviesForDisplay() {
+  try {
+    const { movies } = await driveLoadMovies();
+    _cacheMoviesLocally(movies);
+    return { movies, offline: false, saved_at: null };
+  } catch (err) {
+    const cached = driveCachedMovies();
+    if (cached) {
+      console.warn('Drive onbereikbaar, laatst bewaarde collectie getoond:', err);
+      return { movies: cached.movies, offline: true, saved_at: cached.saved_at };
+    }
+    throw err;
+  }
+}
+
 async function upsertMovieInDrive(entry) {
   return withWriteLock(async () => {
     const { movies } = await driveLoadMovies();
