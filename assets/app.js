@@ -41,7 +41,42 @@ function pageSizeForView(view) {
   return view === 'text' ? 400 : view === 'compact' ? 150 : PAGE_SIZE;
 }
 
+/**
+ * Controleert of de andere bestanden bij deze versie van app.js horen.
+ * Bij een halve upload (bv. wel app.js, niet drive.js) krijg je anders een
+ * cryptische melding als "X is not defined" die niets zegt over de oorzaak.
+ */
+function checkAssetVersions() {
+  const missing = [];
+  if (typeof MEDIA_FORMATS === 'undefined' || typeof normalizeMovieEntry === 'undefined') {
+    missing.push('assets/drive.js');
+  }
+  if (typeof tmdbPerson === 'undefined' || typeof applyTmdbFields === 'undefined') {
+    missing.push('assets/admin.js');
+  }
+  return missing;
+}
+
 function initCollectionApp(config) {
+  const outdated = checkAssetVersions();
+  if (outdated.length) {
+    const grid = document.getElementById('grid');
+    if (grid) {
+      grid.innerHTML =
+        '<div class="col-span-full text-center py-16 px-6">' +
+        '<p class="text-[#C9A227] font-mono text-sm mb-3">Bestanden komen niet overeen</p>' +
+        '<p class="text-[#F2F0EA] mb-2">Deze versie van <code>assets/app.js</code> heeft een nieuwere ' +
+        outdated.map((f) => '<code>' + f + '</code>').join(' en ') +
+        ' nodig.</p>' +
+        '<p class="text-[#8B8A92] text-sm">Upload ' +
+        (outdated.length === 1 ? 'dat bestand' : 'die bestanden') +
+        ' opnieuw en herlaad met Ctrl+Shift+R.</p>' +
+        '</div>';
+    }
+    console.error('Verouderde bestanden:', outdated.join(', '));
+    return;
+  }
+
   const state = {
     all: [],
     filtered: [],
@@ -104,6 +139,17 @@ function initCollectionApp(config) {
 
   // Sorteertitel: lidwoorden vooraan negeren ("The Matrix" → "matrix"),
   // accenten weglaten. Gebruikt voor alfabetisch sorteren én het letterfilter.
+  // Zelfde normalisatie als sortTitle, maar op een losse tekst — nodig om
+  // titels uit TMDb te vergelijken met titels uit je collectie.
+  function normalizeTitleText(text) {
+    return String(text || '')
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/^(the|a|an|de|het|een|le|la|les|l')\s+/i, '')
+      .toLowerCase()
+      .trim();
+  }
+
   function sortTitle(item) {
     return String(item.title || '')
       .normalize('NFKD')
@@ -1143,6 +1189,79 @@ function initCollectionApp(config) {
     }
 
     showSagaCompleteness(item);
+    showUniverses(item);
+  }
+
+  // ---------- Universums in de detailweergave ----------
+
+  // Universums en hun ledenlijsten worden één keer per bezoek geladen. Zolang
+  // dat loopt blijft het blok verborgen; het is bijzaak en mag de rest van de
+  // detailweergave niet ophouden.
+  let universeData = null;
+  let universeLoading = null;
+
+  function loadUniverseData() {
+    if (universeData) return Promise.resolve(universeData);
+    if (universeLoading) return universeLoading;
+
+    universeLoading = (async () => {
+      const c = typeof getConfig === 'function' ? getConfig() : {};
+      if (!c.tmdbKey || typeof driveLoadUniverses !== 'function') return { universes: [], members: {} };
+
+      const { universes } = await driveLoadUniverses();
+      const members = {};
+      for (const u of universes) {
+        try {
+          members[u.id] = await loadUniverseMembers(u, c.tmdbKey);
+        } catch (err) {
+          console.warn('Universum niet geladen:', u.name, err);
+        }
+      }
+      universeData = { universes, members };
+      return universeData;
+    })();
+
+    return universeLoading;
+  }
+
+  async function showUniverses(item) {
+    const section = els.modal.querySelector('[data-field="universe-section"]');
+    const list = els.modal.querySelector('[data-field="universe-list"]');
+    if (!section || !list) return;
+    section.classList.add('hidden');
+
+    const requestedFor = item.id;
+    let data;
+    try {
+      data = await loadUniverseData();
+    } catch {
+      return;
+    }
+    if (requestedFor !== currentModalId || !data.universes.length) return;
+
+    const matchOne = buildOwnedMatcher([item]);
+    const hits = data.universes.filter((u) => {
+      const m = data.members[u.id];
+      return m && m.items.some((part) => matchOne(part) === item);
+    });
+
+    if (!hits.length) return;
+
+    list.innerHTML = hits
+      .map((u) => {
+        const status = universeStatus(data.members[u.id].items, state.all);
+        const pct = status.total ? Math.round((status.owned / status.total) * 100) : 0;
+        return `
+          <div class="flex items-center justify-between gap-3">
+            <a href="universums.html" class="text-sm text-ink hover:text-gold underline decoration-white/20 underline-offset-2 truncate min-w-0">${escapeHtml(
+              u.name
+            )}</a>
+            <span class="font-mono text-xs text-gold shrink-0">${status.owned}/${status.total} · ${pct}%</span>
+          </div>`;
+      })
+      .join('');
+
+    section.classList.remove('hidden');
   }
 
   // ---------- Wat zullen we kijken? ----------
@@ -1767,22 +1886,57 @@ function initCollectionApp(config) {
 
     if (requestedFor !== currentModalId) return;
 
+    // Koppelen gebeurt op TMDb-id, maar dat lukt niet altijd: TMDb bevat soms
+    // meerdere records voor dezelfde film, en dan heeft jouw exemplaar een
+    // ander id dan het deel in de officiële reeks. Daarom vergelijken we ook
+    // op genormaliseerde titel met een jaar dat hooguit één jaar afwijkt.
     const ownedByTmdb = {};
+    const ownedByTitle = {};
     state.all.forEach((m) => {
       if (m.tmdb_id) ownedByTmdb[String(m.tmdb_id)] = m;
+      const key = normalizeTitleText(m.title);
+      (ownedByTitle[key] = ownedByTitle[key] || []).push(m);
     });
 
-    const parts = collection.parts || [];
-    const ownedCount = parts.filter((p) => {
-      const mine = ownedByTmdb[String(p.tmdb_id)];
-      return mine && !mine.wishlist;
-    }).length;
+    function findMine(part) {
+      const byId = ownedByTmdb[String(part.tmdb_id)];
+      if (byId) return byId;
+      const candidates = ownedByTitle[normalizeTitleText(part.title)] || [];
+      if (!candidates.length) return null;
+      return (
+        candidates.find(
+          (m) =>
+            !part.release_year ||
+            !m.release_year ||
+            Math.abs(m.release_year - part.release_year) <= 1
+        ) || null
+      );
+    }
 
-    progressEl.textContent = `${ownedCount}/${parts.length} in bezit`;
+    const parts = collection.parts || [];
+    const matched = new Set();
+
+    // Titels die jij onder dezelfde reeksnaam hebt gezet maar die TMDb niet in
+    // deze collectie heeft — bijvoorbeeld een andere uitgave of een deel dat
+    // TMDb elders onderbrengt.
+    const sagaName = sagaOf(item);
+    const extras = state.all.filter((m) => {
+      if (sagaOf(m) !== sagaName) return false;
+      return !parts.some((p) => findMine(p) === m);
+    });
+
+    const ownedCount =
+      parts.filter((p) => {
+        const mine = findMine(p);
+        return mine && !mine.wishlist;
+      }).length + extras.filter((m) => !m.wishlist).length;
+
+    progressEl.textContent = `${ownedCount}/${parts.length + extras.length} in bezit`;
 
     listEl.innerHTML = parts
       .map((p) => {
-        const mine = ownedByTmdb[String(p.tmdb_id)];
+        const mine = findMine(p);
+        if (mine) matched.add(mine.id);
         const owned = mine && !mine.wishlist;
         const onWishlist = mine && mine.wishlist;
         const year = p.release_year || '—';
@@ -1802,7 +1956,25 @@ function initCollectionApp(config) {
             <span class="shrink-0">${right}</span>
           </div>`;
       })
-      .join('');
+      .join('') +
+      (extras.length
+        ? `<div class="pt-2 mt-2 border-t border-white/5">
+             <p class="text-[11px] text-muted mb-1">Ook door jou bij deze reeks gezet:</p>
+             ${extras
+               .map(
+                 (m) => `
+                   <div class="flex items-center justify-between gap-2 text-sm">
+                     <span class="truncate min-w-0">${escapeHtml(m.title)} <span class="text-muted font-mono text-xs">(${
+                   m.release_year || '—'
+                 })</span></span>
+                     <span class="shrink-0 font-mono text-xs ${m.wishlist ? 'text-gold' : 'text-teal'}">${
+                   m.wishlist ? 'verlanglijst' : '✓ in bezit'
+                 }</span>
+                   </div>`
+               )
+               .join('')}
+           </div>`
+        : '');
 
     listEl.querySelectorAll('[data-saga-add]').forEach((btn) => {
       btn.addEventListener('click', () => {
