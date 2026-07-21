@@ -383,7 +383,6 @@ async function bulkBuildEntry(candidate, opts, apiKey) {
         notes: '',
         boxset: opts.boxset || '',
         location: opts.location || '',
-        steelbook: false,
         wishlist: !!opts.wishlist,
         date_added: today,
         custom_front_cover_id: '',
