@@ -853,7 +853,23 @@ function initCollectionApp(config) {
   // ---------- Plankweergave / cover-flow (fase 20) ----------
 
   let shelfActive = 0;
+  let shelfAnchor = null; // titel/reeks waarop de plank moet openen na wissel vanuit het raster
   const SHELF_PAD = 20; // 10px links + rechts
+
+  // Onthoudt welke kaart bovenaan in beeld staat, zodat de plank dáár opent
+  // in plaats van waar hij de vorige keer bleef staan.
+  function captureShelfAnchor() {
+    if (!els.grid) return;
+    const cards = els.grid.querySelectorAll('[data-open-id],[data-open-group]');
+    let best = null, bestTop = Infinity;
+    cards.forEach((c) => {
+      const r = c.getBoundingClientRect();
+      // Kaart die (deels) onder de vaste kop staat en het hoogst in beeld is.
+      if (r.bottom > 120 && r.top < bestTop) { bestTop = r.top; best = c; }
+    });
+    if (!best && cards.length) best = cards[0];
+    shelfAnchor = best ? { id: best.dataset.openId || null, group: best.dataset.openGroup || null } : null;
+  }
 
   // Leest de actuele slidebreedte uit de CSS-variabele, zodat de centrering
   // klopt op zowel breedbeeld als gsm.
@@ -880,6 +896,16 @@ function initCollectionApp(config) {
     els.empty.classList.toggle('hidden', state.filtered.length !== 0);
 
     shelfUnits = units;
+    // Kom je vanuit het raster, open de plank dan op de titel die je daar zag.
+    if (shelfAnchor) {
+      const idx = units.findIndex((u) =>
+        shelfAnchor.group
+          ? u.type === 'group' && u.saga === shelfAnchor.group
+          : u.type !== 'group' && u.item.id === shelfAnchor.id
+      );
+      if (idx >= 0) shelfActive = idx;
+      shelfAnchor = null;
+    }
     if (shelfActive >= units.length) shelfActive = 0;
 
     els.shelfTrack.innerHTML = units
@@ -3692,7 +3718,11 @@ function initCollectionApp(config) {
   if (els.viewChips) {
     els.viewChips.querySelectorAll('[data-view]').forEach((chip) => {
       chip.addEventListener('click', () => {
+        const prev = state.view;
         state.view = chip.dataset.view;
+        // Wissel je vanuit een andere weergave naar de plank, laat die dan
+        // meespringen naar de titel die je op dat moment in beeld had.
+        if (state.view === 'shelf' && prev !== 'shelf') captureShelfAnchor();
         try {
           localStorage.setItem(VIEW_STORAGE_KEY, state.view);
         } catch {
