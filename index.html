@@ -7,14 +7,36 @@
 <meta name="description" content="Persoonlijke collectie van films en series op DVD, Blu-ray en 4K Ultra HD.">
 
 <!-- Installeerbaar als app (PWA) -->
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json" id="app-manifest">
 <meta name="theme-color" content="#14141A">
 <link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
 <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mediacollectie">
 <meta name="mobile-web-app-capable" content="yes">
+<script>
+  /**
+   * iPhone/iPad: bewust GEEN schermvullende installatie.
+   *
+   * Een geïnstalleerde app verlaat op iOS de standalone-modus zodra er naar
+   * een ander domein genavigeerd wordt. Inloggen gaat via accounts.google.com,
+   * dus dat gebeurt gegarandeerd — waarna Safari de aanmelding overneemt en de
+   * app het antwoord nooit terugkrijgt (fout 400).
+   *
+   * Door het manifest op iOS weg te laten, opent het pictogram op je
+   * beginscherm in Safari mét adresbalk. Inloggen werkt dan gewoon, en je deelt
+   * bovendien de sessie van Safari — vaak ben je dus meteen al aangemeld.
+   * Op Android blijft de volwaardige app-installatie ongewijzigd.
+   */
+  (function () {
+    var isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      var link = document.getElementById('app-manifest');
+      if (link) link.remove();
+    }
+  })();
+</script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -748,6 +770,25 @@
     }
 
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
+
+    // Draait deze pagina tóch nog in een schermvullend geïnstalleerde app op
+    // iPhone (een pictogram van vóór deze aanpassing)? Dan kan inloggen daar
+    // niet werken. Leg meteen uit wat er moet gebeuren in plaats van de
+    // gebruiker op een 400-foutmelding te laten stuiten.
+    (function () {
+      var isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var standalone =
+        window.navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+      if (isIOS && standalone) {
+        document.getElementById('login-status').innerHTML =
+          'Inloggen werkt niet vanuit een schermvullende app op iPhone.<br><br>' +
+          'Verwijder dit pictogram van je beginscherm, open de site opnieuw in Safari ' +
+          'en zet hem daar opnieuw op je beginscherm. Daarna werkt het wel.';
+      }
+    })();
 
     driveOnReady(() => {
       document.getElementById('login-status').textContent = 'Log in met Google om je collectie te bekijken.';
