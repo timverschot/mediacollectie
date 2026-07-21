@@ -452,6 +452,7 @@ async function buildInsuranceRows() {
         const fmt = s.format || m.format;
         const last = priceFor(`${m.id}|${fmt}|s${s.season_number}`, `${m.id}|${fmt}`, m.id);
         const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
+        const low = last ? (last.ebay_q1 != null ? last.ebay_q1 : last.ebay_low != null ? last.ebay_low : value) : null;
         rows.push({
           title: `${m.title} — seizoen ${s.season_number}`,
           year: m.release_year || '',
@@ -461,6 +462,7 @@ async function buildInsuranceRows() {
           notes: s.name || '',
           acquired: ed.date_added || '',
           value,
+          low,
           currency: (last && last.ebay_currency) || 'EUR',
           measured: (last && last.date) || '',
         });
@@ -483,6 +485,7 @@ async function buildInsuranceRows() {
         notes: ed.notes || '',
         acquired: ed.date_added || '',
         value,
+        low,
         currency: (last && last.ebay_currency) || 'EUR',
         measured: (last && last.date) || '',
       });
@@ -493,18 +496,46 @@ async function buildInsuranceRows() {
   return rows;
 }
 
+/**
+ * Totalen per munt. Ponden en euro's mogen niet bij elkaar opgeteld worden;
+ * de hoofdmunt is die met de meeste exemplaren, de rest wordt apart gemeld.
+ *
+ * Naast de richtwaarde (som van de medianen) berekenen we een voorzichtige
+ * ondergrens (som van de eerste kwartielen): wat je realistisch minstens
+ * voor je collectie zou krijgen.
+ */
 function insuranceTotals(rows) {
   const priced = rows.filter((r) => r.value != null);
-  const total = priced.reduce((sum, r) => sum + r.value, 0);
-  const average = priced.length ? total / priced.length : 0;
+
+  const byCurrency = {};
+  priced.forEach((r) => {
+    const c = (byCurrency[r.currency] = byCurrency[r.currency] || { items: 0, total: 0, low: 0 });
+    c.items++;
+    c.total += r.value;
+    c.low += r.low != null ? r.low : r.value;
+  });
+
+  const currencies = Object.keys(byCurrency).sort((a, b) => byCurrency[b].items - byCurrency[a].items);
+  const currency = currencies[0] || 'EUR';
+  const main = byCurrency[currency] || { items: 0, total: 0, low: 0 };
+  const average = main.items ? main.total / main.items : 0;
+  const r2 = (n) => Math.round(n * 100) / 100;
+
   return {
     items: rows.length,
-    priced: priced.length,
-    total: Math.round(total * 100) / 100,
-    average: Math.round(average * 100) / 100,
+    priced: main.items,
+    total: r2(main.total),
+    lowTotal: r2(main.low),
+    average: r2(average),
     // Ruwe schatting voor exemplaren zonder prijsdata, op basis van het gemiddelde.
-    projected: Math.round(average * rows.length * 100) / 100,
-    currency: (priced[0] && priced[0].currency) || 'EUR',
+    projected: r2(average * rows.length),
+    currency,
+    otherCurrencies: currencies.slice(1).map((c) => ({
+      currency: c,
+      items: byCurrency[c].items,
+      total: r2(byCurrency[c].total),
+      lowTotal: r2(byCurrency[c].low),
+    })),
   };
 }
 
@@ -514,10 +545,13 @@ function insuranceCsv(rows, totals) {
     return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const lines = [];
-  lines.push(['Titel', 'Jaar', 'Formaat', 'Steelbook', 'Boxset', 'Opmerkingen', 'In bezit sinds', 'Geschatte waarde', 'Munt', 'Prijs gemeten op'].join(';'));
+  const num = (v) => (v != null ? String(v).replace('.', ',') : '');
+  lines.push(
+    ['Titel', 'Jaar', 'Formaat', 'Steelbook', 'Boxset', 'Opmerkingen', 'In bezit sinds', 'Richtwaarde', 'Ondergrens', 'Munt', 'Prijs gemeten op'].join(';')
+  );
   rows.forEach((r) => {
     lines.push(
-      [r.title, r.year, r.format, r.steelbook, r.boxset, r.notes, r.acquired, r.value != null ? String(r.value).replace('.', ',') : '', r.currency, r.measured]
+      [r.title, r.year, r.format, r.steelbook, r.boxset, r.notes, r.acquired, num(r.value), num(r.low), r.currency, r.measured]
         .map(esc)
         .join(';')
     );
@@ -525,8 +559,12 @@ function insuranceCsv(rows, totals) {
   lines.push('');
   lines.push(['TOTAAL exemplaren', totals.items].map(esc).join(';'));
   lines.push(['Met prijsdata', totals.priced].map(esc).join(';'));
-  lines.push(['Totale waarde (met prijsdata)', String(totals.total).replace('.', ',')].map(esc).join(';'));
-  lines.push(['Geschat totaal (hele collectie)', String(totals.projected).replace('.', ',')].map(esc).join(';'));
+  lines.push([`Richtwaarde (${totals.currency})`, num(totals.total)].map(esc).join(';'));
+  lines.push([`Voorzichtige ondergrens (${totals.currency})`, num(totals.lowTotal)].map(esc).join(';'));
+  lines.push([`Geschat totaal hele collectie (${totals.currency})`, num(totals.projected)].map(esc).join(';'));
+  (totals.otherCurrencies || []).forEach((o) => {
+    lines.push([`Apart in ${o.currency} (${o.items} exemplaren, niet omgerekend)`, num(o.total)].map(esc).join(';'));
+  });
   return lines.join('\r\n');
 }
 
@@ -569,7 +607,7 @@ async function openInsurancePrintView() {
 <h1>Waardeoverzicht mediacollectie</h1>
 <p class="sub">Opgemaakt op ${new Date().toLocaleDateString('nl-BE')} — ${totals.items} exemplaren, waarvan ${totals.priced} met prijsgegevens</p>
 <table>
-  <thead><tr><th>Titel</th><th>Jaar</th><th>Formaat</th><th>Bijzonderheden</th><th class="num">Waarde</th></tr></thead>
+  <thead><tr><th>Titel</th><th>Jaar</th><th>Formaat</th><th>Bijzonderheden</th><th class="num">Ondergrens</th><th class="num">Richtwaarde</th></tr></thead>
   <tbody>
     ${rows
       .map(
@@ -578,20 +616,30 @@ async function openInsurancePrintView() {
           <td>${esc(r.year)}</td>
           <td>${esc(r.format)}</td>
           <td>${esc([r.steelbook ? 'Steelbook' : '', r.boxset, r.notes].filter(Boolean).join(' · '))}</td>
+          <td class="num">${money(r.low, r.currency)}</td>
           <td class="num">${money(r.value, r.currency)}</td>
         </tr>`
       )
       .join('')}
   </tbody>
   <tfoot>
-    <tr><td colspan="4">Totaal van exemplaren met prijsgegevens</td><td class="num">${money(totals.total, totals.currency)}</td></tr>
-    <tr><td colspan="4">Geschat totaal voor de volledige collectie</td><td class="num">${money(totals.projected, totals.currency)}</td></tr>
+    <tr><td colspan="4">Totaal van exemplaren met prijsgegevens</td><td class="num">${money(totals.lowTotal, totals.currency)}</td><td class="num">${money(totals.total, totals.currency)}</td></tr>
+    <tr><td colspan="4">Geschat totaal voor de volledige collectie</td><td class="num">—</td><td class="num">${money(totals.projected, totals.currency)}</td></tr>
   </tfoot>
 </table>
+${
+  (totals.otherCurrencies || []).length
+    ? `<p class="note"><strong>Niet in bovenstaand totaal:</strong> ${totals.otherCurrencies
+        .map((o) => `${o.items} exemplaren geprijsd in ${esc(o.currency)} (${money(o.total, o.currency)})`)
+        .join(', ')}. Deze zijn niet omgerekend, omdat een wisselkoers een nauwkeurigheid zou suggereren die de schatting niet heeft.</p>`
+    : ''
+}
 <p class="note">
-  De bedragen zijn richtprijzen op basis van actieve vraagprijzen op eBay (mediaan van vergelijkbare aanbiedingen,
-  veilingen buiten beschouwing gelaten). Het zijn geen bevestigde verkoopprijzen en geen taxatie.
-  Het geschatte totaal rekent het gemiddelde door naar exemplaren zonder prijsgegevens en is daarmee het minst
+  De bedragen zijn richtprijzen op basis van actieve vraagprijzen op eBay (veilingen buiten beschouwing gelaten).
+  Het zijn geen bevestigde verkoopprijzen en geen taxatie.
+  De <strong>richtwaarde</strong> is de mediaan van vergelijkbare aanbiedingen; de <strong>ondergrens</strong> is
+  het eerste kwartiel — een kwart van het aanbod staat lager geprijsd — en geeft dus een voorzichtige minimumwaarde.
+  Het geschatte totaal rekent het gemiddelde door naar exemplaren zonder prijsgegevens en is het minst
   betrouwbare cijfer. Bewaar dit overzicht samen met aankoopbewijzen en foto's van je collectie.
 </p>
 <script>window.onload = function () { window.print(); };<\/script>
