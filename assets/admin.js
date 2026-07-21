@@ -167,9 +167,11 @@ async function tmdbDetails(id, mediaType, apiKey) {
   // enkel de HUIDIGE hoofdcast, dus acteurs die halverwege de reeks vertrokken
   // ontbreken volledig. aggregate_credits voegt alle seizoenen samen en meldt
   // per acteur in hoeveel afleveringen die te zien is.
+  // Voor series vragen we béide op: mocht aggregate_credits om welke reden dan
+  // ook leeg terugkomen, dan is er nog altijd de gewone castlijst als vangnet.
   const appends =
     mediaType === 'tv'
-      ? 'aggregate_credits,content_ratings,external_ids,videos'
+      ? 'aggregate_credits,credits,content_ratings,external_ids,videos'
       : 'credits,release_dates,external_ids,videos';
   const d = await tmdbGet(`${mediaType}/${id}`, { language: 'nl-NL', append_to_response: appends }, apiKey);
 
@@ -190,7 +192,9 @@ async function tmdbDetails(id, mediaType, apiKey) {
   // Films leveren credits.cast/crew; series leveren aggregate_credits met een
   // andere vorm (roles[] resp. jobs[] in plaats van character/job). Hieronder
   // brengen we beide naar dezelfde vorm.
-  const rawCredits = d.aggregate_credits || d.credits || {};
+  const agg = d.aggregate_credits;
+  const hasAggregate = agg && Array.isArray(agg.cast) && agg.cast.length > 0;
+  const rawCredits = hasAggregate ? agg : d.credits || {};
 
   const crew = ((rawCredits.crew || [])).flatMap((c) => {
     if (Array.isArray(c.jobs) && c.jobs.length) {
@@ -475,7 +479,18 @@ async function tmdbSeason(tvId, seasonNumber, apiKey) {
       air_date: e.air_date || '',
       runtime: e.runtime || null,
       rating: e.vote_average || null,
+      vote_count: e.vote_count || 0,
       still_path: e.still_path || '',
+      // Regie en scenario van déze aflevering, plus gastrollen.
+      // Dezelfde persoon kan zowel 'Writer' als 'Story' zijn; niet dubbel tonen.
+      directors: [...new Set((e.crew || []).filter((c) => c.job === 'Director').map((c) => c.name))],
+      writers: [...new Set((e.crew || []).filter((c) => ['Writer', 'Screenplay', 'Story'].includes(c.job)).map((c) => c.name))],
+      guest_stars: (e.guest_stars || []).slice(0, 12).map((g) => ({
+        id: g.id || null,
+        name: g.name,
+        character: g.character || '',
+        profile_path: g.profile_path || '',
+      })),
     })),
   };
 }
