@@ -1042,6 +1042,19 @@ function initCollectionApp(config) {
     document.body.classList.remove('overflow-hidden');
   }
 
+  // Knoppen van de reeks-verlanglijstbalk: eenmalig koppelen (de balk zelf
+  // wordt bij elke openModal opnieuw gevuld, maar de knoppen blijven bestaan).
+  const sagaWishBtn = els.modal.querySelector('[data-saga-bulk-wish]');
+  if (sagaWishBtn) sagaWishBtn.addEventListener('click', sagaBulkToWishlist);
+  const sagaClearBtn = els.modal.querySelector('[data-saga-bulk-clear]');
+  if (sagaClearBtn) {
+    sagaClearBtn.addEventListener('click', () => {
+      sagaBulkSelection = [];
+      els.modal.querySelectorAll('[data-saga-pick]').forEach((cb) => (cb.checked = false));
+      updateSagaBulkBar();
+    });
+  }
+
   if (els.groupModal) {
     els.groupModal.addEventListener('click', (e) => {
       if (e.target === els.groupModal) closeGroupModal();
@@ -2566,13 +2579,17 @@ function initCollectionApp(config) {
         const year = p.release_year || '—';
 
         let right;
+        let checkbox = '<span class="w-4 shrink-0"></span>';
         if (owned) {
           right = '<span class="font-mono text-xs text-teal">✓ in bezit</span>';
         } else if (onWishlist) {
           right = '<span class="font-mono text-xs text-gold">verlanglijst</span>';
         } else {
-          // Twee wegen: snel op de verlanglijst, of het volledige formulier
-          // met formaat, hoesfoto's en boxset — voor als je hem net gekocht hebt.
+          // Ontbrekend deel: aanvinken om samen op de verlanglijst te zetten,
+          // of los toevoegen via de twee knoppen.
+          checkbox = `<input type="checkbox" class="w-4 h-4 shrink-0 cursor-pointer" data-saga-pick="${escapeAttr(
+            p.tmdb_id
+          )}" title="Aanvinken om samen op de verlanglijst te zetten">`;
           right = `
             <span class="flex gap-2 shrink-0">
               <button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ wens</button>
@@ -2581,8 +2598,9 @@ function initCollectionApp(config) {
         }
 
         return `
-          <div class="flex items-center justify-between gap-2 text-sm ${owned ? '' : 'opacity-75'}">
-            <span class="truncate min-w-0">${escapeHtml(p.title)} <span class="text-muted font-mono text-xs">(${year})</span></span>
+          <div class="flex items-center gap-2 text-sm ${owned ? '' : 'opacity-75'}">
+            ${checkbox}
+            <span class="flex-1 min-w-0 truncate">${escapeHtml(p.title)} <span class="text-muted font-mono text-xs">(${year})</span></span>
             <span class="shrink-0">${right}</span>
           </div>`;
       })
@@ -2613,6 +2631,25 @@ function initCollectionApp(config) {
       });
     });
 
+    // Aanvinken van ontbrekende delen om ze samen op de verlanglijst te zetten.
+    sagaBulkSelection = [];
+    const missingParts = parts.filter((p) => {
+      const mine = findMine(p);
+      return !mine;
+    });
+    updateSagaBulkBar();
+
+    listEl.querySelectorAll('[data-saga-pick]').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', () => {
+        const part = missingParts.find((p) => String(p.tmdb_id) === cb.dataset.sagaPick);
+        if (!part) return;
+        if (cb.checked) sagaBulkSelection.push(part);
+        else sagaBulkSelection = sagaBulkSelection.filter((x) => String(x.tmdb_id) !== cb.dataset.sagaPick);
+        updateSagaBulkBar();
+      });
+    });
+
     // Volledig toevoegformulier openen voor een ontbrekend deel.
     listEl.querySelectorAll('[data-saga-own]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -2639,6 +2676,102 @@ function initCollectionApp(config) {
 
   // Zet een ontbrekend deel van een reeks op de verlanglijst. Haalt de volledige
   // TMDb-gegevens op zodat de titel meteen compleet in je collectie staat.
+  // ---------- Meerdere reeksdelen samen op de verlanglijst ----------
+
+  let sagaBulkSelection = [];
+
+  function updateSagaBulkBar() {
+    const bar = els.modal.querySelector('[data-field="saga-bulk-bar"]');
+    const count = els.modal.querySelector('[data-field="saga-bulk-count"]');
+    if (!bar || !count) return;
+    const n = sagaBulkSelection.length;
+    bar.classList.toggle('hidden', n === 0);
+    count.textContent = `${n} aangevinkt`;
+  }
+
+  async function sagaBulkToWishlist() {
+    const bar = els.modal.querySelector('[data-field="saga-bulk-bar"]');
+    const status = els.modal.querySelector('[data-field="saga-bulk-status"]');
+    const wishBtn = els.modal.querySelector('[data-saga-bulk-wish]');
+    if (!sagaBulkSelection.length) return;
+
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    if (!c.tmdbKey) {
+      status.textContent = 'TMDb-key ontbreekt.';
+      status.className = 'text-[11px] font-mono text-gold';
+      return;
+    }
+
+    const selection = [...sagaBulkSelection];
+    if (wishBtn) wishBtn.disabled = true;
+
+    const entries = [];
+    for (let i = 0; i < selection.length; i++) {
+      const part = selection[i];
+      status.textContent = `(${i + 1}/${selection.length}) ${part.title}…`;
+      status.className = 'text-[11px] font-mono text-muted';
+      try {
+        const details = await tmdbDetails(part.tmdb_id, 'movie', c.tmdbKey);
+        const id = slugify(details.title, details.release_year);
+        if (state.all.some((m) => m.id === id)) continue; // stond er intussen al
+        const today = new Date().toISOString().slice(0, 10);
+        const entry = {
+          id,
+          content_type: 'movie',
+          date_added: today,
+          watched: false,
+          editions: [
+            {
+              eid: 'e1',
+              format: 'bluray',
+              notes: '',
+              boxset: '',
+              location: '',
+              wishlist: true,
+              date_added: today,
+              custom_front_cover_id: '',
+              custom_back_cover_id: '',
+              custom_front_cover: '',
+              custom_back_cover: '',
+            },
+          ],
+          ...details,
+          seasons: [],
+        };
+        normalizeMovieEntry(entry);
+        entries.push(entry);
+      } catch (err) {
+        console.warn('Reeksdeel overslaan:', part.title, err);
+      }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+
+    if (!entries.length) {
+      status.textContent = 'Niets toegevoegd (stonden er al in).';
+      status.className = 'text-[11px] font-mono text-gold';
+      if (wishBtn) wishBtn.disabled = false;
+      return;
+    }
+
+    // Meteen in de interface, opslaan op de achtergrond.
+    entries.forEach((e) => state.all.push(e));
+    buildFacetChips(state.all);
+    applyFilters();
+
+    backgroundSave(
+      () => upsertMoviesBatchInDrive(entries),
+      () => {
+        const ids = new Set(entries.map((e) => e.id));
+        state.all = state.all.filter((m) => !ids.has(m.id));
+      }
+    );
+
+    sagaBulkSelection = [];
+    if (wishBtn) wishBtn.disabled = false;
+    // Reekslijst opnieuw opbouwen zodat de nieuwe verlanglijst-status klopt.
+    openModal(currentModalId);
+  }
+
   async function addSagaPartToWishlist(part, btn) {
     const c = typeof getConfig === 'function' ? getConfig() : {};
     if (!c.tmdbKey) return;
