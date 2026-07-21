@@ -16,6 +16,8 @@
  */
 
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
+const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w780';
+const PROFILE_BASE = 'https://image.tmdb.org/t/p/w185';
 const PAGE_SIZE = 60;
 
 function initCollectionApp(config) {
@@ -30,6 +32,7 @@ function initCollectionApp(config) {
     activeStatus: new Set(),   // 'owned' / 'wishlist'
     activeWatched: new Set(),  // 'watched' / 'unwatched'
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
+    activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
@@ -45,6 +48,8 @@ function initCollectionApp(config) {
     typeChips: document.getElementById('type-chips'),
     genreChips: document.getElementById('genre-chips'),
     decadeChips: document.getElementById('decade-chips'),
+    certChips: document.getElementById('cert-chips'),
+    certRow: document.getElementById('cert-row'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
@@ -97,8 +102,15 @@ function initCollectionApp(config) {
     return "jaren '" + String(decade).slice(2);
   }
 
+  // Heb je zelf een alternatieve TMDb-poster gekozen (bv. de artwork van jouw
+  // editie), dan krijgt die voorrang op de standaardposter.
   function posterUrl(item) {
-    return item.poster_path ? POSTER_BASE + item.poster_path : '';
+    const path = item.custom_poster_path || item.poster_path;
+    return path ? POSTER_BASE + path : '';
+  }
+
+  function backdropUrl(item) {
+    return item.backdrop_path ? BACKDROP_BASE + item.backdrop_path : '';
   }
 
   function frontCoverRef(item) {
@@ -254,10 +266,54 @@ function initCollectionApp(config) {
     });
   }
 
+  // Leeftijdskeuring (Kijkwijzer/MPAA). De rij blijft verborgen zolang geen
+  // enkele titel een keuring heeft — bv. vóór je één keer hebt ververst.
+  function buildCertChips(data) {
+    if (!els.certChips) return;
+    const counts = {};
+    data.forEach((item) => {
+      const c = (item.certification || '').trim();
+      if (c) counts[c] = (counts[c] || 0) + 1;
+    });
+
+    // Numerieke keuringen (6, 12, 16) netjes op leeftijd; de rest alfabetisch erna.
+    const values = Object.keys(counts).sort((a, b) => {
+      const na = parseInt(a, 10);
+      const nb = parseInt(b, 10);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      if (!isNaN(na)) return -1;
+      if (!isNaN(nb)) return 1;
+      return a.localeCompare(b);
+    });
+
+    if (els.certRow) els.certRow.classList.toggle('hidden', values.length === 0);
+    if (els.certRow && values.length) els.certRow.classList.add('flex');
+
+    els.certChips.innerHTML = '';
+    values.forEach((value) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeCerts.has(value) ? ' chip-active' : '');
+      chip.textContent = value;
+      chip.title = `${counts[value]} titel(s)`;
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeCerts, value);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.certChips.appendChild(chip);
+    });
+
+    [...state.activeCerts].forEach((v) => {
+      if (!values.includes(v)) state.activeCerts.delete(v);
+    });
+  }
+
   // Alle chips die uit de data zelf worden afgeleid, in één keer opnieuw opbouwen.
   function buildFacetChips(data) {
     buildGenreChips(data);
     buildDecadeChips(data);
+    buildCertChips(data);
   }
 
   function buildLetterChips() {
@@ -293,10 +349,12 @@ function initCollectionApp(config) {
     let list = state.all.filter((item) => {
       if (q) {
         const inTitle = item.title.toLowerCase().includes(q);
+        const inOriginal = (item.original_title || '').toLowerCase().includes(q);
         const inCast = (item.cast || []).some((name) => name.toLowerCase().includes(q));
         const inDirector = (item.director || '').toLowerCase().includes(q);
+        const inWriters = (item.writers || '').toLowerCase().includes(q);
         const inSaga = sagaOf(item).toLowerCase().includes(q);
-        if (!inTitle && !inCast && !inDirector && !inSaga) return false;
+        if (!inTitle && !inOriginal && !inCast && !inDirector && !inWriters && !inSaga) return false;
       }
       if (state.activeFormats.size && !state.activeFormats.has(item.format)) return false;
       if (state.activeTypes.size && !state.activeTypes.has(item.content_type)) return false;
@@ -316,6 +374,7 @@ function initCollectionApp(config) {
         const d = decadeOf(item);
         if (!state.activeDecades.has(d === null ? 'unknown' : d)) return false;
       }
+      if (state.activeCerts.size && !state.activeCerts.has((item.certification || '').trim())) return false;
       if (state.activeLetter && firstLetter(item) !== state.activeLetter) return false;
       return true;
     });
@@ -685,9 +744,255 @@ function initCollectionApp(config) {
     updateModalCoverTabs(item);
   }
 
+  // ---------- Fase 5: verrijkte velden in de detailmodal ----------
+
+  // Toont of verbergt een element op basis van of er inhoud is.
+  function setOptionalField(selector, value, formatter) {
+    const el = els.modal.querySelector(selector);
+    if (!el) return;
+    const has = value !== null && value !== undefined && value !== '';
+    el.classList.toggle('hidden', !has);
+    if (has) el.textContent = formatter ? formatter(value) : value;
+  }
+
+  const TV_STATUS_LABELS = {
+    'Ended': 'Afgelopen reeks',
+    'Canceled': 'Stopgezet',
+    'Returning Series': 'Loopt nog',
+    'In Production': 'In productie',
+    'Planned': 'Gepland',
+  };
+
+  function fillEnrichedFields(item) {
+    // Achtergrondafbeelding bovenaan
+    const wrap = els.modal.querySelector('[data-backdrop-wrap]');
+    const img = els.modal.querySelector('[data-backdrop]');
+    const bd = backdropUrl(item);
+    if (wrap && img) {
+      wrap.classList.toggle('hidden', !bd);
+      if (bd) {
+        img.src = bd;
+        img.alt = item.title + ' — achtergrondafbeelding';
+      } else {
+        img.removeAttribute('src');
+      }
+    }
+
+    // Originele titel enkel tonen als ze afwijkt van de Nederlandse.
+    const original = item.original_title && item.original_title !== item.title ? item.original_title : '';
+    setOptionalField('[data-field="original-title"]', original);
+    setOptionalField('[data-field="tagline"]', item.tagline);
+    setOptionalField('[data-field="cert"]', item.certification, (c) =>
+      item.certification_country ? `${item.certification_country} ${c}` : c
+    );
+    setOptionalField('[data-field="tv-status"]', item.tv_status, (s) => TV_STATUS_LABELS[s] || s);
+
+    const votes = els.modal.querySelector('[data-field="votes"]');
+    if (votes) votes.textContent = item.vote_count ? ` (${Number(item.vote_count).toLocaleString('nl-BE')} stemmen)` : '';
+
+    // Scenario en muziek verbergen we volledig als ze onbekend zijn — anders
+    // staat de modal vol met streepjes.
+    const writersWrap = els.modal.querySelector('[data-field="writers-wrap"]');
+    if (writersWrap) {
+      writersWrap.classList.toggle('hidden', !item.writers);
+      const w = writersWrap.querySelector('[data-field="writers"]');
+      if (w) w.textContent = item.writers || '';
+    }
+    const composerWrap = els.modal.querySelector('[data-field="composer-wrap"]');
+    if (composerWrap) {
+      composerWrap.classList.toggle('hidden', !item.composer);
+      const c = composerWrap.querySelector('[data-field="composer"]');
+      if (c) c.textContent = item.composer || '';
+    }
+
+    // Trailer en IMDb
+    const trailer = els.modal.querySelector('[data-field="trailer-link"]');
+    if (trailer) {
+      trailer.classList.toggle('hidden', !item.trailer_key);
+      if (item.trailer_key) trailer.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(item.trailer_key);
+    }
+    const imdb = els.modal.querySelector('[data-field="imdb-link"]');
+    if (imdb) {
+      imdb.classList.toggle('hidden', !item.imdb_id);
+      if (item.imdb_id) imdb.href = 'https://www.imdb.com/title/' + encodeURIComponent(item.imdb_id) + '/';
+    }
+
+    // Cast: met portretfoto's als die er zijn, anders gewoon de namen.
+    const castList = els.modal.querySelector('[data-field="cast-list"]');
+    if (castList) {
+      const details = item.cast_details || [];
+      if (details.length) {
+        castList.innerHTML = details
+          .map(
+            (c) => `
+              <div class="w-20 shrink-0 text-center">
+                <div class="w-20 h-20 rounded-full overflow-hidden bg-bg ring-1 ring-white/10 mb-1">
+                  ${
+                    c.profile_path
+                      ? `<img src="${escapeAttr(PROFILE_BASE + c.profile_path)}" alt="${escapeAttr(c.name)}" loading="lazy" class="w-full h-full object-cover">`
+                      : `<div class="w-full h-full flex items-center justify-center text-[#8B8A92] font-mono text-lg">${escapeHtml((c.name || '?').charAt(0))}</div>`
+                  }
+                </div>
+                <p class="text-[11px] leading-tight text-ink truncate" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</p>
+                ${c.character ? `<p class="text-[10px] leading-tight text-muted truncate" title="${escapeAttr(c.character)}">${escapeHtml(c.character)}</p>` : ''}
+              </div>`
+          )
+          .join('');
+      } else {
+        castList.innerHTML = `<p class="text-sm text-muted">${escapeHtml((item.cast || []).join(', ') || '—')}</p>`;
+      }
+    }
+
+    showSagaCompleteness(item);
+  }
+
+  // ---------- Reeks-compleetheid ----------
+
+  // Eenmaal opgehaalde reeksen onthouden we voor deze sessie, zodat je bij het
+  // heen-en-weer klikken niet telkens opnieuw TMDb aanspreekt.
+  const sagaCache = {};
+
+  async function showSagaCompleteness(item) {
+    const section = els.modal.querySelector('[data-field="saga-section"]');
+    const listEl = els.modal.querySelector('[data-field="saga-parts"]');
+    const progressEl = els.modal.querySelector('[data-field="saga-progress"]');
+    if (!section || !listEl) return;
+
+    if (!item.saga_id) {
+      section.classList.add('hidden');
+      return;
+    }
+
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    if (!c.tmdbKey || typeof tmdbCollection !== 'function') {
+      section.classList.add('hidden');
+      return;
+    }
+
+    section.classList.remove('hidden');
+    progressEl.textContent = '';
+    listEl.innerHTML = '<p class="text-sm text-muted">Delen van de reeks ophalen…</p>';
+
+    // Onthouden voor welke titel we bezig zijn: klikt de gebruiker intussen
+    // door naar een andere titel, dan gooien we dit resultaat weg.
+    const requestedFor = item.id;
+
+    let collection;
+    try {
+      if (sagaCache[item.saga_id]) {
+        collection = sagaCache[item.saga_id];
+      } else {
+        collection = await tmdbCollection(item.saga_id, c.tmdbKey);
+        sagaCache[item.saga_id] = collection;
+      }
+    } catch (err) {
+      if (requestedFor !== currentModalId) return;
+      listEl.innerHTML = `<p class="text-sm text-muted">Kon de reeks niet ophalen: ${escapeHtml(err.message)}</p>`;
+      return;
+    }
+
+    if (requestedFor !== currentModalId) return;
+
+    const ownedByTmdb = {};
+    state.all.forEach((m) => {
+      if (m.tmdb_id) ownedByTmdb[String(m.tmdb_id)] = m;
+    });
+
+    const parts = collection.parts || [];
+    const ownedCount = parts.filter((p) => {
+      const mine = ownedByTmdb[String(p.tmdb_id)];
+      return mine && !mine.wishlist;
+    }).length;
+
+    progressEl.textContent = `${ownedCount}/${parts.length} in bezit`;
+
+    listEl.innerHTML = parts
+      .map((p) => {
+        const mine = ownedByTmdb[String(p.tmdb_id)];
+        const owned = mine && !mine.wishlist;
+        const onWishlist = mine && mine.wishlist;
+        const year = p.release_year || '—';
+
+        let right;
+        if (owned) {
+          right = '<span class="font-mono text-xs text-teal">✓ in bezit</span>';
+        } else if (onWishlist) {
+          right = '<span class="font-mono text-xs text-gold">verlanglijst</span>';
+        } else {
+          right = `<button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ verlanglijst</button>`;
+        }
+
+        return `
+          <div class="flex items-center justify-between gap-2 text-sm ${owned ? '' : 'opacity-75'}">
+            <span class="truncate">${escapeHtml(p.title)} <span class="text-muted font-mono text-xs">(${year})</span></span>
+            ${right}
+          </div>`;
+      })
+      .join('');
+
+    listEl.querySelectorAll('[data-saga-add]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const part = parts.find((p) => String(p.tmdb_id) === btn.dataset.sagaAdd);
+        if (part) addSagaPartToWishlist(part, btn);
+      });
+    });
+  }
+
+  // Zet een ontbrekend deel van een reeks op de verlanglijst. Haalt de volledige
+  // TMDb-gegevens op zodat de titel meteen compleet in je collectie staat.
+  async function addSagaPartToWishlist(part, btn) {
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    if (!c.tmdbKey) return;
+
+    btn.disabled = true;
+    btn.textContent = 'bezig…';
+    try {
+      const details = await tmdbDetails(part.tmdb_id, 'movie', c.tmdbKey);
+      const entry = {
+        id: slugify(details.title, details.release_year),
+        content_type: 'movie',
+        format: 'bluray',
+        wishlist: true,
+        watched: false,
+        notes: '',
+        date_added: new Date().toISOString().slice(0, 10),
+        custom_front_cover_id: '',
+        custom_back_cover_id: '',
+        custom_front_cover: '',
+        custom_back_cover: '',
+        ...details,
+        seasons: [],
+      };
+
+      if (state.all.some((m) => m.id === entry.id)) {
+        btn.textContent = 'stond er al';
+        return;
+      }
+
+      state.all.push(entry);
+      buildFacetChips(state.all);
+      applyFilters();
+      btn.outerHTML = '<span class="font-mono text-xs text-gold">verlanglijst</span>';
+
+      backgroundSave(
+        () => upsertMovieInDrive(entry),
+        () => { state.all = state.all.filter((m) => m.id !== entry.id); }
+      );
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '+ verlanglijst';
+      alert('Toevoegen mislukt: ' + err.message);
+    }
+  }
+
+  // Welke titel staat er op dit moment open? Nodig om trage TMDb-antwoorden
+  // te kunnen negeren als je intussen al doorgeklikt bent.
+  let currentModalId = null;
+
   function openModal(id) {
     const item = state.all.find((m) => m.id === id);
     if (!item) return;
+    currentModalId = id;
 
     const ribbon = ribbonInfo(item);
 
@@ -696,8 +1001,9 @@ function initCollectionApp(config) {
     els.modal.querySelector('[data-field="runtime"]').textContent = item.runtime ? item.runtime + ' min' : '—';
     els.modal.querySelector('[data-field="rating"]').textContent = item.rating ? item.rating.toFixed(1) + ' / 10' : '—';
     els.modal.querySelector('[data-field="director"]').textContent = item.director || '—';
-    els.modal.querySelector('[data-field="cast"]').textContent = (item.cast || []).join(', ') || '—';
     els.modal.querySelector('[data-field="genres"]').textContent = (item.genres || []).join(' · ') || '—';
+
+    fillEnrichedFields(item);
     els.modal.querySelector('[data-field="format"]').textContent = ribbon.label + (item.wishlist ? ' · Verlanglijst' : '');
     els.modal.querySelector('[data-field="notes"]').textContent = item.notes || 'Geen opmerkingen';
     els.modal.querySelector('[data-field="overview"]').textContent = item.overview || '';
@@ -843,6 +1149,80 @@ function initCollectionApp(config) {
     const status = m.querySelector('[data-edit-status]');
     status.textContent = '';
     status.className = 'text-sm font-mono';
+    setupPosterPicker(item);
+  }
+
+  // ---------- Posterkeuze ----------
+  // Je kan een andere TMDb-poster kiezen dan de standaard, bv. de artwork die
+  // op jouw editie staat. De keuze wordt pas bewaard bij 'Opslaan'.
+  let pendingPosterPath = null; // null = onveranderd, '' = terug naar standaard
+
+  function setupPosterPicker(item) {
+    const m = els.modal;
+    const loadBtn = m.querySelector('[data-edit-poster-load]');
+    const resetBtn = m.querySelector('[data-edit-poster-reset]');
+    const grid = m.querySelector('[data-edit-poster-grid]');
+    const statusEl = m.querySelector('[data-edit-poster-status]');
+    if (!loadBtn || !grid) return;
+
+    pendingPosterPath = null;
+    grid.innerHTML = '';
+    grid.classList.add('hidden');
+    statusEl.textContent = item.custom_poster_path ? 'eigen poster gekozen' : '';
+    resetBtn.classList.toggle('hidden', !item.custom_poster_path);
+
+    resetBtn.onclick = () => {
+      pendingPosterPath = '';
+      statusEl.textContent = 'terug naar standaard bij opslaan';
+      grid.querySelectorAll('[data-poster-option]').forEach((el) => el.classList.remove('ring-2', 'ring-gold'));
+    };
+
+    loadBtn.onclick = async () => {
+      const c = typeof getConfig === 'function' ? getConfig() : {};
+      if (!c.tmdbKey || typeof tmdbPosters !== 'function') {
+        statusEl.textContent = 'TMDb-key ontbreekt';
+        return;
+      }
+      if (!item.tmdb_id) {
+        statusEl.textContent = 'geen TMDb-koppeling';
+        return;
+      }
+      loadBtn.disabled = true;
+      statusEl.textContent = 'posters ophalen…';
+      try {
+        const posters = await tmdbPosters(item.tmdb_id, item.content_type === 'tv' ? 'tv' : 'movie', c.tmdbKey);
+        if (!posters.length) {
+          statusEl.textContent = 'geen alternatieve posters gevonden';
+          return;
+        }
+        grid.classList.remove('hidden');
+        grid.innerHTML = posters
+          .map(
+            (p) => `
+              <button type="button" data-poster-option="${escapeAttr(p.file_path)}"
+                class="rounded overflow-hidden aspect-[2/3] bg-bg ring-1 ring-white/10 ${
+                  item.custom_poster_path === p.file_path ? 'ring-2 ring-gold' : ''
+                }">
+                <img src="${escapeAttr('https://image.tmdb.org/t/p/w185' + p.file_path)}" loading="lazy" class="w-full h-full object-cover" alt="Poster${p.language ? ' (' + escapeAttr(p.language) + ')' : ''}">
+              </button>`
+          )
+          .join('');
+        statusEl.textContent = `${posters.length} posters — klik om te kiezen`;
+
+        grid.querySelectorAll('[data-poster-option]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            pendingPosterPath = btn.dataset.posterOption;
+            grid.querySelectorAll('[data-poster-option]').forEach((el) => el.classList.remove('ring-2', 'ring-gold'));
+            btn.classList.add('ring-2', 'ring-gold');
+            statusEl.textContent = 'gekozen — klik Opslaan om te bewaren';
+          });
+        });
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+      } finally {
+        loadBtn.disabled = false;
+      }
+    };
   }
 
   async function saveEditPanel(item) {
@@ -858,6 +1238,7 @@ function initCollectionApp(config) {
       watched: item.watched,
       notes: item.notes,
       saga: item.saga,
+      custom_poster_path: item.custom_poster_path,
       custom_front_cover: item.custom_front_cover,
       custom_back_cover: item.custom_back_cover,
       custom_front_cover_id: item.custom_front_cover_id,
@@ -899,6 +1280,8 @@ function initCollectionApp(config) {
       item.notes = m.querySelector('[data-edit-notes]').value.trim();
       const sagaInput = m.querySelector('[data-edit-saga]');
       if (sagaInput) item.saga = sagaInput.value.trim();
+      // Posterkeuze: null = niets veranderd, '' = terug naar de standaardposter.
+      if (pendingPosterPath !== null) item.custom_poster_path = pendingPosterPath;
 
       buildFacetChips(state.all);
       applyFilters();
@@ -941,25 +1324,10 @@ function initCollectionApp(config) {
       const mediaType = item.content_type === 'tv' ? 'tv' : 'movie';
       const fresh = await tmdbDetails(item.tmdb_id, mediaType, c.tmdbKey);
 
-      // Seizoensbezit behouden bij het samenvoegen van verse seizoensdata.
-      if (fresh.seasons && item.seasons) {
-        fresh.seasons = fresh.seasons.map((s) => {
-          const old = item.seasons.find((o) => o.season_number === s.season_number);
-          return old ? { ...s, owned: old.owned, format: old.format } : { ...s, owned: false, format: '' };
-        });
-      }
-
-      item.title = fresh.title;
-      item.release_year = fresh.release_year;
-      item.poster_path = fresh.poster_path;
-      item.genres = fresh.genres;
-      item.director = fresh.director;
-      item.cast = fresh.cast;
-      item.runtime = fresh.runtime;
-      item.rating = fresh.rating;
-      item.overview = fresh.overview;
-      if (fresh.saga) item.saga = fresh.saga;
-      if (fresh.seasons) item.seasons = fresh.seasons;
+      // Samenvoegen gebeurt centraal in admin.js: TMDb-velden worden ververst,
+      // persoonlijke keuzes (formaat, notities, foto's, seizoensbezit,
+      // posterkeuze) blijven staan.
+      applyTmdbFields(item, fresh);
 
       buildFacetChips(state.all);
       applyFilters();
@@ -976,6 +1344,7 @@ function initCollectionApp(config) {
   }
 
   function closeModal() {
+    currentModalId = null;
     els.modal.classList.add('hidden');
     document.body.classList.remove('overflow-hidden');
   }
