@@ -669,10 +669,12 @@
                 <label class="!normal-case !text-sm text-ink flex items-center gap-2">
                   <input type="checkbox" data-edit-watched class="w-4 h-4"> Al bekeken
                 </label>
-                <label class="!normal-case !text-sm text-ink flex items-center gap-2">
-                  <input type="checkbox" data-edit-steelbook class="w-4 h-4"> Steelbook
-                </label>
               </div>
+            </div>
+
+            <div>
+              <label>Uitvoering van dit exemplaar</label>
+              <div data-edit-variants class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
             </div>
             <div class="grid sm:grid-cols-2 gap-3">
               <div>
@@ -853,9 +855,10 @@
             <input type="text" id="form-boxset" placeholder="Leeg laten als losse uitgave">
           </div>
         </div>
-        <label class="!normal-case !text-sm text-ink flex items-center gap-2">
-          <input type="checkbox" id="form-steelbook" class="w-4 h-4"> Steelbook
-        </label>
+        <div>
+          <label>Uitvoering</label>
+          <div id="form-variants" class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
+        </div>
 
         <div id="saga-bulk" class="hidden bg-surface rounded-md p-3 text-sm">
           <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>
