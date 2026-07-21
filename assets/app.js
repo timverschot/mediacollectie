@@ -18,7 +18,28 @@
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
 const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w780';
 const PROFILE_BASE = 'https://image.tmdb.org/t/p/w185';
+const THUMB_BASE = 'https://image.tmdb.org/t/p/w92';
 const PAGE_SIZE = 60;
+
+// Weergavekeuze onthouden tussen bezoeken.
+const VIEW_STORAGE_KEY = 'mediacollectie_view';
+const VALID_VIEWS = ['grid', 'compact', 'text'];
+
+function loadStoredView() {
+  try {
+    const v = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (VALID_VIEWS.includes(v)) return v;
+  } catch {
+    // localStorage geblokkeerd: gewoon met het raster starten.
+  }
+  return 'grid';
+}
+
+// In de tekst- en compacte weergave laden we bewust meer titels per keer:
+// er zijn geen afbeeldingen, dus scrollen blijft licht.
+function pageSizeForView(view) {
+  return view === 'text' ? 400 : view === 'compact' ? 150 : PAGE_SIZE;
+}
 
 function initCollectionApp(config) {
   const state = {
@@ -36,6 +57,9 @@ function initCollectionApp(config) {
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
+    // 'grid' = posterraster, 'compact' = rij met miniatuur, 'text' = pure
+    // tekstlijst (snelst om door te scrollen, verbruikt geen data)
+    view: loadStoredView(),
   };
 
   const els = {
@@ -54,6 +78,8 @@ function initCollectionApp(config) {
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
+    viewChips: document.getElementById('view-chips'),
+    personModal: document.getElementById('person-modal'),
     saveIndicator: document.getElementById('save-indicator'),
     loadMore: document.getElementById('load-more'),
     modal: document.getElementById('detail-modal'),
@@ -381,7 +407,7 @@ function initCollectionApp(config) {
 
     list = sortList(list, state.sort);
     state.filtered = list;
-    state.visibleCount = PAGE_SIZE;
+    state.visibleCount = pageSizeForView(state.view);
     render();
   }
 
@@ -435,6 +461,23 @@ function initCollectionApp(config) {
     return units.map((u) => (u.type === 'group' && u.items.length === 1 ? { type: 'item', item: u.items[0] } : u));
   }
 
+  // De container krijgt per weergave andere opmaak: een raster voor posters,
+  // een verticale lijst voor de andere twee.
+  const VIEW_CONTAINER_CLASSES = {
+    grid: 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-5 gap-y-8',
+    compact: 'flex flex-col divide-y divide-white/5',
+    text: 'flex flex-col divide-y divide-white/5',
+  };
+
+  function applyViewClasses() {
+    els.grid.className = VIEW_CONTAINER_CLASSES[state.view] || VIEW_CONTAINER_CLASSES.grid;
+    if (els.viewChips) {
+      els.viewChips.querySelectorAll('[data-view]').forEach((chip) => {
+        chip.classList.toggle('chip-active', chip.dataset.view === state.view);
+      });
+    }
+  }
+
   function render() {
     const units = buildRenderUnits();
     const visible = units.slice(0, state.visibleCount);
@@ -446,9 +489,16 @@ function initCollectionApp(config) {
     els.empty.classList.toggle('hidden', state.filtered.length !== 0);
     els.loadMore.classList.toggle('hidden', state.visibleCount >= units.length);
 
-    els.grid.innerHTML = visible
-      .map((u) => (u.type === 'group' ? groupCardTemplate(u) : cardTemplate(u.item)))
-      .join('');
+    applyViewClasses();
+
+    const renderUnit =
+      state.view === 'grid'
+        ? (u) => (u.type === 'group' ? groupCardTemplate(u) : cardTemplate(u.item))
+        : state.view === 'compact'
+        ? (u) => (u.type === 'group' ? groupRowTemplate(u, true) : rowTemplate(u.item, true))
+        : (u) => (u.type === 'group' ? groupRowTemplate(u, false) : rowTemplate(u.item, false));
+
+    els.grid.innerHTML = visible.map(renderUnit).join('');
 
     els.grid.querySelectorAll('[data-open-id]').forEach((card) => {
       card.addEventListener('click', () => openModal(card.dataset.openId));
@@ -602,6 +652,84 @@ function initCollectionApp(config) {
         <p class="text-xs text-[#8B8A92] font-mono">${yearRange}</p>
       </div>
     `;
+  }
+
+  // ---------- Rijen (compacte en tekstweergave) ----------
+
+  const FORMAT_SHORT = { '4k': '4K', bluray: 'BD', dvd: 'DVD' };
+
+  function formatTagHtml(item) {
+    const ribbon = ribbonInfo(item);
+    const short = FORMAT_SHORT[item.format] || ribbon.label;
+    const color =
+      item.format === '4k' ? 'text-gold' : item.format === 'bluray' ? 'text-teal' : 'text-muted';
+    return `<span class="font-mono text-[11px] ${color} w-9 text-right shrink-0">${escapeHtml(
+      ribbon.label === 'Gemengd' ? 'mix' : short
+    )}</span>`;
+  }
+
+  // withThumb=true → compacte weergave met miniatuur; false → pure tekst.
+  function rowTemplate(item, withThumb) {
+    const seasonBadge = seasonBadgeInfo(item);
+    const thumb = withThumb
+      ? `<div class="w-8 h-12 shrink-0 rounded-sm overflow-hidden bg-[#1E1E26]">
+           ${
+             item.poster_path || item.custom_poster_path
+               ? `<img src="${escapeAttr(
+                   THUMB_BASE + (item.custom_poster_path || item.poster_path)
+                 )}" alt="" loading="lazy" class="w-full h-full object-cover">`
+               : ''
+           }
+         </div>`
+      : '';
+
+    return `
+      <div data-open-id="${escapeHtml(item.id)}"
+        class="case-card flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded"
+        role="button" tabindex="0">
+        ${thumb}
+        <span class="w-2 shrink-0">${
+          item.watched ? '<span class="block w-1.5 h-1.5 rounded-full bg-teal" title="Bekeken"></span>' : ''
+        }</span>
+        <span class="flex-1 min-w-0 truncate text-sm text-ink">${escapeHtml(item.title)}</span>
+        ${
+          seasonBadge
+            ? `<span class="font-mono text-[11px] ${
+                seasonBadge.complete ? 'text-muted' : 'text-gold'
+              } shrink-0">${seasonBadge.text}</span>`
+            : ''
+        }
+        ${item.wishlist ? '<span class="font-mono text-[10px] text-gold shrink-0">wens</span>' : ''}
+        <span class="font-mono text-[11px] text-muted w-10 text-right shrink-0">${item.release_year || ''}</span>
+        ${formatTagHtml(item)}
+      </div>`;
+  }
+
+  function groupRowTemplate(unit, withThumb) {
+    const sorted = [...unit.items].sort((a, b) => (a.release_year || 0) - (b.release_year || 0));
+    const first = sorted[0];
+    const years = sorted.map((i) => i.release_year).filter(Boolean);
+    const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '';
+    const thumb = withThumb
+      ? `<div class="w-8 h-12 shrink-0 rounded-sm overflow-hidden bg-[#1E1E26]">
+           ${
+             first.poster_path
+               ? `<img src="${escapeAttr(THUMB_BASE + first.poster_path)}" alt="" loading="lazy" class="w-full h-full object-cover">`
+               : ''
+           }
+         </div>`
+      : '';
+
+    return `
+      <div data-open-group="${escapeAttr(unit.saga)}"
+        class="case-card flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded"
+        role="button" tabindex="0">
+        ${thumb}
+        <span class="w-2 shrink-0"></span>
+        <span class="flex-1 min-w-0 truncate text-sm text-ink">${escapeHtml(unit.saga)}</span>
+        <span class="font-mono text-[11px] text-gold shrink-0">${unit.items.length} delen</span>
+        <span class="font-mono text-[11px] text-muted w-20 text-right shrink-0">${escapeHtml(yearRange)}</span>
+      </div>`;
   }
 
   function posterFallbackHtml(title) {
@@ -821,15 +949,21 @@ function initCollectionApp(config) {
     }
 
     // Cast: met portretfoto's als die er zijn, anders gewoon de namen.
+    // Heeft een acteur een TMDb-id, dan is de kaart klikbaar naar zijn profiel.
     const castList = els.modal.querySelector('[data-field="cast-list"]');
     if (castList) {
       const details = item.cast_details || [];
       if (details.length) {
         castList.innerHTML = details
-          .map(
-            (c) => `
-              <div class="w-20 shrink-0 text-center">
-                <div class="w-20 h-20 rounded-full overflow-hidden bg-bg ring-1 ring-white/10 mb-1">
+          .map((c) => {
+            const clickable = !!c.id;
+            return `
+              <div class="w-20 shrink-0 text-center ${clickable ? 'cursor-pointer group/person' : ''}"
+                ${clickable ? `data-person-id="${escapeAttr(c.id)}" role="button" tabindex="0"` : ''}
+                ${clickable ? `title="Bekijk alles van ${escapeAttr(c.name)}"` : ''}>
+                <div class="w-20 h-20 rounded-full overflow-hidden bg-bg ring-1 ring-white/10 mb-1 ${
+                  clickable ? 'group-hover/person:ring-gold' : ''
+                }">
                   ${
                     c.profile_path
                       ? `<img src="${escapeAttr(PROFILE_BASE + c.profile_path)}" alt="${escapeAttr(c.name)}" loading="lazy" class="w-full h-full object-cover">`
@@ -838,15 +972,294 @@ function initCollectionApp(config) {
                 </div>
                 <p class="text-[11px] leading-tight text-ink truncate" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</p>
                 ${c.character ? `<p class="text-[10px] leading-tight text-muted truncate" title="${escapeAttr(c.character)}">${escapeHtml(c.character)}</p>` : ''}
-              </div>`
-          )
+              </div>`;
+          })
           .join('');
+
+        castList.querySelectorAll('[data-person-id]').forEach((el) => {
+          el.addEventListener('click', () => openPersonModal(el.dataset.personId));
+          el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openPersonModal(el.dataset.personId);
+            }
+          });
+        });
       } else {
         castList.innerHTML = `<p class="text-sm text-muted">${escapeHtml((item.cast || []).join(', ') || '—')}</p>`;
       }
     }
 
+    // Crew: klikbaar zodra de titel ververst is. Zolang dat niet gebeurd is,
+    // tonen we de oude tekstvelden.
+    const crewBlock = els.modal.querySelector('[data-field="crew-block"]');
+    const crewFallback = els.modal.querySelector('[data-field="crew-fallback"]');
+    const crewList = els.modal.querySelector('[data-field="crew-list"]');
+    const crewDetails = item.crew_details || [];
+    if (crewBlock && crewList && crewFallback) {
+      crewBlock.classList.toggle('hidden', crewDetails.length === 0);
+      crewFallback.classList.toggle('hidden', crewDetails.length > 0);
+      if (crewDetails.length) {
+        crewList.innerHTML = crewDetails
+          .map((c) => {
+            const clickable = !!c.id;
+            return `
+              <span class="text-sm">
+                <span class="text-muted font-mono uppercase text-[10px]">${escapeHtml(c.jobs.join(' · '))}</span><br>
+                ${
+                  clickable
+                    ? `<button type="button" data-person-id="${escapeAttr(c.id)}" class="text-ink hover:text-gold underline decoration-white/20 underline-offset-2">${escapeHtml(c.name)}</button>`
+                    : escapeHtml(c.name)
+                }
+              </span>`;
+          })
+          .join('');
+        crewList.querySelectorAll('[data-person-id]').forEach((el) => {
+          el.addEventListener('click', () => openPersonModal(el.dataset.personId));
+        });
+      }
+    }
+
     showSagaCompleteness(item);
+  }
+
+  // ---------- Personen ----------
+
+  const personCache = {};
+  let personState = { data: null, filter: 'all', shown: 40, bioExpanded: false };
+  const PERSON_PAGE = 40;
+  // Volgnummer per aanvraag: klik je snel door naar een andere persoon, dan
+  // mag het trage antwoord van de vorige het scherm niet meer overschrijven.
+  let personRequestSeq = 0;
+
+  // Koppelt een TMDb-titel aan wat jij in je collectie hebt.
+  function ownedIndexByTmdb() {
+    const index = {};
+    state.all.forEach((m) => {
+      if (m.tmdb_id) index[String(m.tmdb_id)] = m;
+    });
+    return index;
+  }
+
+  function personCreditRowHtml(credit, mine) {
+    const owned = mine && !mine.wishlist;
+    const onWishlist = mine && mine.wishlist;
+    const year = credit.release_year || '—';
+    const roles = credit.roles.length ? credit.roles.slice(0, 3).join(' · ') : '';
+    const typeLabel = credit.media_type === 'tv' ? 'serie' : '';
+
+    let marker;
+    if (owned) marker = '<span class="font-mono text-[11px] text-teal shrink-0">✓ in bezit</span>';
+    else if (onWishlist) marker = '<span class="font-mono text-[11px] text-gold shrink-0">verlanglijst</span>';
+    else marker = '<span class="font-mono text-[11px] text-muted/60 shrink-0">—</span>';
+
+    return `
+      <div class="flex items-center gap-3 py-1.5 ${owned ? '' : 'opacity-75'} ${
+      mine ? 'cursor-pointer hover:bg-white/5 rounded px-1' : 'px-1'
+    }" ${mine ? `data-open-owned="${escapeAttr(mine.id)}" role="button" tabindex="0"` : ''}>
+        <span class="font-mono text-[11px] text-muted w-10 shrink-0">${year}</span>
+        <span class="flex-1 min-w-0">
+          <span class="block truncate text-sm text-ink">${escapeHtml(credit.title)}${
+      typeLabel ? ` <span class="text-muted font-mono text-[10px]">${typeLabel}</span>` : ''
+    }</span>
+          ${roles ? `<span class="block truncate text-[11px] text-muted">${escapeHtml(roles)}</span>` : ''}
+        </span>
+        ${marker}
+      </div>`;
+  }
+
+  function renderPersonCredits() {
+    const m = els.personModal;
+    if (!m || !personState.data) return;
+    const index = ownedIndexByTmdb();
+    const listEl = m.querySelector('[data-person-credits]');
+    const moreBtn = m.querySelector('[data-person-more]');
+
+    const all = personState.data.credits;
+    const filtered = all.filter((c) => {
+      const mine = index[String(c.tmdb_id)];
+      if (personState.filter === 'owned') return mine && !mine.wishlist;
+      if (personState.filter === 'missing') return !mine || mine.wishlist;
+      return true;
+    });
+
+    const visible = filtered.slice(0, personState.shown);
+    listEl.innerHTML = visible.length
+      ? visible.map((c) => personCreditRowHtml(c, index[String(c.tmdb_id)])).join('')
+      : '<p class="text-sm text-muted py-3">Niets gevonden met dit filter.</p>';
+
+    moreBtn.classList.toggle('hidden', personState.shown >= filtered.length);
+    moreBtn.textContent = `Toon meer (${filtered.length - personState.shown} resterend)`;
+
+    listEl.querySelectorAll('[data-open-owned]').forEach((el) => {
+      el.addEventListener('click', () => {
+        closePersonModal();
+        openModal(el.dataset.openOwned);
+      });
+    });
+  }
+
+  async function openPersonModal(personId) {
+    const m = els.personModal;
+    if (!m) return;
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    if (!c.tmdbKey || typeof tmdbPerson !== 'function') return;
+
+    const myRequest = ++personRequestSeq;
+    personState = { data: null, filter: 'all', shown: PERSON_PAGE, bioExpanded: false };
+
+    m.querySelector('[data-person-name]').textContent = 'Laden…';
+    m.querySelector('[data-person-meta]').textContent = '';
+    m.querySelector('[data-person-owned]').textContent = '';
+    m.querySelector('[data-person-bio]').textContent = '';
+    m.querySelector('[data-person-credits]').innerHTML = '';
+    m.querySelector('[data-person-photo]').removeAttribute('src');
+    m.querySelector('[data-person-appearances-wrap]').classList.add('hidden');
+    m.querySelectorAll('[data-person-filter]').forEach((b) =>
+      b.classList.toggle('chip-active', b.dataset.personFilter === 'all')
+    );
+    m.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+
+    let person;
+    try {
+      person = personCache[personId] || (personCache[personId] = await tmdbPerson(personId, c.tmdbKey));
+    } catch (err) {
+      if (myRequest !== personRequestSeq) return;
+      m.querySelector('[data-person-name]').textContent = 'Kon deze persoon niet laden';
+      m.querySelector('[data-person-meta]').textContent = err.message;
+      return;
+    }
+
+    // Intussen doorgeklikt naar iemand anders, of het venster gesloten?
+    // Dan dit antwoord laten vallen.
+    if (myRequest !== personRequestSeq || m.classList.contains('hidden')) return;
+
+    personState.data = person;
+
+    m.querySelector('[data-person-name]').textContent = person.name;
+
+    const photo = m.querySelector('[data-person-photo]');
+    if (person.profile_path) {
+      photo.src = PROFILE_BASE + person.profile_path;
+      photo.alt = person.name;
+    }
+
+    const bits = [];
+    const DEPT = { Acting: 'Acteur', Directing: 'Regisseur', Writing: 'Scenarist', Sound: 'Muziek', Production: 'Productie' };
+    if (person.known_for_department) bits.push(DEPT[person.known_for_department] || person.known_for_department);
+    if (person.birthday) {
+      const born = new Date(person.birthday);
+      if (!isNaN(born)) {
+        if (person.deathday) {
+          const died = new Date(person.deathday);
+          bits.push(`${born.getFullYear()}–${isNaN(died) ? '' : died.getFullYear()}`);
+        } else {
+          const age = Math.floor((Date.now() - born) / 31557600000);
+          bits.push(`geboren ${born.toLocaleDateString('nl-BE')} (${age})`);
+        }
+      }
+    }
+    if (person.place_of_birth) bits.push(person.place_of_birth);
+    m.querySelector('[data-person-meta]').textContent = bits.join(' · ');
+
+    // Hoeveel van deze filmografie staat er bij jou in de kast?
+    const index = ownedIndexByTmdb();
+    const ownedCount = person.credits.filter((cr) => {
+      const mine = index[String(cr.tmdb_id)];
+      return mine && !mine.wishlist;
+    }).length;
+    m.querySelector('[data-person-owned]').textContent = ownedCount
+      ? `Je bezit ${ownedCount} van de ${person.credits.length} titels`
+      : `Nog geen van deze ${person.credits.length} titels in je collectie`;
+
+    // Biografie inkorten tot een leesbaar blok, met knop om uit te klappen.
+    const bioEl = m.querySelector('[data-person-bio]');
+    const bioBtn = m.querySelector('[data-person-bio-toggle]');
+    const bio = person.biography || '';
+    const SHORT = 320;
+    const applyBio = () => {
+      if (!bio) {
+        bioEl.textContent = 'Geen biografie beschikbaar.';
+        bioBtn.classList.add('hidden');
+        return;
+      }
+      if (bio.length <= SHORT) {
+        bioEl.textContent = bio;
+        bioBtn.classList.add('hidden');
+        return;
+      }
+      bioEl.textContent = personState.bioExpanded ? bio : bio.slice(0, SHORT).trimEnd() + '…';
+      bioBtn.classList.remove('hidden');
+      bioBtn.textContent = personState.bioExpanded ? 'Minder' : 'Meer lezen';
+    };
+    applyBio();
+    bioBtn.onclick = () => {
+      personState.bioExpanded = !personState.bioExpanded;
+      applyBio();
+    };
+
+    renderPersonCredits();
+
+    // Gastoptredens als zichzelf staan apart, achter een knop.
+    const appWrap = m.querySelector('[data-person-appearances-wrap]');
+    const appList = m.querySelector('[data-person-appearances]');
+    const appBtn = m.querySelector('[data-person-appearances-toggle]');
+    if (person.appearances.length) {
+      appWrap.classList.remove('hidden');
+      appList.classList.add('hidden');
+      appBtn.textContent = `Gastoptredens als zichzelf tonen (${person.appearances.length})`;
+      appBtn.onclick = () => {
+        const hidden = appList.classList.toggle('hidden');
+        appBtn.textContent = hidden
+          ? `Gastoptredens als zichzelf tonen (${person.appearances.length})`
+          : 'Gastoptredens verbergen';
+        if (!hidden && !appList.dataset.filled) {
+          const idx = ownedIndexByTmdb();
+          appList.innerHTML = person.appearances
+            .map((cr) => personCreditRowHtml(cr, idx[String(cr.tmdb_id)]))
+            .join('');
+          appList.dataset.filled = '1';
+        }
+      };
+      delete appList.dataset.filled;
+      appList.innerHTML = '';
+    } else {
+      appWrap.classList.add('hidden');
+    }
+  }
+
+  function closePersonModal() {
+    if (!els.personModal) return;
+    els.personModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  }
+
+  if (els.personModal) {
+    els.personModal.addEventListener('click', (e) => {
+      if (e.target === els.personModal) closePersonModal();
+    });
+    const closeBtn = els.personModal.querySelector('[data-person-close]');
+    if (closeBtn) closeBtn.addEventListener('click', closePersonModal);
+
+    els.personModal.querySelectorAll('[data-person-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        personState.filter = btn.dataset.personFilter;
+        personState.shown = PERSON_PAGE;
+        els.personModal.querySelectorAll('[data-person-filter]').forEach((b) => {
+          b.classList.toggle('chip-active', b === btn);
+        });
+        renderPersonCredits();
+      });
+    });
+
+    const moreBtn = els.personModal.querySelector('[data-person-more]');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', () => {
+        personState.shown += PERSON_PAGE;
+        renderPersonCredits();
+      });
+    }
   }
 
   // ---------- Reeks-compleetheid ----------
@@ -1361,6 +1774,7 @@ function initCollectionApp(config) {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
+      else if (els.personModal && !els.personModal.classList.contains('hidden')) closePersonModal();
       else if (els.groupModal && !els.groupModal.classList.contains('hidden')) closeGroupModal();
       else closeModal();
     }
@@ -1412,6 +1826,22 @@ function initCollectionApp(config) {
     });
   }
 
+  if (els.viewChips) {
+    els.viewChips.querySelectorAll('[data-view]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        state.view = chip.dataset.view;
+        try {
+          localStorage.setItem(VIEW_STORAGE_KEY, state.view);
+        } catch {
+          // Voorkeur niet kunnen bewaren is niet erg; de weergave werkt gewoon.
+        }
+        state.visibleCount = pageSizeForView(state.view);
+        render();
+      });
+    });
+    applyViewClasses();
+  }
+
   if (els.groupToggle) {
     els.groupToggle.addEventListener('click', () => {
       state.groupSagas = !state.groupSagas;
@@ -1421,7 +1851,7 @@ function initCollectionApp(config) {
   }
 
   els.loadMore.addEventListener('click', () => {
-    state.visibleCount += PAGE_SIZE;
+    state.visibleCount += pageSizeForView(state.view);
     render();
   });
 }
