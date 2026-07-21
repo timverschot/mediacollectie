@@ -29,6 +29,7 @@ function initCollectionApp(config) {
     activeGenres: new Set(),
     activeStatus: new Set(),   // 'owned' / 'wishlist'
     activeWatched: new Set(),  // 'watched' / 'unwatched'
+    activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
@@ -43,6 +44,7 @@ function initCollectionApp(config) {
     formatChips: document.getElementById('format-chips'),
     typeChips: document.getElementById('type-chips'),
     genreChips: document.getElementById('genre-chips'),
+    decadeChips: document.getElementById('decade-chips'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
@@ -81,6 +83,18 @@ function initCollectionApp(config) {
 
   function sagaOf(item) {
     return (item.saga || '').trim();
+  }
+
+  // Decennium waarin een titel uitkwam: 1994 → 1990. Null als er geen jaar is.
+  function decadeOf(item) {
+    const y = Number(item.release_year);
+    if (!y || y < 1000) return null;
+    return Math.floor(y / 10) * 10;
+  }
+
+  function decadeLabel(decade) {
+    // 1990 → "jaren '90", 2000 → "jaren '00"
+    return "jaren '" + String(decade).slice(2);
   }
 
   function posterUrl(item) {
@@ -146,7 +160,7 @@ function initCollectionApp(config) {
       } catch (err) {
         console.error('Achtergrond-opslag mislukt:', err);
         if (revertFn) revertFn();
-        buildGenreChips(state.all);
+        buildFacetChips(state.all);
         applyFilters();
         setIndicator('error');
         alert('Opslaan mislukt: ' + err.message + '\nJe wijziging is teruggedraaid.');
@@ -167,7 +181,7 @@ function initCollectionApp(config) {
           });
     return p.then((data) => {
       state.all = data;
-      buildGenreChips(data);
+      buildFacetChips(data);
       applyFilters();
     });
   }
@@ -202,6 +216,48 @@ function initCollectionApp(config) {
         });
         els.genreChips.appendChild(chip);
       });
+  }
+
+  // Decennia komen uit de collectie zelf: je ziet dus enkel decennia die je
+  // ook echt bezit, van oud naar nieuw. Titels zonder jaar krijgen een
+  // aparte chip 'onbekend'.
+  function buildDecadeChips(data) {
+    if (!els.decadeChips) return;
+    const decades = new Set();
+    let hasUnknown = false;
+    data.forEach((item) => {
+      const d = decadeOf(item);
+      if (d === null) hasUnknown = true;
+      else decades.add(d);
+    });
+
+    const values = [...decades].sort((a, b) => a - b);
+    if (hasUnknown) values.push('unknown');
+
+    els.decadeChips.innerHTML = '';
+    values.forEach((value) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeDecades.has(value) ? ' chip-active' : '');
+      chip.textContent = value === 'unknown' ? 'onbekend' : decadeLabel(value);
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeDecades, value);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.decadeChips.appendChild(chip);
+    });
+
+    // Decennia die intussen uit de collectie verdwenen zijn, niet blijven filteren.
+    [...state.activeDecades].forEach((v) => {
+      if (!values.includes(v)) state.activeDecades.delete(v);
+    });
+  }
+
+  // Alle chips die uit de data zelf worden afgeleid, in één keer opnieuw opbouwen.
+  function buildFacetChips(data) {
+    buildGenreChips(data);
+    buildDecadeChips(data);
   }
 
   function buildLetterChips() {
@@ -255,6 +311,10 @@ function initCollectionApp(config) {
       if (state.activeWatched.size) {
         const w = item.watched ? 'watched' : 'unwatched';
         if (!state.activeWatched.has(w)) return false;
+      }
+      if (state.activeDecades.size) {
+        const d = decadeOf(item);
+        if (!state.activeDecades.has(d === null ? 'unknown' : d)) return false;
       }
       if (state.activeLetter && firstLetter(item) !== state.activeLetter) return false;
       return true;
@@ -368,7 +428,7 @@ function initCollectionApp(config) {
     const removed = state.all.find((m) => m.id === id);
     const idx = state.all.indexOf(removed);
     state.all = state.all.filter((m) => m.id !== id);
-    buildGenreChips(state.all);
+    buildFacetChips(state.all);
     applyFilters();
     if (!els.modal.classList.contains('hidden')) closeModal();
 
@@ -840,7 +900,7 @@ function initCollectionApp(config) {
       const sagaInput = m.querySelector('[data-edit-saga]');
       if (sagaInput) item.saga = sagaInput.value.trim();
 
-      buildGenreChips(state.all);
+      buildFacetChips(state.all);
       applyFilters();
       openModal(item.id);
 
@@ -901,7 +961,7 @@ function initCollectionApp(config) {
       if (fresh.saga) item.saga = fresh.saga;
       if (fresh.seasons) item.seasons = fresh.seasons;
 
-      buildGenreChips(state.all);
+      buildFacetChips(state.all);
       applyFilters();
       openModal(item.id);
       const panel = m.querySelector('[data-edit-panel]');
