@@ -1,0 +1,48 @@
+{
+  "name": "Mijn Mediacollectie",
+  "short_name": "Mediacollectie",
+  "description": "Persoonlijke verzameling van films en series op DVD, Blu-ray en 4K Ultra HD.",
+  "lang": "nl",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#14141A",
+  "theme_color": "#14141A",
+  "categories": ["entertainment", "utilities"],
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Statistieken",
+      "short_name": "Cijfers",
+      "url": "./statistieken.html",
+      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Prijzen",
+      "short_name": "Prijzen",
+      "url": "./prijzen.html",
+      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
