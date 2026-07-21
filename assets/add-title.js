@@ -19,6 +19,18 @@
  * pagina. onSaved(entry) wordt aangeroepen na een geslaagde opslag.
  */
 
+// Laatst gekozen formaat onthouden. Beginwaarde is DVD: dat is voor de meeste
+// verzamelingen het grootste deel, en het scheelt handmatig omschakelen.
+const ADD_FORMAT_KEY = 'mediacollectie_last_format';
+
+function addTitlePreferredFormat() {
+  try {
+    const v = localStorage.getItem(ADD_FORMAT_KEY);
+    if (v && typeof FORMAT_BY_VALUE !== 'undefined' && FORMAT_BY_VALUE[v]) return v;
+  } catch {}
+  return 'dvd';
+}
+
 let addTitleSelectedDetails = null;
 let addTitleExistingEntry = null; // bestaande collectie-entry met dezelfde slug (of null)
 let addTitleOnSaved = null;
@@ -32,16 +44,165 @@ function initAddTitleUI(onSaved) {
   document.getElementById('add-form').addEventListener('submit', addTitleSubmit);
 
   // Formaatkeuze opbouwen uit de gedeelde lijst (drive.js), zodat er maar één
-  // plek is waar formaten gedefinieerd staan.
+  // plek is waar formaten gedefinieerd staan. Het laatst gekozen formaat wordt
+  // onthouden — wie een kast vol dvd's invoert, wil niet elke keer omschakelen.
   const formatSel = document.getElementById('form-format');
   if (formatSel && typeof MEDIA_FORMATS !== 'undefined') {
+    const preferred = addTitlePreferredFormat();
     formatSel.innerHTML = MEDIA_FORMATS.map(
-      (f) => `<option value="${f.value}"${f.value === 'bluray' ? ' selected' : ''}>${addTitleEscapeHtml(f.label)}</option>`
+      (f) => `<option value="${f.value}"${f.value === preferred ? ' selected' : ''}>${addTitleEscapeHtml(f.label)}</option>`
     ).join('');
+    formatSel.addEventListener('change', () => {
+      try {
+        localStorage.setItem(ADD_FORMAT_KEY, formatSel.value);
+      } catch {
+        // Voorkeur niet kunnen bewaren is niet erg.
+      }
+    });
   }
 
   const bulkBtn = document.getElementById('saga-bulk-btn');
   if (bulkBtn) bulkBtn.addEventListener('click', addTitleAddWholeSaga);
+
+  const bulkAdd = document.getElementById('bulk-add-btn');
+  if (bulkAdd) bulkAdd.addEventListener('click', addTitleBulkSubmit);
+
+  const bulkClear = document.getElementById('bulk-clear-btn');
+  if (bulkClear) {
+    bulkClear.addEventListener('click', () => {
+      addTitleBulkSelection = [];
+      document.querySelectorAll('#search-results .bulk-pick').forEach((cb) => {
+        cb.checked = false;
+        const card = cb.closest('.result-card');
+        if (card) card.classList.remove('selected');
+      });
+      addTitleUpdateBulkBar();
+    });
+  }
+}
+
+// ---------- Meerdere titels tegelijk toevoegen ----------
+
+let addTitleBulkSelection = [];
+
+function addTitleUpdateBulkBar() {
+  const bar = document.getElementById('bulk-add-bar');
+  if (!bar) return;
+  const n = addTitleBulkSelection.length;
+  bar.classList.toggle('hidden', n === 0);
+  const count = document.getElementById('bulk-add-count');
+  if (count) count.textContent = `${n} titel${n === 1 ? '' : 's'}`;
+
+  const sel = document.getElementById('bulk-format');
+  if (sel && !sel.options.length && typeof MEDIA_FORMATS !== 'undefined') {
+    const preferred = addTitlePreferredFormat();
+    sel.innerHTML = MEDIA_FORMATS.map(
+      (f) => `<option value="${f.value}"${f.value === preferred ? ' selected' : ''}>${addTitleEscapeHtml(f.label)}</option>`
+    ).join('');
+  }
+}
+
+/**
+ * Voegt alle aangevinkte zoekresultaten in één keer toe met dezelfde
+ * instellingen. Bedoeld voor reeksen als Ace Ventura: aanvinken, formaat
+ * kiezen, klaar. Titels die je al hebt worden overgeslagen.
+ */
+async function addTitleBulkSubmit() {
+  const c = getConfig();
+  const btn = document.getElementById('bulk-add-btn');
+  const status = document.getElementById('bulk-add-status');
+  const setStatus = (t, cls) => {
+    status.textContent = t;
+    status.className = 'text-sm font-mono ' + (cls || 'text-muted');
+  };
+
+  if (!addTitleBulkSelection.length) return;
+  const format = document.getElementById('bulk-format').value;
+  const wishlist = document.getElementById('bulk-owned').value === 'wishlist';
+  const boxset = (document.getElementById('bulk-boxset').value || '').trim();
+
+  btn.disabled = true;
+  try {
+    localStorage.setItem(ADD_FORMAT_KEY, format);
+  } catch {}
+
+  const { movies } = await driveLoadMovies();
+  const existingIds = new Set(movies.map((m) => m.id));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const entries = [];
+  const skipped = [];
+
+  for (let i = 0; i < addTitleBulkSelection.length; i++) {
+    const r = addTitleBulkSelection[i];
+    const label = r.title || r.name;
+    setStatus(`(${i + 1}/${addTitleBulkSelection.length}) ${label}…`);
+    try {
+      const details = await tmdbDetails(r.id, r.media_type === 'tv' ? 'tv' : 'movie', c.tmdbKey);
+      const slug = slugify(details.title, details.release_year);
+      if (existingIds.has(slug)) {
+        skipped.push(details.title);
+        continue;
+      }
+      const entry = {
+        id: slug,
+        content_type: r.media_type === 'tv' ? 'tv' : 'movie',
+        date_added: today,
+        watched: false,
+        editions: [
+          {
+            eid: 'e1',
+            format,
+            notes: '',
+            boxset,
+            location: '',
+            steelbook: false,
+            wishlist,
+            date_added: today,
+            custom_front_cover_id: '',
+            custom_back_cover_id: '',
+            custom_front_cover: '',
+            custom_back_cover: '',
+          },
+        ],
+        ...details,
+        seasons: details.seasons ? details.seasons.map((s) => ({ ...s, owned: false, format: '' })) : [],
+      };
+      normalizeMovieEntry(entry);
+      entries.push(entry);
+      existingIds.add(slug);
+    } catch (err) {
+      console.warn('Overgeslagen:', label, err);
+      skipped.push(label + ' (fout)');
+    }
+    await new Promise((res) => setTimeout(res, 200));
+  }
+
+  if (!entries.length) {
+    setStatus(skipped.length ? 'Niets toegevoegd — alles stond er al.' : 'Niets toegevoegd.', 'text-gold');
+    btn.disabled = false;
+    return;
+  }
+
+  setStatus('Opslaan naar Drive…');
+  try {
+    await upsertMoviesBatchInDrive(entries);
+    setStatus(
+      `✓ ${entries.length} toegevoegd` + (skipped.length ? `, ${skipped.length} overgeslagen (stond er al)` : '') + '.',
+      'text-teal'
+    );
+    addTitleBulkSelection = [];
+    document.querySelectorAll('#search-results .bulk-pick').forEach((cb) => {
+      cb.checked = false;
+      cb.closest('.result-card').classList.remove('selected');
+    });
+    addTitleUpdateBulkBar();
+    if (addTitleOnSaved) addTitleOnSaved(entries[0]);
+  } catch (err) {
+    setStatus('✗ ' + err.message, 'text-red-400');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // Bouwt één exemplaar op basis van wat er in het formulier staat.
@@ -86,22 +247,62 @@ async function addTitleDoSearch() {
       return;
     }
     resultsEl.innerHTML = '';
-    results.slice(0, 8).forEach((r) => {
+    addTitleBulkSelection = [];
+    addTitleUpdateBulkBar();
+
+    results.slice(0, 12).forEach((r) => {
       const title = r.title || r.name;
       const date = r.release_date || r.first_air_date || '';
       const div = document.createElement('div');
-      div.className = 'result-card';
+      div.className = 'result-card relative';
       div.innerHTML = `
+        <label class="absolute top-1 left-1 z-10 flex items-center justify-center w-7 h-7 rounded bg-black/70 cursor-pointer"
+          title="Selecteer om samen toe te voegen">
+          <input type="checkbox" class="w-4 h-4 bulk-pick" >
+        </label>
         ${r.poster_path ? `<img src="${TMDB_IMG_BASE}${r.poster_path}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
         <p class="text-xs truncate">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
       `;
-      div.addEventListener('click', () => addTitleSelectResult(r));
+
+      // Klik op de kaart = één titel openen met alle keuzes.
+      // Vinkje = toevoegen aan de meervoudige selectie.
+      div.addEventListener('click', (ev) => {
+        if (ev.target.closest('label')) return;
+        addTitleSelectResult(r);
+      });
+
+      const cb = div.querySelector('.bulk-pick');
+      cb.addEventListener('change', () => {
+        if (cb.checked) addTitleBulkSelection.push(r);
+        else addTitleBulkSelection = addTitleBulkSelection.filter((x) => x.id !== r.id);
+        div.classList.toggle('selected', cb.checked);
+        addTitleUpdateBulkBar();
+      });
+
       resultsEl.appendChild(div);
     });
   } catch (err) {
     resultsEl.innerHTML = `<p class="col-span-full text-red-400 text-sm">${addTitleEscapeHtml(err.message)}</p>`;
   }
+}
+
+/**
+ * Opent het volledige toevoegformulier voor één TMDb-titel, zonder dat je
+ * eerst hoeft te zoeken. Wordt gebruikt vanuit de reekslijst in de
+ * detailweergave: klik op een ontbrekend deel en je krijgt dezelfde keuzes
+ * als bij een gewone toevoeging — formaat, status, hoesfoto's, boxset.
+ */
+async function addTitleOpenForTmdb(tmdbId, mediaType) {
+  const results = document.getElementById('search-results');
+  if (results) results.innerHTML = '';
+  addTitleBulkSelection = [];
+  addTitleUpdateBulkBar();
+
+  const sagaBulk = document.getElementById('saga-bulk');
+  if (sagaBulk) sagaBulk.classList.add('hidden');
+
+  await addTitleSelectResult({ id: tmdbId, media_type: mediaType === 'tv' ? 'tv' : 'movie' });
 }
 
 async function addTitleSelectResult(r) {
