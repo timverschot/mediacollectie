@@ -2,9 +2,17 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Statistieken — Mijn Mediacollectie</title>
 <meta name="description" content="Overzicht en cijfers van je fysieke mediacollectie.">
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#14141A">
+<link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mediacollectie">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -55,18 +63,37 @@
 
   .panel { background: #1E1E26; border-radius: 0.75rem; padding: 1.25rem; box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
   .panel h2 { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; letter-spacing: 0.03em; margin-bottom: 0.75rem; }
+
+  /* ---------- Mobiel (fase 6) ---------- */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header .sprocket-strip { margin-top: env(safe-area-inset-top); }
+
+  @media (pointer: coarse) {
+    .chip { padding: 0.55rem 1rem; }
+    .nav-link { padding: 0.35rem 0; }
+  }
+
+  @media (max-width: 639px) {
+    /* Meer ruimte voor de balken zelf: labels smaller en compacter paneel */
+    .panel { padding: 0.9rem; border-radius: 0.6rem; }
+    .panel h2 { font-size: 1.3rem; }
+  }
 </style>
 </head>
 <body class="font-body text-ink min-h-screen">
 
   <header class="border-b border-white/5">
     <div class="sprocket-strip h-2 w-full opacity-60"></div>
-    <div class="max-w-6xl mx-auto px-6 py-8 flex items-end justify-between flex-wrap gap-4">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3 sm:gap-4">
       <div>
         <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
-        <h1 class="font-display text-4xl sm:text-5xl tracking-wide text-ink">Statistieken</h1>
+        <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Statistieken</h1>
       </div>
-      <nav class="flex gap-4 sm:gap-6">
+      <nav class="flex gap-4 sm:gap-6 overflow-x-auto w-full sm:w-auto">
         <a href="index.html" class="nav-link">Collectie</a>
         <a href="statistieken.html" class="nav-link active">Statistieken</a>
         <a href="prijzen.html" class="nav-link">Prijzen</a>
@@ -75,7 +102,7 @@
     </div>
   </header>
 
-  <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-5 sm:space-y-6">
 
     <!-- Bereik: enkel bezit, of ook verlanglijst -->
     <div class="flex flex-wrap gap-2 items-center">
@@ -160,6 +187,12 @@
   <script src="assets/drive.js"></script>
   <script src="assets/stats.js"></script>
   <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
 
     window._driveError = function (msg) {
