@@ -768,6 +768,7 @@ function initCollectionApp(config) {
     const wrap = els.modal.querySelector('[data-backdrop-wrap]');
     const img = els.modal.querySelector('[data-backdrop]');
     const bd = backdropUrl(item);
+    const body = els.modal.querySelector('[data-detail-body]');
     if (wrap && img) {
       wrap.classList.toggle('hidden', !bd);
       if (bd) {
@@ -777,6 +778,8 @@ function initCollectionApp(config) {
         img.removeAttribute('src');
       }
     }
+    // De poster mag enkel over de achtergrond schuiven als die er ook is.
+    if (body) body.classList.toggle('with-backdrop', !!bd);
 
     // Originele titel enkel tonen als ze afwijkt van de Nederlandse.
     const original = item.original_title && item.original_title !== item.title ? item.original_title : '';
@@ -924,8 +927,8 @@ function initCollectionApp(config) {
 
         return `
           <div class="flex items-center justify-between gap-2 text-sm ${owned ? '' : 'opacity-75'}">
-            <span class="truncate">${escapeHtml(p.title)} <span class="text-muted font-mono text-xs">(${year})</span></span>
-            ${right}
+            <span class="truncate min-w-0">${escapeHtml(p.title)} <span class="text-muted font-mono text-xs">(${year})</span></span>
+            <span class="shrink-0">${right}</span>
           </div>`;
       })
       .join('');
@@ -1046,8 +1049,8 @@ function initCollectionApp(config) {
           if (s.owned) {
             return `
               <div class="flex items-center justify-between text-sm">
-                <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-                <span class="flex items-center gap-2">
+                <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+                <span class="flex items-center gap-2 shrink-0">
                   <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
                   <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
                 </span>
@@ -1055,9 +1058,9 @@ function initCollectionApp(config) {
             `;
           }
           return `
-            <div class="flex items-center justify-between text-sm opacity-70">
-              <span>${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-              <span class="flex items-center gap-2">
+            <div class="flex items-center justify-between text-sm opacity-70 gap-2">
+              <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+              <span class="flex items-center gap-2 shrink-0">
                 <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-0.5 text-xs font-mono" data-season="${s.season_number}">
                   ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
                 </select>
