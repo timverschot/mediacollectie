@@ -65,6 +65,9 @@ function checkAssetVersions() {
   if (typeof addTitleOpenForTmdb === 'undefined' || typeof addTitleBulkSubmit === 'undefined') {
     missing.push('assets/add-title.js');
   }
+  if (typeof parseTitleList === 'undefined' || typeof initBulkImportUI === 'undefined') {
+    missing.push('assets/bulk-import.js');
+  }
   return missing;
 }
 
