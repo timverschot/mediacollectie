@@ -90,6 +90,7 @@ function initCollectionApp(config) {
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
     activeBoxsets: new Set(),  // namen van boxsets
+    activeLocations: new Set(), // waar de schijf fysiek ligt
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
     sort: 'date_added_desc',
@@ -112,6 +113,8 @@ function initCollectionApp(config) {
     certRow: document.getElementById('cert-row'),
     boxsetChips: document.getElementById('boxset-chips'),
     boxsetRow: document.getElementById('boxset-row'),
+    locationChips: document.getElementById('location-chips'),
+    locationRow: document.getElementById('location-row'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
@@ -423,43 +426,52 @@ function initCollectionApp(config) {
     });
   }
 
-  // Boxsets: enkel tonen als je er ook echt gebruik van maakt.
-  function buildBoxsetChips(data) {
-    if (!els.boxsetChips) return;
+  // Chiprij op basis van een veld binnen de exemplaren (boxset, locatie).
+  // Verschijnt pas zodra je dat veld ergens gebruikt.
+  function buildEditionFieldChips(data, field, activeSet, chipsEl, rowEl) {
+    if (!chipsEl) return;
     const counts = {};
     data.forEach((item) => {
-      const boxes = new Set(
-        (item.editions || []).map((e) => (e.boxset || '').trim()).filter(Boolean)
+      const values = new Set(
+        (item.editions || []).map((e) => (e[field] || '').trim()).filter(Boolean)
       );
-      boxes.forEach((b) => {
-        counts[b] = (counts[b] || 0) + 1;
+      values.forEach((v) => {
+        counts[v] = (counts[v] || 0) + 1;
       });
     });
     const values = Object.keys(counts).sort((a, b) => a.localeCompare(b));
 
-    if (els.boxsetRow) {
-      els.boxsetRow.classList.toggle('hidden', values.length === 0);
-      if (values.length) els.boxsetRow.classList.add('flex');
+    if (rowEl) {
+      rowEl.classList.toggle('hidden', values.length === 0);
+      if (values.length) rowEl.classList.add('flex');
     }
 
-    els.boxsetChips.innerHTML = '';
+    chipsEl.innerHTML = '';
     values.forEach((value) => {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'chip' + (state.activeBoxsets.has(value) ? ' chip-active' : '');
+      chip.className = 'chip' + (activeSet.has(value) ? ' chip-active' : '');
       chip.textContent = value;
       chip.title = `${counts[value]} titel(s)`;
       chip.addEventListener('click', () => {
-        toggleSetValue(state.activeBoxsets, value);
+        toggleSetValue(activeSet, value);
         chip.classList.toggle('chip-active');
         applyFilters();
       });
-      els.boxsetChips.appendChild(chip);
+      chipsEl.appendChild(chip);
     });
 
-    [...state.activeBoxsets].forEach((v) => {
-      if (!values.includes(v)) state.activeBoxsets.delete(v);
+    [...activeSet].forEach((v) => {
+      if (!values.includes(v)) activeSet.delete(v);
     });
+  }
+
+  function buildBoxsetChips(data) {
+    buildEditionFieldChips(data, 'boxset', state.activeBoxsets, els.boxsetChips, els.boxsetRow);
+  }
+
+  function buildLocationChips(data) {
+    buildEditionFieldChips(data, 'location', state.activeLocations, els.locationChips, els.locationRow);
   }
 
   // Alle chips die uit de data zelf worden afgeleid, in één keer opnieuw opbouwen.
@@ -469,6 +481,7 @@ function initCollectionApp(config) {
     buildDecadeChips(data);
     buildCertChips(data);
     buildBoxsetChips(data);
+    buildLocationChips(data);
   }
 
   function buildLetterChips() {
@@ -516,6 +529,10 @@ function initCollectionApp(config) {
         const boxes = (item.editions || []).map((e) => (e.boxset || '').trim()).filter(Boolean);
         if (!boxes.some((b) => state.activeBoxsets.has(b))) return false;
       }
+      if (state.activeLocations.size) {
+        const locs = (item.editions || []).map((e) => (e.location || '').trim()).filter(Boolean);
+        if (!locs.some((l) => state.activeLocations.has(l))) return false;
+      }
       if (state.activeTypes.size && !state.activeTypes.has(item.content_type)) return false;
       if (state.activeGenres.size) {
         const hasGenre = (item.genres || []).some((g) => state.activeGenres.has(g));
@@ -557,6 +574,16 @@ function initCollectionApp(config) {
           // Zelfde reeks: op releasejaar
           return (a.release_year || 0) - (b.release_year || 0);
         });
+      case 'my_rating_desc':
+        // Zonder eigen score achteraan, anders zou een lege waarde bovenaan komen.
+        return copy.sort((a, b) => (b.my_rating || -1) - (a.my_rating || -1));
+      case 'watched_desc': {
+        const last = (m) => {
+          const log = m.watch_log || [];
+          return log.length ? log[log.length - 1].date : '';
+        };
+        return copy.sort((a, b) => String(last(b)).localeCompare(String(last(a))));
+      }
       case 'year_desc':
         return copy.sort((a, b) => (b.release_year || 0) - (a.release_year || 0));
       case 'year_asc':
@@ -1140,6 +1167,7 @@ function initCollectionApp(config) {
                 </div>
                 <p class="text-[11px] leading-tight text-ink truncate" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</p>
                 ${c.character ? `<p class="text-[10px] leading-tight text-muted truncate" title="${escapeAttr(c.character)}">${escapeHtml(c.character)}</p>` : ''}
+                ${c.episode_count ? `<p class="text-[10px] leading-tight text-muted/70 font-mono">${c.episode_count} afl.</p>` : ''}
               </div>`;
           })
           .join('');
@@ -1262,6 +1290,302 @@ function initCollectionApp(config) {
       .join('');
 
     section.classList.remove('hidden');
+  }
+
+  // ---------- Klikbaar filteren (fase 13) ----------
+
+  // Klik je in de detailweergave op een genre, regisseur of jaar, dan sluit de
+  // pop-up en staat je collectie meteen op dat filter. Bestaande filters worden
+  // gewist, anders krijg je onbedoeld een lege lijst.
+  function applyQuickFilter(kind, value) {
+    state.activeGenres.clear();
+    state.activeDecades.clear();
+    state.activeCerts.clear();
+    state.activeBoxsets.clear();
+    state.activeLocations.clear();
+    state.activeLetter = null;
+    state.search = '';
+    els.search.value = '';
+
+    if (kind === 'genre') state.activeGenres.add(value);
+    if (kind === 'decade') state.activeDecades.add(Number(value));
+    if (kind === 'search') {
+      state.search = value;
+      els.search.value = value;
+    }
+
+    closeModal();
+    buildFacetChips(state.all);
+    applyFilters();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ---------- Kijkgeschiedenis en eigen score (fase 13) ----------
+
+  // item.watch_log = [{ date: '2026-07-21' }, ...] — oudste eerst.
+  function addWatchEntry(item, date) {
+    const d = date || new Date().toISOString().slice(0, 10);
+    item.watch_log = item.watch_log || [];
+    // Twee keer dezelfde dag telt als één kijkbeurt.
+    if (item.watch_log.some((e) => e.date === d)) return false;
+    item.watch_log.push({ date: d });
+    item.watch_log.sort((a, b) => a.date.localeCompare(b.date));
+    return true;
+  }
+
+  function renderWatchLog(item) {
+    const section = els.modal.querySelector('[data-field="watchlog-section"]');
+    const summary = els.modal.querySelector('[data-field="watchlog-summary"]');
+    const list = els.modal.querySelector('[data-field="watchlog-list"]');
+    const addBtn = els.modal.querySelector('[data-watchlog-add]');
+    if (!section || !summary || !list) return;
+
+    const log = item.watch_log || [];
+    section.classList.toggle('hidden', !item.watched && log.length === 0);
+    if (!item.watched && !log.length) return;
+
+    const fmt = (d) => {
+      const dt = new Date(d);
+      return isNaN(dt) ? d : dt.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    };
+
+    if (!log.length) {
+      summary.textContent = 'Gezien, maar zonder datum — die is er pas sinds deze versie.';
+      list.innerHTML = '';
+    } else if (log.length === 1) {
+      summary.textContent = `Gezien op ${fmt(log[0].date)}`;
+      list.innerHTML = '';
+    } else {
+      summary.textContent = `${log.length}× gezien, laatst op ${fmt(log[log.length - 1].date)}`;
+      list.innerHTML = log
+        .slice()
+        .reverse()
+        .map(
+          (e) => `
+            <div class="flex items-center justify-between gap-2 text-[11px] text-muted">
+              <span>${escapeHtml(fmt(e.date))}</span>
+              <button type="button" class="hover:text-red-400 underline" data-log-remove="${escapeAttr(e.date)}">verwijderen</button>
+            </div>`
+        )
+        .join('');
+    }
+
+    list.querySelectorAll('[data-log-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const before = JSON.parse(JSON.stringify(item.watch_log || []));
+        item.watch_log = (item.watch_log || []).filter((e) => e.date !== btn.dataset.logRemove);
+        openModal(item.id);
+        backgroundSave(
+          () => upsertMovieInDrive(item),
+          () => { item.watch_log = before; if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+        );
+      });
+    });
+
+    if (addBtn) {
+      addBtn.onclick = () => {
+        const before = JSON.parse(JSON.stringify(item.watch_log || []));
+        if (!addWatchEntry(item)) return; // vandaag stond er al in
+        item.watched = true;
+        applyFilters();
+        openModal(item.id);
+        backgroundSave(
+          () => upsertMovieInDrive(item),
+          () => { item.watch_log = before; if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+        );
+      };
+    }
+  }
+
+  function renderMyRating(item) {
+    const sel = els.modal.querySelector('[data-my-rating]');
+    if (!sel) return;
+    if (sel.options.length <= 1) {
+      for (let n = 10; n >= 1; n--) {
+        const o = document.createElement('option');
+        o.value = String(n);
+        o.textContent = String(n);
+        sel.appendChild(o);
+      }
+    }
+    sel.value = item.my_rating != null ? String(item.my_rating) : '';
+    sel.onchange = () => {
+      const before = item.my_rating;
+      const v = sel.value === '' ? null : Number(sel.value);
+      item.my_rating = v;
+      applyFilters();
+      backgroundSave(
+        () => upsertMovieInDrive(item),
+        () => { item.my_rating = before; if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+      );
+    };
+  }
+
+  // ---------- Afleveringen en kijkvoortgang (fase 13) ----------
+
+  // Opgehaalde seizoenen worden per bezoek onthouden.
+  const seasonCache = {};
+
+  // Welke afleveringen je gezien hebt, per seizoen:
+  //   item.watched_episodes = { "3": [1,2,3,5] }
+  function watchedEpisodes(item, seasonNumber) {
+    const map = item.watched_episodes || {};
+    return new Set(map[String(seasonNumber)] || []);
+  }
+
+  function setWatchedEpisodes(item, seasonNumber, set) {
+    if (!item.watched_episodes) item.watched_episodes = {};
+    const list = [...set].sort((a, b) => a - b);
+    if (list.length) item.watched_episodes[String(seasonNumber)] = list;
+    else delete item.watched_episodes[String(seasonNumber)];
+  }
+
+  function seasonProgress(item, season) {
+    const total = Number(season.episode_count) || 0;
+    const seen = watchedEpisodes(item, season.season_number).size;
+    return { seen, total, pct: total ? Math.round((seen / total) * 100) : 0 };
+  }
+
+  // Waar ben je gebleven: hoogste seizoen met kijkactiviteit, en daarbinnen de
+  // hoogste aflevering die je zag.
+  function lastWatchedPoint(item) {
+    const map = item.watched_episodes || {};
+    const seasons = Object.keys(map)
+      .map(Number)
+      .filter((n) => (map[String(n)] || []).length)
+      .sort((a, b) => b - a);
+    if (!seasons.length) return null;
+    const s = seasons[0];
+    const eps = map[String(s)];
+    return { season: s, episode: Math.max(...eps) };
+  }
+
+  function totalWatchedEpisodes(item) {
+    const map = item.watched_episodes || {};
+    return Object.values(map).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+  }
+
+  function totalOwnedEpisodes(item) {
+    return (item.seasons || [])
+      .filter((s) => s.owned)
+      .reduce((sum, s) => sum + (Number(s.episode_count) || 0), 0);
+  }
+
+  // Slaat de kijkvoortgang op. Voor series bepaalt de voortgang meteen of de
+  // titel als 'bekeken' geldt: alles gezien = bekeken.
+  function saveEpisodeProgress(item, revertSnapshot) {
+    const owned = totalOwnedEpisodes(item);
+    const seen = totalWatchedEpisodes(item);
+    if (owned) item.watched = seen >= owned;
+
+    applyFilters();
+    backgroundSave(
+      () => upsertMovieInDrive(item),
+      () => {
+        item.watched_episodes = revertSnapshot.episodes;
+        item.watched = revertSnapshot.watched;
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
+    );
+  }
+
+  function snapshotProgress(item) {
+    return {
+      episodes: JSON.parse(JSON.stringify(item.watched_episodes || {})),
+      watched: item.watched,
+    };
+  }
+
+  async function toggleSeasonEpisodes(item, season, container, btn) {
+    const open = container.dataset.open === '1';
+    if (open) {
+      container.classList.add('hidden');
+      container.dataset.open = '0';
+      btn.textContent = 'afleveringen ▾';
+      return;
+    }
+
+    container.classList.remove('hidden');
+    container.dataset.open = '1';
+    btn.textContent = 'afleveringen ▴';
+
+    if (container.dataset.loaded === '1') return;
+
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    if (!c.tmdbKey || !item.tmdb_id || typeof tmdbSeason !== 'function') {
+      container.innerHTML = '<p class="text-xs text-muted py-2">Geen TMDb-koppeling voor deze titel.</p>';
+      return;
+    }
+
+    container.innerHTML = '<p class="text-xs text-muted py-2">Afleveringen ophalen…</p>';
+    const cacheKey = `${item.tmdb_id}:${season.season_number}`;
+    let data;
+    try {
+      data = seasonCache[cacheKey] || (seasonCache[cacheKey] = await tmdbSeason(item.tmdb_id, season.season_number, c.tmdbKey));
+    } catch (err) {
+      container.innerHTML = `<p class="text-xs text-muted py-2">Kon de afleveringen niet ophalen: ${escapeHtml(err.message)}</p>`;
+      return;
+    }
+
+    container.dataset.loaded = '1';
+    renderEpisodes(item, season, data, container);
+  }
+
+  function renderEpisodes(item, season, data, container) {
+    const seen = watchedEpisodes(item, season.season_number);
+
+    container.innerHTML = `
+      <div class="flex flex-wrap gap-2 mb-2">
+        <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-all>Alles aanvinken</button>
+        <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-none>Alles uitvinken</button>
+      </div>
+      <div class="space-y-0.5">
+        ${data.episodes
+          .map((e) => {
+            const isSeen = seen.has(e.episode_number);
+            return `
+              <label class="flex items-start gap-2 py-1 px-1 rounded hover:bg-white/5 cursor-pointer">
+                <input type="checkbox" class="mt-1 w-3.5 h-3.5 shrink-0" data-ep="${e.episode_number}" ${isSeen ? 'checked' : ''}>
+                <span class="font-mono text-[10px] text-muted w-10 shrink-0 mt-0.5">${season.season_number}×${String(
+              e.episode_number
+            ).padStart(2, '0')}</span>
+                <span class="flex-1 min-w-0">
+                  <span class="block text-xs text-ink ${isSeen ? 'opacity-60' : ''}">${escapeHtml(e.name || 'Aflevering ' + e.episode_number)}</span>
+                  ${
+                    e.overview
+                      ? `<span class="block text-[10px] text-muted leading-snug line-clamp-2">${escapeHtml(e.overview)}</span>`
+                      : ''
+                  }
+                </span>
+                <span class="font-mono text-[10px] text-muted shrink-0 mt-0.5 text-right">
+                  ${e.air_date ? escapeHtml(e.air_date.slice(0, 4)) : ''}${e.rating ? ' · ' + e.rating.toFixed(1) : ''}
+                </span>
+              </label>`;
+          })
+          .join('')}
+      </div>`;
+
+    const applyChange = (mutate) => {
+      const before = snapshotProgress(item);
+      const set = watchedEpisodes(item, season.season_number);
+      mutate(set);
+      setWatchedEpisodes(item, season.season_number, set);
+      saveEpisodeProgress(item, before);
+      openModal(item.id);
+    };
+
+    container.querySelectorAll('[data-ep]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const n = Number(cb.dataset.ep);
+        applyChange((set) => (cb.checked ? set.add(n) : set.delete(n)));
+      });
+    });
+    container.querySelector('[data-ep-all]').addEventListener('click', () => {
+      applyChange((set) => data.episodes.forEach((e) => set.add(e.episode_number)));
+    });
+    container.querySelector('[data-ep-none]').addEventListener('click', () => {
+      applyChange((set) => set.clear());
+    });
   }
 
   // ---------- Wat zullen we kijken? ----------
@@ -1496,6 +1820,7 @@ function initCollectionApp(config) {
         const bits = [];
         if (e.steelbook) bits.push('Steelbook');
         if (e.boxset) bits.push(escapeHtml(e.boxset));
+        if (e.location) bits.push('📍 ' + escapeHtml(e.location));
         if (e.notes) bits.push(escapeHtml(e.notes));
         const hasPhotos = e.custom_front_cover_id || e.custom_front_cover || e.custom_back_cover_id || e.custom_back_cover;
 
@@ -2048,8 +2373,39 @@ function initCollectionApp(config) {
     els.modal.querySelector('[data-field="year"]').textContent = item.release_year || '—';
     els.modal.querySelector('[data-field="runtime"]').textContent = item.runtime ? item.runtime + ' min' : '—';
     els.modal.querySelector('[data-field="rating"]').textContent = item.rating ? item.rating.toFixed(1) + ' / 10' : '—';
-    els.modal.querySelector('[data-field="director"]').textContent = item.director || '—';
-    els.modal.querySelector('[data-field="genres"]').textContent = (item.genres || []).join(' · ') || '—';
+    // Genres en regisseur zijn klikbaar: je filtert er meteen je collectie mee.
+    const genresEl = els.modal.querySelector('[data-field="genres"]');
+    genresEl.innerHTML = (item.genres || []).length
+      ? item.genres
+          .map(
+            (g) =>
+              `<button type="button" class="hover:text-gold underline decoration-white/20 underline-offset-2" data-filter-genre="${escapeAttr(
+                g
+              )}">${escapeHtml(g)}</button>`
+          )
+          .join(' <span class="text-muted">·</span> ')
+      : '—';
+    genresEl.querySelectorAll('[data-filter-genre]').forEach((btn) => {
+      btn.addEventListener('click', () => applyQuickFilter('genre', btn.dataset.filterGenre));
+    });
+
+    const directorEl = els.modal.querySelector('[data-field="director"]');
+    directorEl.innerHTML = item.director
+      ? item.director
+          .split(',')
+          .map((n) => n.trim())
+          .filter(Boolean)
+          .map(
+            (n) =>
+              `<button type="button" class="hover:text-gold underline decoration-white/20 underline-offset-2" data-filter-search="${escapeAttr(
+                n
+              )}">${escapeHtml(n)}</button>`
+          )
+          .join(', ')
+      : '—';
+    directorEl.querySelectorAll('[data-filter-search]').forEach((btn) => {
+      btn.addEventListener('click', () => applyQuickFilter('search', btn.dataset.filterSearch));
+    });
 
     fillEnrichedFields(item);
     const ed = activeEdition(item);
@@ -2096,13 +2452,24 @@ function initCollectionApp(config) {
       seasonsList.innerHTML = item.seasons
         .map((s) => {
           if (s.owned) {
+            const p = seasonProgress(item, s);
             return `
-              <div class="flex items-center justify-between text-sm">
-                <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-                <span class="flex items-center gap-2 shrink-0">
-                  <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
-                  <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
-                </span>
+              <div class="border-b border-white/5 last:border-0 pb-2 mb-2 last:pb-0 last:mb-0">
+                <div class="flex items-center justify-between text-sm gap-2">
+                  <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
+                  <span class="flex items-center gap-2 shrink-0">
+                    <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
+                    <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 mt-1">
+                  <div class="flex-1 h-1 bg-bg rounded-full overflow-hidden">
+                    <div class="h-full rounded-full ${p.pct === 100 ? 'bg-teal' : 'bg-gold'}" style="width:${p.pct}%"></div>
+                  </div>
+                  <span class="font-mono text-[10px] text-muted shrink-0">${p.seen}/${p.total || '?'}</span>
+                  <button type="button" class="text-gold hover:text-white text-[10px] underline shrink-0" data-episodes="${s.season_number}">afleveringen ▾</button>
+                </div>
+                <div data-episodes-for="${s.season_number}" class="hidden mt-2 pl-1" data-open="0" data-loaded="0"></div>
               </div>
             `;
           }
@@ -2119,6 +2486,32 @@ function initCollectionApp(config) {
           `;
         })
         .join('');
+
+      // Uitklappen naar de afleveringen van een seizoen
+      seasonsList.querySelectorAll('[data-episodes]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const num = Number(btn.dataset.episodes);
+          const season = item.seasons.find((s) => s.season_number === num);
+          const box = seasonsList.querySelector(`[data-episodes-for="${num}"]`);
+          if (season && box) toggleSeasonEpisodes(item, season, box, btn);
+        });
+      });
+
+      // 'Waar ben je gebleven' bovenaan de seizoenen
+      const point = lastWatchedPoint(item);
+      const resumeEl = els.modal.querySelector('[data-field="resume"]');
+      if (resumeEl) {
+        const totals = { seen: totalWatchedEpisodes(item), owned: totalOwnedEpisodes(item) };
+        if (point && totals.owned) {
+          resumeEl.textContent =
+            totals.seen >= totals.owned
+              ? `Alles gezien — ${totals.seen} afleveringen`
+              : `Gebleven bij ${point.season}×${String(point.episode).padStart(2, '0')} · ${totals.seen} van ${totals.owned} gezien`;
+          resumeEl.classList.remove('hidden');
+        } else {
+          resumeEl.classList.add('hidden');
+        }
+      }
 
       seasonsList.querySelectorAll('[data-remove-season]').forEach((btn) => {
         btn.addEventListener('click', () => handleRemoveSeason(item, Number(btn.dataset.removeSeason)));
@@ -2140,22 +2533,32 @@ function initCollectionApp(config) {
     const addEditionBtn = els.modal.querySelector('[data-add-edition]');
     if (addEditionBtn) addEditionBtn.onclick = () => handleAddEdition(item);
 
-    // Snelle 'bekeken'-toggle (optimistic)
+    // Snelle 'bekeken'-toggle (optimistic). Sinds fase 13 wordt er meteen een
+    // datum bijgehouden, zodat je later ziet wanneer je iets gezien hebt.
     const watchedBtn = els.modal.querySelector('[data-toggle-watched]');
     if (watchedBtn) {
       watchedBtn.textContent = item.watched ? '✓ Bekeken — zet terug op niet bekeken' : 'Markeer als bekeken';
       watchedBtn.classList.toggle('chip-active', !!item.watched);
       watchedBtn.onclick = () => {
-        const previous = item.watched;
+        const previous = { watched: item.watched, log: JSON.parse(JSON.stringify(item.watch_log || [])) };
         item.watched = !item.watched;
+        if (item.watched) addWatchEntry(item);
+        else item.watch_log = []; // terug op 'niet bekeken' wist ook het logboek
         applyFilters();
         openModal(item.id);
         backgroundSave(
           () => upsertMovieInDrive(item),
-          () => { item.watched = previous; if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+          () => {
+            item.watched = previous.watched;
+            item.watch_log = previous.log;
+            if (!els.modal.classList.contains('hidden')) openModal(item.id);
+          }
         );
       };
     }
+
+    renderWatchLog(item);
+    renderMyRating(item);
 
     // Bewerken-paneel
     const editPanel = els.modal.querySelector('[data-edit-panel]');
@@ -2203,6 +2606,8 @@ function initCollectionApp(config) {
     if (steelbook) steelbook.checked = !!ed.steelbook;
     const boxsetInput = m.querySelector('[data-edit-boxset]');
     if (boxsetInput) boxsetInput.value = ed.boxset || '';
+    const locationInput = m.querySelector('[data-edit-location]');
+    if (locationInput) locationInput.value = ed.location || '';
     const sagaInput = m.querySelector('[data-edit-saga]');
     if (sagaInput) sagaInput.value = item.saga || '';
 
@@ -2363,6 +2768,8 @@ function initCollectionApp(config) {
       if (steelbook) ed.steelbook = steelbook.checked;
       const boxsetInput = m.querySelector('[data-edit-boxset]');
       if (boxsetInput) ed.boxset = boxsetInput.value.trim();
+      const locationInput = m.querySelector('[data-edit-location]');
+      if (locationInput) ed.location = locationInput.value.trim();
 
       syncLegacyFieldsFromEditions(item);
       // Posterkeuze: null = niets veranderd, '' = terug naar de standaardposter.
