@@ -372,6 +372,7 @@
       <div class="flex items-center gap-3 sm:gap-6 flex-wrap w-full sm:w-auto">
         <nav class="flex gap-4 sm:gap-6 overflow-x-auto shrink-0">
           <a href="index.html" class="nav-link active">Collectie</a>
+          <a href="universums.html" class="nav-link">Universums</a>
           <a href="statistieken.html" class="nav-link">Statistieken</a>
           <a href="prijzen.html" class="nav-link">Prijzen</a>
           <a href="beheer.html" class="nav-link">Beheer</a>
@@ -648,6 +649,12 @@
             </div>
           </div>
 
+          <!-- Fase 11: overkoepelend universum (bv. het MCU) -->
+          <div data-field="universe-section" class="hidden pt-3 border-t border-white/10">
+            <p class="text-muted font-mono uppercase text-xs mb-2">Universum</p>
+            <div data-field="universe-list" class="space-y-1"></div>
+          </div>
+
           <!-- Fase 5: alle delen van de reeks, met wat je nog mist -->
           <div data-field="saga-section" class="hidden pt-3 border-t border-white/10">
             <div class="flex items-center justify-between mb-2 gap-2">
@@ -890,6 +897,7 @@
 
   <script src="assets/drive.js"></script>
   <script src="assets/admin.js"></script>
+  <script src="assets/universes.js"></script>
   <script src="assets/add-title.js"></script>
   <script src="assets/app.js"></script>
   <script>
