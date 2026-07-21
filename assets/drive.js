@@ -28,6 +28,9 @@ let accessToken = null;
 let tokenExpiresAt = 0;
 let isReady = false;
 let readyCallbacks = [];
+// Staat er op dit moment een stille aanmeldpoging open? Bepaalt of een fout
+// aan de gebruiker gemeld moet worden of stilletjes genegeerd mag worden.
+let silentAttemptInProgress = false;
 
 // Bestandsnaam → Drive file-ID (zodat we niet telkens opnieuw hoeven te zoeken)
 const fileIdCache = {};
@@ -50,6 +53,11 @@ function gisLoaded() {
     client_id: GOOGLE_CLIENT_ID,
     scope: DRIVE_SCOPE,
     callback: onTokenResponse,
+    // Google meldt fouten die niets met OAuth zelf te maken hebben (popup
+    // geblokkeerd of gesloten, stille aanmelding niet mogelijk) NIET via de
+    // gewone callback maar hier. Zonder deze afhandeling lijkt de inlogknop
+    // in die gevallen niets te doen.
+    error_callback: onTokenError,
   });
   isReady = true;
   readyCallbacks.forEach((cb) => cb());
@@ -72,10 +80,15 @@ function tryRestoreSession() {
       accessToken = cached.access_token;
       tokenExpiresAt = cached.expires_at;
       notifyAuthenticated();
+      return;
     }
   } catch {
     // Corrupte cache negeren, gewoon opnieuw laten inloggen.
   }
+
+  // Geen (geldig) token meer in de cache: probeer stil opnieuw in te loggen,
+  // zodat je bij een verlopen token niet telkens het toestemmingsscherm ziet.
+  driveTrySilentSignIn();
 }
 
 // Stuurt het "ingelogd"-sein pas zodra de hele pagina geparsed is. Dit
@@ -102,26 +115,55 @@ function driveSignIn() {
     driveOnReady(driveSignIn);
     return;
   }
+  // Een klik op de knop opent altijd meteen het echte Google-scherm. Dat moet
+  // ook: een popup mag alleen openen als rechtstreeks gevolg van je klik.
+  // Eerst iets anders proberen en pas daarna de popup openen werkt niet — die
+  // tweede poging is de klik kwijt en wordt door de browser geblokkeerd.
+  //
+  // Het vermijden van het toestemmingsscherm gebeurt daarom elders: bij het
+  // laden van de pagina, via driveTrySilentSignIn() hieronder.
+  silentAttemptInProgress = false;
   accessToken = null;
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+}
 
-  // Eerst een stille poging: heb je de toestemming ooit al gegeven, dan log je
-  // meteen in zonder het toestemmingsscherm te zien. Mislukt dat (eerste keer,
-  // of toestemming ingetrokken), dan tonen we alsnog het echte scherm — zo
-  // blijft de knop altijd werken, maar zonder je elke keer lastig te vallen.
-  const previousCallback = tokenClient.callback;
-  tokenClient.callback = (resp) => {
-    tokenClient.callback = previousCallback;
-    if (resp.error) {
-      tokenClient.requestAccessToken({ prompt: 'consent' });
-      return;
-    }
-    onTokenResponse(resp);
-  };
-  tokenClient.requestAccessToken({ prompt: '' });
+// Stille aanmelding bij het laden van de pagina. Heb je de toestemming al eens
+// gegeven en is enkel je token verlopen, dan log je hiermee ongemerkt weer in
+// en zie je het toestemmingsscherm niet. Lukt het niet, dan gebeurt er niets
+// bijzonders: het inlogscherm blijft gewoon staan en de knop doet de rest.
+function driveTrySilentSignIn() {
+  if (!tokenClient || accessToken) return;
+  silentAttemptInProgress = true;
+  try {
+    tokenClient.requestAccessToken({ prompt: '' });
+  } catch (e) {
+    silentAttemptInProgress = false;
+  }
+}
+
+function onTokenError(err) {
+  const type = (err && (err.type || err.message)) || 'onbekende fout';
+  if (silentAttemptInProgress) {
+    // Stille poging mislukt is volkomen normaal (eerste bezoek, of cookies van
+    // derden geblokkeerd). Gewoon het inlogscherm laten staan.
+    silentAttemptInProgress = false;
+    console.info('Stille aanmelding niet mogelijk, gebruik de inlogknop:', type);
+    return;
+  }
+  reportError(type);
 }
 
 function onTokenResponse(resp) {
+  const wasSilent = silentAttemptInProgress;
+  silentAttemptInProgress = false;
+
   if (resp.error) {
+    // Een mislukte stille poging is geen fout om de gebruiker mee lastig te
+    // vallen; die klikt gewoon op de inlogknop.
+    if (wasSilent) {
+      console.info('Stille aanmelding niet mogelijk:', resp.error);
+      return;
+    }
     reportError(resp.error);
     return;
   }
