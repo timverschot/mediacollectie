@@ -417,6 +417,7 @@
         <span id="save-indicator" class="font-mono text-xs"></span>
         <button id="open-pick-btn" type="button" class="chip shrink-0" title="Willekeurige suggestie uit je ongeziene titels">🎲 Wat kijken?</button>
         <button id="open-dupes-btn" type="button" class="chip shrink-0" title="Titels die je meer dan één keer in hetzelfde formaat hebt">Dubbels</button>
+        <button id="open-bulk-text-btn" type="button" class="chip shrink-0" title="Een lijst titels plakken, bijvoorbeeld uit een AI die je plankfoto las">📋 Lijst</button>
         <button id="open-add-title-btn" type="button" class="btn btn-primary !py-1.5 !px-3 text-xs shrink-0">+ Titel toevoegen</button>
       </div>
     </div>
@@ -940,6 +941,79 @@
     </div>
   </div>
 
+  <!-- Lijstinvoer: een geplakte lijst titels in één keer verwerken -->
+  <div id="bulk-text-modal" class="hidden fixed inset-0 z-[58] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-3 gap-2">
+        <h2 class="font-display text-2xl tracking-wide">Lijst invoeren</h2>
+        <button data-bulktext-close aria-label="Sluiten"
+          class="modal-close-fixed w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
+      </div>
+
+      <!-- Stap 1: plakken -->
+      <div data-bulktext-step="input" class="space-y-3">
+        <div class="bg-bg rounded-lg p-3 text-sm space-y-2">
+          <p class="text-ink">Werkwijze: fotografeer een plank of stapel, laat een AI de titels aflezen, plak het resultaat hieronder.</p>
+          <p class="text-muted text-xs">Handige opdracht om aan de AI te geven:</p>
+          <div class="flex gap-2 items-start">
+            <code id="bulk-prompt" class="flex-1 text-[11px] bg-surface rounded p-2 block leading-relaxed">Lees alle filmtitels van de ruggen op deze foto. Geef enkel een lijst, één titel per regel, met het jaartal tussen haakjes erachter als je het kunt zien. Geen nummering, geen inleiding, geen extra tekst.</code>
+            <button type="button" id="copy-prompt-btn" class="chip shrink-0">Kopieer</button>
+          </div>
+        </div>
+
+        <textarea id="bulk-text-input" rows="10" placeholder="The Matrix (1999)&#10;Alien (1979)&#10;Ace Ventura&#10;…"
+          class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-gold/50"></textarea>
+
+        <div class="flex flex-wrap gap-3 items-center">
+          <button type="button" id="bulk-text-analyse" class="btn btn-primary">Titels opzoeken</button>
+          <span id="bulk-text-status" class="text-sm font-mono"></span>
+        </div>
+      </div>
+
+      <!-- Stap 2: bevestigen -->
+      <div data-bulktext-step="review" class="hidden space-y-3">
+        <div class="flex flex-wrap gap-2 items-center justify-between">
+          <p id="bulk-review-summary" class="text-sm"></p>
+          <div class="flex gap-2">
+            <button type="button" id="bulk-review-all" class="chip !py-1 !px-2.5 text-[11px]">Alles aan</button>
+            <button type="button" id="bulk-review-none" class="chip !py-1 !px-2.5 text-[11px]">Alles uit</button>
+            <button type="button" id="bulk-review-back" class="chip !py-1 !px-2.5 text-[11px]">← Lijst aanpassen</button>
+          </div>
+        </div>
+
+        <div id="bulk-review-list" class="space-y-1 max-h-[45vh] overflow-y-auto pr-1"></div>
+
+        <div class="bg-bg rounded-lg p-3 space-y-3">
+          <div class="grid sm:grid-cols-3 gap-3">
+            <div>
+              <label>Formaat</label>
+              <select id="bulk-text-format"></select>
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="bulk-text-owned">
+                <option value="owned" selected>In bezit</option>
+                <option value="wishlist">Verlanglijst</option>
+              </select>
+            </div>
+            <div>
+              <label>Locatie (optioneel)</label>
+              <input type="text" id="bulk-text-location" placeholder="Bv. Kast woonkamer">
+            </div>
+          </div>
+          <div>
+            <label>Boxset (optioneel)</label>
+            <input type="text" id="bulk-text-boxset" placeholder="Leeg laten bij losse uitgaven">
+          </div>
+          <div class="flex flex-wrap gap-3 items-center">
+            <button type="button" id="bulk-text-add" class="btn btn-primary">Toevoegen aan collectie</button>
+            <span id="bulk-add-progress" class="text-sm font-mono"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Afleveringpagina: eigen achtergrond en volledige uitleg -->
   <div id="episode-modal" class="hidden fixed inset-0 z-[59] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/80">
     <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
@@ -1051,6 +1125,7 @@
   <script src="assets/admin.js"></script>
   <script src="assets/universes.js"></script>
   <script src="assets/add-title.js"></script>
+  <script src="assets/bulk-import.js"></script>
   <script src="assets/app.js"></script>
   <script>
     // Service worker: maakt de site installeerbaar als app en laat haar ook
@@ -1160,6 +1235,16 @@
       initAddTitleUI(() => {
         addModal.classList.add('hidden');
         if (window.__collectionReload) window.__collectionReload();
+      });
+
+      // Lijstinvoer (geplakte titellijst)
+      if (typeof initBulkImportUI === 'function') {
+        initBulkImportUI(() => {
+          if (window.__collectionReload) window.__collectionReload();
+        });
+      }
+      document.getElementById('open-bulk-text-btn').addEventListener('click', () => {
+        if (window.__openBulkTextModal) window.__openBulkTextModal();
       });
     };
   </script>
