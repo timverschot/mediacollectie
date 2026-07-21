@@ -30,6 +30,7 @@ let isReady = false;
 let readyCallbacks = [];
 // Staat er op dit moment een stille aanmeldpoging open? Bepaalt of een fout
 // aan de gebruiker gemeld moet worden of stilletjes genegeerd mag worden.
+// Stille pogingen komen alleen van ensureToken(), nooit van de inlogknop.
 let silentAttemptInProgress = false;
 
 // Bestandsnaam → Drive file-ID (zodat we niet telkens opnieuw hoeven te zoeken)
@@ -86,9 +87,11 @@ function tryRestoreSession() {
     // Corrupte cache negeren, gewoon opnieuw laten inloggen.
   }
 
-  // Geen (geldig) token meer in de cache: probeer stil opnieuw in te loggen,
-  // zodat je bij een verlopen token niet telkens het toestemmingsscherm ziet.
-  driveTrySilentSignIn();
+  // Geen (geldig) token meer in de cache: het inlogscherm blijft staan.
+  // Automatisch opnieuw aanmelden proberen we hier bewust NIET — dat vereist
+  // een popup, en een popup zonder klik van jou wordt door de browser
+  // geblokkeerd. Eén klik op de knop is genoeg, en die toont dankzij de lege
+  // prompt meestal helemaal geen scherm.
 }
 
 // Stuurt het "ingelogd"-sein pas zodra de hele pagina geparsed is. Dit
@@ -115,22 +118,31 @@ function driveSignIn() {
     driveOnReady(driveSignIn);
     return;
   }
-  // Een klik op de knop opent altijd meteen het echte Google-scherm. Dat moet
-  // ook: een popup mag alleen openen als rechtstreeks gevolg van je klik.
-  // Eerst iets anders proberen en pas daarna de popup openen werkt niet — die
-  // tweede poging is de klik kwijt en wordt door de browser geblokkeerd.
-  //
-  // Het vermijden van het toestemmingsscherm gebeurt daarom elders: bij het
-  // laden van de pagina, via driveTrySilentSignIn() hieronder.
   silentAttemptInProgress = false;
   accessToken = null;
+
+  // BELANGRIJK — niet 'verbeteren' naar prompt: ''.
+  //
+  // Met een lege prompt zou Google zelf beslissen of het toestemmingsscherm
+  // nodig is, en zou je dat scherm meestal niet meer zien. In de praktijk
+  // blijkt die stille vraag hier niet ingewilligd te worden: Google antwoordt
+  // met een fout in plaats van een token, en dan opent er dus niets. Dat is
+  // twee keer getest en beide keren lag de inlogknop plat.
+  //
+  // Automatisch herproberen kan het niet redden: een popup mag alleen openen
+  // als rechtstreeks gevolg van jouw klik, en die is na een mislukte eerste
+  // poging verbruikt.
+  //
+  // Daarom bewust altijd 'consent'. Dat toont telkens het toestemmingsscherm —
+  // één extra klik — maar werkt gegarandeerd. Betrouwbaar inloggen weegt hier
+  // zwaarder dan een schermpje minder.
   tokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
-// Stille aanmelding bij het laden van de pagina. Heb je de toestemming al eens
-// gegeven en is enkel je token verlopen, dan log je hiermee ongemerkt weer in
-// en zie je het toestemmingsscherm niet. Lukt het niet, dan gebeurt er niets
-// bijzonders: het inlogscherm blijft gewoon staan en de knop doet de rest.
+// Stille aanmelding zonder tussenkomst. Wordt gebruikt door ensureToken() om
+// een verlopen token te vernieuwen tijdens het gebruik van de app. Niet
+// geschikt als vervanging van de inlogknop: zonder klik van de gebruiker
+// blokkeert de browser het venster dat Google hiervoor opent.
 function driveTrySilentSignIn() {
   if (!tokenClient || accessToken) return;
   silentAttemptInProgress = true;
