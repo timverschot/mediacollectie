@@ -64,12 +64,12 @@ function statsBarChart(rows, options = {}) {
         const share = ((row.value / total) * 100).toFixed(0);
         const color = row.color || '#C9A227';
         return `
-          <div class="flex items-center gap-3">
-            <span class="w-28 sm:w-36 shrink-0 text-xs font-mono text-muted truncate" title="${statsEsc(row.label)}">${statsEsc(row.label)}</span>
-            <div class="flex-1 h-5 bg-bg rounded-sm overflow-hidden ring-1 ring-white/5">
+          <div class="flex items-center gap-2 sm:gap-3">
+            <span class="w-20 sm:w-36 shrink-0 text-[11px] sm:text-xs font-mono text-muted truncate" title="${statsEsc(row.label)}">${statsEsc(row.label)}</span>
+            <div class="flex-1 min-w-0 h-5 bg-bg rounded-sm overflow-hidden ring-1 ring-white/5">
               <div class="h-full rounded-sm" style="width:${width}%;background:${color}"></div>
             </div>
-            <span class="w-20 shrink-0 text-right text-xs font-mono text-ink">
+            <span class="w-16 sm:w-20 shrink-0 text-right text-[11px] sm:text-xs font-mono text-ink">
               ${row.sub != null ? statsEsc(row.sub) : row.value}
               ${options.showShare ? `<span class="text-muted"> ${share}%</span>` : ''}
             </span>
