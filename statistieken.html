@@ -263,15 +263,39 @@
       document.getElementById('insurance-csv').addEventListener('click', run(downloadInsuranceCsv, 'Bestand maken…'));
     }
 
+    function toonFout(titel, err) {
+      console.error(titel, err);
+      // Bovenaan tonen, want onderaan scrol je eroverheen.
+      var top = document.getElementById('stats-kpis');
+      var html =
+        '<div class="col-span-full bg-surface rounded-lg p-4 ring-1 ring-red-500/40">' +
+        '<p class="text-red-400 font-mono text-sm mb-1">' + titel + '</p>' +
+        '<p class="text-[#F2F0EA] text-sm">' + (err && err.message ? err.message : String(err)) + '</p>' +
+        '<p class="text-[#8B8A92] text-xs mt-2">Druk op F12 en kijk bij Console voor het volledige spoor.</p>' +
+        '</div>';
+      if (top) top.innerHTML = html;
+    }
+
     window._driveAuthenticated = function () {
-      document.getElementById('login-gate').remove();
-      wireInsuranceButtons();
-      initStatsPage().catch(function (err) {
-        console.error(err);
-        var box = document.getElementById('stats-error');
-        box.textContent = 'Kon de statistieken niet berekenen: ' + err.message;
-        box.classList.remove('hidden');
-      });
+      var gate = document.getElementById('login-gate');
+      if (gate) gate.remove();
+
+      // De knoppen voor het verzekeringsoverzicht zijn bijzaak. Ging het hier
+      // mis, dan werd initStatsPage() nooit bereikt en bleef de hele pagina
+      // leeg zónder foutmelding — precies het beeld dat zo lastig te duiden is.
+      try {
+        wireInsuranceButtons();
+      } catch (err) {
+        console.warn('Knoppen voor het verzekeringsoverzicht niet gekoppeld:', err);
+      }
+
+      try {
+        initStatsPage().catch(function (err) {
+          toonFout('De statistieken konden niet berekend worden', err);
+        });
+      } catch (err) {
+        toonFout('De statistieken konden niet starten', err);
+      }
     };
   </script>
 </body>
