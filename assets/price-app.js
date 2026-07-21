@@ -14,6 +14,16 @@
 
 const POSTER_BASE_PRICES = 'https://image.tmdb.org/t/p/w200';
 
+// Korte namen voor de marktplaatsen in de weergave.
+const MARKET_LABELS = {
+  EBAY_NL: 'NL',
+  EBAY_BE: 'BE',
+  EBAY_DE: 'DE',
+  EBAY_GB: 'UK',
+  EBAY_FR: 'FR',
+  EBAY_US: 'US',
+};
+
 // Zoekwoord per formaat, gebruikt in de eBay-zoekopdracht.
 const FORMAT_KEYWORDS_PRICES = {
   '4k': '4K UHD',
@@ -117,6 +127,20 @@ function initPriceTracker() {
     </svg>`;
   }
 
+  // Vergelijking tussen markten, bv. "NL €16,50 · DE €13,95 · UK £11,00".
+  // Munten worden bewust niet omgerekend of gemengd.
+  function marketsLine(h) {
+    if (!h || !h.markets) return '';
+    const parts = Object.entries(h.markets)
+      .filter(([, v]) => v && v.median != null)
+      .map(([k, v]) => {
+        const sym = v.currency === 'EUR' ? '€' : v.currency === 'GBP' ? '£' : v.currency + ' ';
+        return `${esc(MARKET_LABELS[k] || k)} ${sym}${v.median}`;
+      });
+    if (parts.length < 2) return '';
+    return `<p class="text-[11px] text-muted font-mono mt-0.5">${parts.join(' · ')}</p>`;
+  }
+
   function trendBadge(entry) {
     const t = trend(entry);
     if (Math.abs(t) < 0.5) return '<span class="text-muted font-mono text-xs">→ stabiel</span>';
@@ -151,10 +175,13 @@ function initPriceTracker() {
               ${trendBadge(entry)}
             </p>
             <p class="text-[11px] text-muted font-mono">${last.ebay_count ?? '?'} advertenties${
+            last.ebay_primary_market ? ' · ' + esc(MARKET_LABELS[last.ebay_primary_market] || last.ebay_primary_market) : ''
+          }${
             last.ebay_filter_level && last.ebay_filter_level !== 'strikt'
               ? ' · ruwe schatting (' + esc(last.ebay_filter_level) + ')'
               : ''
           }</p>
+            ${marketsLine(last)}
             ${last.bol_new_price ? `<p class="text-xs text-muted font-mono">bol.com nieuw: €${esc(last.bol_new_price)}</p>` : ''}
             <div class="mt-2">${sparkline(entry)}</div>
           `
@@ -169,7 +196,7 @@ function initPriceTracker() {
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-start justify-between gap-2">
-              <p class="font-display text-xl tracking-wide truncate">${esc(entry.title)}</p>
+              <p class="font-display text-xl tracking-wide truncate">${esc(entry.label || entry.title)}</p>
               ${entry.owned ? '<span class="chip chip-active shrink-0 !text-[10px] !py-0.5">In collectie</span>' : '<span class="chip shrink-0 !text-[10px] !py-0.5">Verlanglijst</span>'}
             </div>
             ${priceBlock}
@@ -190,6 +217,22 @@ function initPriceTracker() {
  *
  * onProgress(huidige, totaal, titel) wordt per titel aangeroepen.
  */
+/**
+ * Bouwt de eBay-zoekterm voor één gevolgd exemplaar.
+ *
+ * - Film: titel + jaar + formaat. Het jaartal helpt hier om verwarring tussen
+ *   remakes te vermijden.
+ * - Seizoen van een serie: titel + "season N" + formaat, zonder jaartal. Het
+ *   jaar van eerste uitzending staat zelden in een advertentie voor seizoen 4.
+ * - Serie zonder seizoensgegevens: titel + "complete series" + formaat.
+ */
+function buildPriceQuery(t) {
+  const formatWord = FORMAT_KEYWORDS_PRICES[t.format] || '';
+  if (t.season) return `${t.title} season ${t.season} ${formatWord}`.replace(/\s+/g, ' ').trim();
+  if (t.whole_series) return `${t.title} complete series ${formatWord}`.replace(/\s+/g, ' ').trim();
+  return `${t.title} ${t.release_year || ''} ${formatWord}`.replace(/\s+/g, ' ').trim();
+}
+
 async function priceRefreshAll(workerUrl, markt, onProgress) {
   const { movies } = await driveLoadMovies();
   const { prices } = await driveLoadPrices();
@@ -215,15 +258,43 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
   const tracked = {};
   movies.forEach((m) => {
     normalizeMovieEntry(m);
+    const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
+
+    if (ownedSeasons.length) {
+      // Series: per seizoen meten. Een losse seizoensbox en een complete
+      // reeks zijn heel verschillend geprijsd; door "seizoen N" in de
+      // zoekterm te zetten vergelijk je appels met appels. Het jaartal laten
+      // we weg — dat is de eerste uitzending en staat zelden in advertenties.
+      ownedSeasons.forEach((s) => {
+        const fmt = s.format || m.format;
+        const key = `${m.id}|${fmt}|s${s.season_number}`;
+        tracked[key] = {
+          id: key,
+          movie_id: m.id,
+          title: m.title,
+          label: `${m.title} — seizoen ${s.season_number}`,
+          release_year: m.release_year,
+          poster_path: m.poster_path || '',
+          format: fmt,
+          season: s.season_number,
+          owned: true,
+        };
+      });
+      return;
+    }
+
     m.editions.forEach((ed) => {
       const key = m.id + '|' + ed.format;
       tracked[key] = {
         id: key,
         movie_id: m.id,
         title: m.title,
+        label: m.title,
         release_year: m.release_year,
         poster_path: m.poster_path || '',
         format: ed.format,
+        // Series zonder seizoensgegevens: als geheel opvragen.
+        whole_series: m.content_type === 'tv',
         owned: !ed.wishlist,
       };
     });
@@ -251,8 +322,7 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
     const t = list[i];
     if (onProgress) onProgress(i + 1, list.length, t.title);
 
-    const formatWord = FORMAT_KEYWORDS_PRICES[t.format] || '';
-    const q = `${t.title} ${t.release_year || ''} ${formatWord}`.trim();
+    const q = buildPriceQuery(t);
 
     let data = null;
     try {
@@ -279,6 +349,8 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
         id: t.id,
         movie_id: t.movie_id,
         title: t.title,
+        label: t.label || t.title,
+        season: t.season || null,
         release_year: t.release_year,
         poster_path: t.poster_path,
         format: t.format,
@@ -301,6 +373,16 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
       ebay_currency: data.ebay_currency,
       ebay_count: data.ebay_count,
       ebay_filter_level: data.ebay_filter_level,
+      ebay_primary_market: data.ebay_primary_market,
+      // Per markt bewaren we alleen de kerncijfers, anders groeit het bestand
+      // onnodig hard bij wekelijks meten.
+      markets: data.markets
+        ? Object.fromEntries(
+            Object.entries(data.markets)
+              .filter(([, v]) => v && v.found)
+              .map(([k, v]) => [k, { median: v.ebay_median, currency: v.ebay_currency, count: v.ebay_count }])
+          )
+        : undefined,
     });
     updated++;
 
