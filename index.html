@@ -378,6 +378,8 @@
         </nav>
         <p id="result-count" class="font-mono text-sm text-muted"></p>
         <span id="save-indicator" class="font-mono text-xs"></span>
+        <button id="open-pick-btn" type="button" class="chip shrink-0" title="Willekeurige suggestie uit je ongeziene titels">🎲 Wat kijken?</button>
+        <button id="open-dupes-btn" type="button" class="chip shrink-0" title="Titels die je meer dan één keer in hetzelfde formaat hebt">Dubbels</button>
         <button id="open-add-title-btn" type="button" class="btn btn-primary !py-1.5 !px-3 text-xs shrink-0">+ Titel toevoegen</button>
       </div>
     </div>
@@ -415,11 +417,7 @@
 
       <div class="flex flex-wrap gap-2 items-center">
         <span class="text-xs font-mono text-muted uppercase mr-1">Formaat</span>
-        <div id="format-chips" class="flex flex-wrap gap-2">
-          <button type="button" class="chip" data-format="4k">4K UHD</button>
-          <button type="button" class="chip" data-format="bluray">Blu-ray</button>
-          <button type="button" class="chip" data-format="dvd">DVD</button>
-        </div>
+        <div id="format-chips" class="flex flex-wrap gap-2"></div>
         <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Type</span>
         <div id="type-chips" class="flex flex-wrap gap-2">
           <button type="button" class="chip" data-type="movie">Films</button>
@@ -451,6 +449,11 @@
       <div id="cert-row" class="hidden flex-wrap gap-2 items-center">
         <span class="text-xs font-mono text-muted uppercase mr-1">Leeftijd</span>
         <div id="cert-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <div id="boxset-row" class="hidden flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Boxset</span>
+        <div id="boxset-chips" class="flex flex-wrap gap-2"></div>
       </div>
 
       </div><!-- /#filter-panel -->
@@ -547,6 +550,16 @@
             <p><span class="text-muted font-mono uppercase text-xs">Formaat</span><br><span data-field="format" class="text-gold font-semibold"></span></p>
             <p><span class="text-muted font-mono uppercase text-xs">Opmerkingen</span><br><span data-field="notes"></span></p>
           </div>
+          <!-- Fase 8: alle exemplaren die je van deze titel bezit -->
+          <div data-field="editions-section" class="hidden pt-3 border-t border-white/10">
+            <div class="flex items-center justify-between mb-2 gap-2">
+              <p class="text-muted font-mono uppercase text-xs">Mijn exemplaren</p>
+              <button type="button" data-add-edition class="chip !py-1 !px-2.5 text-[11px]">+ Formaat toevoegen</button>
+            </div>
+            <div data-field="editions-list" class="space-y-1"></div>
+            <p class="text-[11px] text-muted mt-2">Klik een exemplaar aan om de hoesfoto's en opmerkingen ervan te zien of te bewerken.</p>
+          </div>
+
           <!-- Fase 2: snelle acties + bewerken -->
           <div class="pt-3 border-t border-white/10 flex flex-wrap gap-2">
             <button type="button" data-toggle-watched class="chip">Markeer als bekeken</button>
@@ -554,6 +567,7 @@
           </div>
 
           <div data-edit-panel class="hidden pt-3 border-t border-white/10 space-y-3 bg-bg rounded-lg p-4">
+            <p class="text-xs text-muted">Je bewerkt <span data-edit-which class="text-gold"></span></p>
             <div class="grid sm:grid-cols-2 gap-3">
               <div>
                 <label>Content-type</label>
@@ -564,12 +578,8 @@
                 </select>
               </div>
               <div>
-                <label>Formaat</label>
-                <select data-edit-format>
-                  <option value="4k">4K UHD</option>
-                  <option value="bluray">Blu-ray</option>
-                  <option value="dvd">DVD</option>
-                </select>
+                <label>Formaat van dit exemplaar</label>
+                <select data-edit-format></select>
               </div>
             </div>
             <div class="grid sm:grid-cols-2 gap-3">
@@ -580,14 +590,24 @@
                   <option value="wishlist">Verlanglijst</option>
                 </select>
               </div>
-              <div class="flex items-end gap-2 pb-1">
-                <input type="checkbox" data-edit-watched class="w-4 h-4">
-                <label class="!normal-case !text-sm text-ink">Al bekeken</label>
+              <div class="flex items-end gap-4 pb-1">
+                <label class="!normal-case !text-sm text-ink flex items-center gap-2">
+                  <input type="checkbox" data-edit-watched class="w-4 h-4"> Al bekeken
+                </label>
+                <label class="!normal-case !text-sm text-ink flex items-center gap-2">
+                  <input type="checkbox" data-edit-steelbook class="w-4 h-4"> Steelbook
+                </label>
               </div>
             </div>
-            <div>
-              <label>Opmerkingen</label>
-              <input type="text" data-edit-notes placeholder="Bv. Steelbook editie">
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label>Opmerkingen bij dit exemplaar</label>
+                <input type="text" data-edit-notes placeholder="Bv. met slipcover, of krasje op schijf 2">
+              </div>
+              <div>
+                <label>Uit welke boxset?</label>
+                <input type="text" data-edit-boxset placeholder="Bv. Alien Anthology — leeg laten als losse uitgave">
+              </div>
             </div>
             <div>
               <label>Reeks (houdt samenhorende titels bij elkaar)</label>
@@ -684,11 +704,7 @@
           </div>
           <div>
             <label>Formaat</label>
-            <select id="form-format">
-              <option value="4k">4K UHD</option>
-              <option value="bluray" selected>Blu-ray</option>
-              <option value="dvd">DVD</option>
-            </select>
+            <select id="form-format"></select>
           </div>
           <div>
             <label>Status</label>
@@ -711,9 +727,24 @@
           <div id="seasons-list" class="bg-surface rounded-md p-3 space-y-0.5 max-h-52 overflow-y-auto"></div>
         </div>
 
-        <div>
-          <label>Opmerkingen</label>
-          <input type="text" id="form-notes" placeholder="Bv. Steelbook editie">
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label>Opmerkingen</label>
+            <input type="text" id="form-notes" placeholder="Bv. met slipcover">
+          </div>
+          <div>
+            <label>Uit welke boxset?</label>
+            <input type="text" id="form-boxset" placeholder="Leeg laten als losse uitgave">
+          </div>
+        </div>
+        <label class="!normal-case !text-sm text-ink flex items-center gap-2">
+          <input type="checkbox" id="form-steelbook" class="w-4 h-4"> Steelbook
+        </label>
+
+        <div id="saga-bulk" class="hidden bg-surface rounded-md p-3 text-sm">
+          <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>
+          <button type="button" id="saga-bulk-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Alle delen van deze reeks toevoegen</button>
+          <p id="saga-bulk-status" class="text-xs font-mono mt-2"></p>
         </div>
 
         <div class="grid sm:grid-cols-2 gap-4">
@@ -741,6 +772,54 @@
         <button data-group-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
       </div>
       <div data-group-grid class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3"></div>
+    </div>
+  </div>
+
+  <!-- 'Wat zullen we kijken?' — willekeurige suggestie uit je ongeziene titels -->
+  <div id="pick-modal" class="hidden fixed inset-0 z-[58] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display text-2xl tracking-wide">Wat zullen we kijken?</h2>
+        <button data-pick-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs font-mono uppercase text-muted">Genre</label>
+            <select data-pick-genre class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink mt-1"></select>
+          </div>
+          <div>
+            <label class="text-xs font-mono uppercase text-muted">Hoogstens</label>
+            <select data-pick-runtime class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink mt-1">
+              <option value="0">maakt niet uit</option>
+              <option value="90">90 minuten</option>
+              <option value="120">2 uur</option>
+              <option value="150">2,5 uur</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="chip chip-active" data-pick-scope="unwatched">Nog niet bekeken</button>
+          <button type="button" class="chip" data-pick-scope="all">Alles mag</button>
+        </div>
+        <button type="button" data-pick-roll class="btn btn-primary w-full">🎲 Verras me</button>
+        <p data-pick-count class="text-xs text-muted font-mono text-center"></p>
+      </div>
+
+      <div data-pick-result class="hidden border-t border-white/10 pt-4"></div>
+    </div>
+  </div>
+
+  <!-- Dubbels: dezelfde titel meer dan één keer in hetzelfde formaat -->
+  <div id="dupes-modal" class="hidden fixed inset-0 z-[58] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-2xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-display text-2xl tracking-wide">Dubbels</h2>
+        <button data-dupes-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
+      </div>
+      <p class="text-xs text-muted mb-4">Titels waarvan je meer dan één exemplaar in hetzelfde formaat hebt, of die twee keer onder een bijna gelijke naam in je collectie staan.</p>
+      <div data-dupes-list class="space-y-2"></div>
     </div>
   </div>
 
@@ -904,6 +983,14 @@
           filterToggle.textContent = open ? 'Filters ▴' : 'Filters ▾';
         });
       }
+
+      // 'Wat kijken?' en 'Dubbels'
+      document.getElementById('open-pick-btn').addEventListener('click', () => {
+        if (window.__openPickModal) window.__openPickModal();
+      });
+      document.getElementById('open-dupes-btn').addEventListener('click', () => {
+        if (window.__openDupesModal) window.__openDupesModal();
+      });
 
       // '+ Titel toevoegen'-modal
       const addModal = document.getElementById('add-title-modal');
