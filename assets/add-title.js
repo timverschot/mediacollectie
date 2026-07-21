@@ -261,7 +261,7 @@ async function addTitleDoSearch() {
           <input type="checkbox" class="w-4 h-4 bulk-pick" >
         </label>
         ${r.poster_path ? `<img src="${TMDB_IMG_BASE}${r.poster_path}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
-        <p class="text-xs truncate">${addTitleEscapeHtml(title)}</p>
+        <p class="text-xs leading-tight" title="${addTitleEscapeHtml(title)}">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
       `;
 
