@@ -1,759 +1,683 @@
 /**
- * Prijstracker — toont per gevolgde titel de laatste eBay-prijsrange/
- * gemiddelde, een trendlijntje en (indien aanwezig) de bol.com-nieuwprijs.
+ * Statistieken — Mijn Mediacollectie
+ * ----------------------------------
+ * Rekent de collectie (movies.json) en de prijsgeschiedenis
+ * (price_history.json) om naar overzichtscijfers en grafieken.
  *
- * Tussenfase 'prijzen live': de prijzen worden nu rechtstreeks vanuit de
- * browser ververst via jouw Cloudflare Worker (het veilige doorgeefluik naar
- * eBay) — geen Python-script meer nodig. Bij het verversen wordt je hele
- * collectie automatisch mee gevolgd; extra (verlanglijst-)titels voeg je toe
- * via 'Volg extra titel' op de pagina.
+ * Bewust zonder externe grafiekbibliotheek: alle grafieken zijn handgemaakte
+ * div-balken en inline SVG, in dezelfde stijl als de sparklines op de
+ * prijzenpagina. Dat houdt de pagina snel en offline-vriendelijk.
  *
- * Verwacht dat assets/drive.js (Drive-functies) en assets/admin.js
- * (TMDb-functies, slugify, getConfig) al geladen zijn.
+ * Verwacht dat assets/drive.js geladen is (driveLoadMovies, driveLoadPrices).
  */
 
-const POSTER_BASE_PRICES = 'https://image.tmdb.org/t/p/w200';
+const STATS_FORMAT_LABELS = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
+const STATS_FORMAT_COLORS = { '4k': '#C9A227', bluray: '#2FA4A9', dvd: '#8B8A92' };
+const STATS_TYPE_LABELS = { movie: 'Films', tv: 'TV-reeksen', animation: 'Animatie' };
 
-// Korte namen voor de marktplaatsen in de weergave.
-const MARKET_LABELS = {
-  EBAY_NL: 'NL',
-  EBAY_BE: 'BE',
-  EBAY_DE: 'DE',
-  EBAY_GB: 'UK',
-  EBAY_FR: 'FR',
-  EBAY_US: 'US',
-};
+function statsEsc(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
-// Zoekwoord per formaat, gebruikt in de eBay-zoekopdracht.
-const FORMAT_KEYWORDS_PRICES = {
-  '4k': '4K UHD',
-  bluray3d: '3D Blu-ray',
-  bluray: 'Blu-ray',
-  dvd: 'DVD',
-  laserdisc: 'Laserdisc',
-  vhs: 'VHS',
-};
+// ---------- Kleine rekenhulpjes ----------
 
-function initPriceTracker() {
-  const state = { all: [], sort: 'updated_desc' };
+function statsDecade(item) {
+  const y = Number(item.release_year);
+  if (!y || y < 1000) return null;
+  return Math.floor(y / 10) * 10;
+}
+
+function statsDecadeLabel(decade) {
+  return "jaren '" + String(decade).slice(2);
+}
+
+function statsMoney(value, currency) {
+  const symbol = currency === 'EUR' || !currency ? '€' : currency + ' ';
+  return symbol + value.toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Laatste prijsnotering met een bruikbaar cijfer.
+function statsLatestPrice(entry) {
+  const history = (entry && entry.history) || [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h && (h.ebay_median != null || h.ebay_avg != null)) return h;
+  }
+  return null;
+}
+
+// Richtwaarde van een meting: mediaan sinds fase 9, anders het oude gemiddelde.
+function statsPointValue(h) {
+  if (!h) return null;
+  return h.ebay_median != null ? h.ebay_median : h.ebay_avg;
+}
+
+// Voorzichtige ondergrens: het eerste kwartiel — een kwart van het vergelijkbare
+// aanbod staat lager geprijsd. Robuuster dan de absolute laagste prijs, die op
+// één beschadigd exemplaar kan slaan. Ontbreekt het kwartiel (oude metingen),
+// dan vallen we terug op de laagste prijs en anders op de richtwaarde zelf.
+function statsLowValue(h) {
+  if (!h) return null;
+  if (h.ebay_q1 != null) return h.ebay_q1;
+  if (h.ebay_low != null) return h.ebay_low;
+  return statsPointValue(h);
+}
+
+// ---------- Grafiek-bouwstenen ----------
+
+// Horizontale balken: rows = [{ label, value, color?, sub? }]
+function statsBarChart(rows, options = {}) {
+  const valid = rows.filter((r) => r.value > 0 || options.keepZero);
+  if (!valid.length) {
+    return '<p class="text-sm text-muted py-4">Nog geen gegevens.</p>';
+  }
+  const max = Math.max(...valid.map((r) => r.value)) || 1;
+  const total = valid.reduce((sum, r) => sum + r.value, 0) || 1;
+
+  return (
+    '<div class="space-y-2">' +
+    valid
+      .map((row) => {
+        const width = Math.max((row.value / max) * 100, 1.5);
+        const share = ((row.value / total) * 100).toFixed(0);
+        const color = row.color || '#C9A227';
+        return `
+          <div class="flex items-center gap-2 sm:gap-3">
+            <span class="w-20 sm:w-36 shrink-0 text-[11px] sm:text-xs font-mono text-muted truncate" title="${statsEsc(row.label)}">${statsEsc(row.label)}</span>
+            <div class="flex-1 min-w-0 h-5 bg-bg rounded-sm overflow-hidden ring-1 ring-white/5">
+              <div class="h-full rounded-sm" style="width:${width}%;background:${color}"></div>
+            </div>
+            <span class="w-16 sm:w-20 shrink-0 text-right text-[11px] sm:text-xs font-mono text-ink">
+              ${row.sub != null ? statsEsc(row.sub) : row.value}
+              ${options.showShare ? `<span class="text-muted"> ${share}%</span>` : ''}
+            </span>
+          </div>`;
+      })
+      .join('') +
+    '</div>'
+  );
+}
+
+// Lijngrafiek met gevulde vlak eronder. points = [{ label, value }]
+function statsLineChart(points, options = {}) {
+  if (points.length < 2) {
+    return '<p class="text-sm text-muted py-4">Nog te weinig gegevens voor een grafiek (minstens twee maanden nodig).</p>';
+  }
+  const w = 720;
+  const h = 200;
+  const padLeft = 44;
+  const padBottom = 26;
+  const padTop = 12;
+  const values = points.map((p) => p.value);
+  const max = Math.max(...values) || 1;
+  const stepX = (w - padLeft - 8) / (points.length - 1);
+  const scaleY = (v) => padTop + (1 - v / max) * (h - padTop - padBottom);
+
+  const coords = points.map((p, i) => [padLeft + i * stepX, scaleY(p.value)]);
+  const line = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const area = `${padLeft},${h - padBottom} ${line} ${(padLeft + (points.length - 1) * stepX).toFixed(1)},${h - padBottom}`;
+
+  // Hooguit ~6 labels op de x-as, anders wordt het onleesbaar.
+  const labelStep = Math.max(1, Math.ceil(points.length / 6));
+  const xLabels = points
+    .map((p, i) =>
+      i % labelStep === 0 || i === points.length - 1
+        ? `<text x="${(padLeft + i * stepX).toFixed(1)}" y="${h - 8}" font-size="10" fill="#8B8A92" font-family="monospace" text-anchor="middle">${statsEsc(p.label)}</text>`
+        : ''
+    )
+    .join('');
+
+  const gridLines = [0, 0.5, 1]
+    .map((f) => {
+      const y = scaleY(max * f);
+      return `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${w - 8}" y2="${y.toFixed(1)}" stroke="rgba(242,240,234,0.08)" stroke-width="1" />
+              <text x="${padLeft - 8}" y="${(y + 3).toFixed(1)}" font-size="10" fill="#8B8A92" font-family="monospace" text-anchor="end">${Math.round(max * f)}</text>`;
+    })
+    .join('');
+
+  const color = options.color || '#C9A227';
+  return `<svg viewBox="0 0 ${w} ${h}" class="w-full" role="img" aria-label="${statsEsc(options.aria || 'Grafiek')}">
+    ${gridLines}
+    <polygon points="${area}" fill="${color}" opacity="0.12" />
+    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    ${xLabels}
+  </svg>`;
+}
+
+// Verhoudingsbalk (bv. bekeken / niet bekeken)
+function statsRatioBar(parts) {
+  const total = parts.reduce((sum, p) => sum + p.value, 0);
+  if (!total) return '<p class="text-sm text-muted py-4">Nog geen gegevens.</p>';
+  return `
+    <div class="flex h-7 rounded-md overflow-hidden ring-1 ring-white/5">
+      ${parts
+        .map((p) =>
+          p.value
+            ? `<div style="width:${(p.value / total) * 100}%;background:${p.color}" title="${statsEsc(p.label)}: ${p.value}"></div>`
+            : ''
+        )
+        .join('')}
+    </div>
+    <div class="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs font-mono">
+      ${parts
+        .map(
+          (p) => `<span class="flex items-center gap-1.5 text-muted">
+            <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:${p.color}"></span>
+            ${statsEsc(p.label)} <span class="text-ink">${p.value}</span>
+            <span>(${((p.value / total) * 100).toFixed(0)}%)</span>
+          </span>`
+        )
+        .join('')}
+    </div>`;
+}
+
+function statsKpi(label, value, sub) {
+  return `
+    <div class="bg-surface rounded-lg p-4 ring-1 ring-white/5">
+      <p class="text-xs font-mono uppercase text-muted tracking-wide">${statsEsc(label)}</p>
+      <p class="font-display text-4xl tracking-wide text-ink mt-1 leading-none">${statsEsc(value)}</p>
+      ${sub ? `<p class="text-xs text-muted font-mono mt-1">${statsEsc(sub)}</p>` : ''}
+    </div>`;
+}
+
+// ---------- Hoofdfunctie ----------
+
+/**
+ * Controleert of de andere bestanden bij deze versie horen. Bij een halve
+ * upload krijg je anders een cryptische foutmelding die niets zegt over de
+ * oorzaak — en die situatie ontstaat makkelijk, want deze pagina leunt op
+ * drie bestanden tegelijk.
+ */
+function statsCheckAssets() {
+  const missing = [];
+  if (typeof MEDIA_FORMATS === 'undefined' || typeof normalizeMovieEntry === 'undefined') {
+    missing.push('assets/drive.js');
+  }
+  if (typeof EDITION_VARIANTS === 'undefined' || typeof editionVariantKeys === 'undefined') {
+    missing.push('assets/drive.js (uitvoeringen ontbreken)');
+  }
+  if (typeof driveLoadPrices === 'undefined') missing.push('assets/drive.js');
+  if (typeof priceKeyFor === 'undefined' || typeof buildInsuranceRows === 'undefined') {
+    missing.push('assets/price-app.js');
+  }
+  return [...new Set(missing)];
+}
+
+async function initStatsPage() {
+  const outdated = statsCheckAssets();
+  if (outdated.length) {
+    // Bovenaan tonen, niet onderaan — daar scrol je overheen.
+    const melding =
+      '<div class="col-span-full bg-surface rounded-lg p-4 ring-1 ring-[#C9A227]/40">' +
+      '<p class="text-[#C9A227] font-mono text-sm mb-2">Bestanden komen niet overeen</p>' +
+      '<p class="text-[#F2F0EA] text-sm mb-1">Deze pagina heeft een nieuwere ' +
+      outdated.map((f) => '<code>' + f + '</code>').join(' en ') +
+      ' nodig.</p>' +
+      '<p class="text-[#8B8A92] text-xs">Upload dat bestand opnieuw en herlaad met Ctrl+Shift+R.</p>' +
+      '</div>';
+    const top = document.getElementById('stats-kpis');
+    if (top) top.innerHTML = melding;
+    console.error('Verouderde bestanden op de statistiekenpagina:', outdated.join(', '));
+    return;
+  }
 
   const els = {
-    grid: document.getElementById('price-grid'),
-    empty: document.getElementById('price-empty'),
-    count: document.getElementById('price-count'),
-    sort: document.getElementById('price-sort'),
+    kpis: document.getElementById('stats-kpis'),
+    formats: document.getElementById('chart-formats'),
+    types: document.getElementById('chart-types'),
+    decades: document.getElementById('chart-decades'),
+    genres: document.getElementById('chart-genres'),
+    growth: document.getElementById('chart-growth'),
+    growthNote: document.getElementById('growth-note'),
+    watched: document.getElementById('chart-watched'),
+    watchedPerFormat: document.getElementById('chart-watched-format'),
+    watchKpis: document.getElementById('watch-kpis'),
+    watchYear: document.getElementById('chart-watch-year'),
+    myRatings: document.getElementById('chart-my-ratings'),
+    value: document.getElementById('value-block'),
+    scopeChips: document.getElementById('scope-chips'),
   };
 
-  function esc(str) {
-    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  function load() {
-    const loader =
-      typeof window.__priceTrackerLoadData === 'function'
-        ? window.__priceTrackerLoadData()
-        : fetch('data/price_history.json').then((r) => r.json());
-
-    return loader
-      .then((data) => {
-        // Gearchiveerde regels (bv. hele-serie-metingen van vóór de
-        // seizoensopdeling) blijven in het bestand staan, maar tonen we niet.
-        state.all = (Array.isArray(data) ? data : []).filter((e) => !e.archived);
-        render();
-      })
-      .catch((err) => {
-        els.grid.innerHTML = '<p class="col-span-full text-center text-[#8B8A92] py-16">Kon de prijsgegevens niet laden.</p>';
-        console.error(err);
-      });
-  }
-  window.__priceReload = load;
-  load();
-
-  els.sort.addEventListener('change', (e) => {
-    state.sort = e.target.value;
-    render();
-  });
-
-  function latest(entry) {
-    return entry.history && entry.history.length ? entry.history[entry.history.length - 1] : null;
-  }
-
-  // De richtprijs van een meting: sinds fase 9 de mediaan, daarvoor het
-  // gemiddelde. Zo blijven oude metingen gewoon leesbaar in de grafiek.
-  function pointValue(h) {
-    if (!h) return null;
-    return h.ebay_median != null ? h.ebay_median : h.ebay_avg;
-  }
-
-  function trend(entry) {
-    if (!entry.history || entry.history.length < 2) return 0;
-    const last = pointValue(latest(entry));
-    const prev = pointValue(entry.history[entry.history.length - 2]);
-    if (last == null || prev == null) return 0;
-    return last - prev;
-  }
-
-  function sortedList() {
-    const list = [...state.all];
-    const lastAvg = (e) => (latest(e) ? pointValue(latest(e)) || 0 : 0);
-    const lastDate = (e) => (latest(e) ? latest(e).date || '' : '');
-    switch (state.sort) {
-      case 'title_asc':
-        return list.sort((a, b) => a.title.localeCompare(b.title));
-      case 'price_desc':
-        return list.sort((a, b) => lastAvg(b) - lastAvg(a));
-      case 'price_asc':
-        return list.sort((a, b) => lastAvg(a) - lastAvg(b));
-      case 'trend_desc':
-        return list.sort((a, b) => trend(b) - trend(a));
-      case 'updated_desc':
-      default:
-        return list.sort((a, b) => String(lastDate(b)).localeCompare(String(lastDate(a))));
-    }
-  }
-
-  function sparkline(entry) {
-    const values = (entry.history || []).map(pointValue).filter((v) => v != null);
-    if (values.length < 2) return '';
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
-    const w = 160;
-    const h = 40;
-    const step = w / (values.length - 1);
-    const points = values
-      .map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`)
-      .join(' ');
-    return `<svg viewBox="0 0 ${w} ${h}" class="w-full h-10">
-      <polyline points="${points}" fill="none" stroke="#2FA4A9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>`;
-  }
-
-  // Vergelijking tussen markten, bv. "NL €16,50 · DE €13,95 · UK £11,00".
-  // Munten worden bewust niet omgerekend of gemengd.
-  function marketsLine(h) {
-    if (!h || !h.markets) return '';
-    const parts = Object.entries(h.markets)
-      .filter(([, v]) => v && v.median != null)
-      .map(([k, v]) => {
-        const sym = v.currency === 'EUR' ? '€' : v.currency === 'GBP' ? '£' : v.currency + ' ';
-        return `${esc(MARKET_LABELS[k] || k)} ${sym}${v.median}`;
-      });
-    if (parts.length < 2) return '';
-    return `<p class="text-[11px] text-muted font-mono mt-0.5">${parts.join(' · ')}</p>`;
-  }
-
-  function trendBadge(entry) {
-    const t = trend(entry);
-    if (Math.abs(t) < 0.5) return '<span class="text-muted font-mono text-xs">→ stabiel</span>';
-    if (t > 0) return `<span class="text-[#C9A227] font-mono text-xs">↑ +${t.toFixed(2)}</span>`;
-    return `<span class="text-[#2FA4A9] font-mono text-xs">↓ ${t.toFixed(2)}</span>`;
-  }
-
-  function render() {
-    const list = sortedList();
-    els.count.textContent = list.length + ' gevolgde titel' + (list.length === 1 ? '' : 's');
-    els.empty.classList.toggle('hidden', list.length !== 0);
-
-    els.grid.innerHTML = list.map((entry) => {
-      const last = latest(entry);
-      const cover = entry.poster_path ? POSTER_BASE_PRICES + entry.poster_path : '';
-      const cur = esc(last && last.ebay_currency === 'EUR' ? '€' : (last && last.ebay_currency) || '');
-      const median = last ? pointValue(last) : null;
-      const hasRange = last && last.ebay_q1 != null && last.ebay_q3 != null;
-
-      const priceBlock = last
-        ? `
-            <p class="text-xs text-muted font-mono mb-2">${esc(entry.release_year || '')} · ${esc(
-            FORMAT_KEYWORDS_PRICES[entry.format] || entry.format || ''
-          )} — bijgewerkt ${esc(last.date || '')}</p>
-            <p class="text-sm flex flex-wrap items-baseline gap-x-2">
-              <span class="font-mono text-gold text-lg">${cur}${median != null ? median : '—'}</span>
-              ${
-                hasRange
-                  ? `<span class="font-mono text-muted text-xs">midden ${cur}${last.ebay_q1}–${cur}${last.ebay_q3}</span>`
-                  : `<span class="font-mono text-muted text-xs">${cur}${last.ebay_low ?? '—'}–${cur}${last.ebay_high ?? '—'}</span>`
-              }
-              ${trendBadge(entry)}
-            </p>
-            <p class="text-[11px] text-muted font-mono">${last.ebay_count ?? '?'} advertenties${
-            last.ebay_primary_market ? ' · ' + esc(MARKET_LABELS[last.ebay_primary_market] || last.ebay_primary_market) : ''
-          }${
-            last.ebay_filter_level && last.ebay_filter_level !== 'strikt'
-              ? ' · ruwe schatting (' + esc(last.ebay_filter_level) + ')'
-              : ''
-          }</p>
-            ${marketsLine(last)}
-            ${last.bol_new_price ? `<p class="text-xs text-muted font-mono">bol.com nieuw: €${esc(last.bol_new_price)}</p>` : ''}
-            <div class="mt-2">${sparkline(entry)}</div>
-          `
-        : `
-            <p class="text-xs text-muted font-mono mb-2">${esc(entry.release_year || '')}</p>
-            <p class="text-sm text-muted">Nog geen prijsdata — klik op "Ververs prijzen".</p>
-          `;
-      return `
-        <div class="bg-surface rounded-lg p-4 flex gap-4 ring-1 ring-white/5">
-          <div class="w-16 shrink-0 rounded overflow-hidden aspect-[2/3] bg-[#14141A]">
-            ${cover ? `<img src="${esc(cover)}" class="w-full h-full object-cover" loading="lazy" alt="${esc(entry.title)}">` : ''}
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-start justify-between gap-2">
-              <p class="font-display text-xl tracking-wide truncate">${esc(entry.label || entry.title)}</p>
-              ${entry.owned ? '<span class="chip chip-active shrink-0 !text-[10px] !py-0.5">In collectie</span>' : '<span class="chip shrink-0 !text-[10px] !py-0.5">Verlanglijst</span>'}
-            </div>
-            ${priceBlock}
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-}
-
-// ---------- Prijzen verversen via de Cloudflare Worker ----------
-
-/**
- * Ververst de prijzen van alle gevolgde titels: je volledige collectie
- * (automatisch) + extra verlanglijst-titels die al in de tracker zitten.
- * Eén datapunt per dag per titel; vandaag opnieuw verversen overschrijft
- * het datapunt van vandaag.
- *
- * onProgress(huidige, totaal, titel) wordt per titel aangeroepen.
- */
-/**
- * Bouwt de eBay-zoekterm voor één gevolgd exemplaar.
- *
- * - Film: titel + jaar + formaat. Het jaartal helpt hier om verwarring tussen
- *   remakes te vermijden.
- * - Seizoen van een serie: titel + "season N" + formaat, zonder jaartal. Het
- *   jaar van eerste uitzending staat zelden in een advertentie voor seizoen 4.
- * - Serie zonder seizoensgegevens: titel + "complete series" + formaat.
- */
-function buildPriceQuery(t) {
-  const formatWord = FORMAT_KEYWORDS_PRICES[t.format] || '';
-  // Elke uitvoering is een eigen markt: een limited edition steelbook is iets
-  // heel anders dan de standaarduitgave. De woorden horen in de zoekterm.
-  const variantWords = (t.variants || [])
-    .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).search)
-    .filter(Boolean)
-    .join(' ');
-  const extra = variantWords ? ' ' + variantWords : '';
-
-  if (t.season) return `${t.title} season ${t.season} ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
-  if (t.whole_series) return `${t.title} complete series ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
-  return `${t.title} ${t.release_year || ''} ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
-}
-
-// Sleutel per gevolgd exemplaar. Elke combinatie van uitvoeringen krijgt een
-// eigen sleutel, zodat een steelbook niet met de standaarduitgave op één hoop
-// belandt. De volgorde ligt vast, dus dezelfde combinatie geeft altijd
-// dezelfde sleutel.
-function priceKeyFor(movieId, format, opts) {
-  const o = opts || {};
-  let key = `${movieId}|${format}`;
-  if (o.season) key += `|s${o.season}`;
-  const variants = o.variants || [];
-  if (variants.length) key += '|' + variants.join('+');
-  return key;
-}
-
-async function priceRefreshAll(workerUrl, markt, onProgress) {
   const { movies } = await driveLoadMovies();
-  const { prices } = await driveLoadPrices();
 
-  // Fase 9: prijzen worden per EXEMPLAAR bijgehouden, want een DVD en een 4K
-  // van dezelfde film zijn heel verschillend geprijsd. De sleutel is
-  // "titel-id|formaat". Oude gegevens (sleutel = enkel het titel-id) worden
-  // hier eenmalig omgezet naar het formaat dat je toen bezat.
-  const byId = {};
-  prices.forEach((p) => {
-    if (p.id && p.id.includes('|')) {
-      byId[p.id] = p;
-      return;
-    }
-    const movie = movies.find((m) => m.id === p.id);
-    const fmt = (movie && movie.format) || p.format || 'bluray';
-    const newId = p.id + '|' + fmt;
-    byId[newId] = { ...p, id: newId, movie_id: p.id, format: fmt };
-  });
-
-  // Gevolgde exemplaren = alles wat je bezit of op je verlanglijst hebt,
-  // plus losse titels die al in de tracker zaten.
-  const tracked = {};
-  movies.forEach((m) => {
-    normalizeMovieEntry(m);
-    const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
-
-    if (ownedSeasons.length) {
-      // Series: per seizoen meten. Een losse seizoensbox en een complete
-      // reeks zijn heel verschillend geprijsd; door "seizoen N" in de
-      // zoekterm te zetten vergelijk je appels met appels. Het jaartal laten
-      // we weg — dat is de eerste uitzending en staat zelden in advertenties.
-      const owned = m.editions.filter((e) => !e.wishlist)[0] || m.editions[0];
-      const variants = editionVariantKeys(owned);
-      const suffix = variants.length ? ' (' + editionVariantLabels(owned).join(', ') + ')' : '';
-      ownedSeasons.forEach((s) => {
-        const fmt = s.format || m.format;
-        const key = priceKeyFor(m.id, fmt, { season: s.season_number, variants });
-        tracked[key] = {
-          id: key,
-          movie_id: m.id,
-          title: m.title,
-          label: `${m.title} — seizoen ${s.season_number}${suffix}`,
-          release_year: m.release_year,
-          poster_path: m.poster_path || '',
-          format: fmt,
-          season: s.season_number,
-          variants,
-          owned: true,
-        };
-      });
-      return;
-    }
-
-    m.editions.forEach((ed) => {
-      const variants = editionVariantKeys(ed);
-      const labels = editionVariantLabels(ed);
-      const key = priceKeyFor(m.id, ed.format, { variants });
-      tracked[key] = {
-        id: key,
-        movie_id: m.id,
-        title: m.title,
-        label: m.title + (labels.length ? ' (' + labels.join(', ') + ')' : ''),
-        release_year: m.release_year,
-        poster_path: m.poster_path || '',
-        format: ed.format,
-        variants,
-        // Series zonder seizoensgegevens: als geheel opvragen.
-        whole_series: m.content_type === 'tv',
-        owned: !ed.wishlist,
-      };
-    });
-  });
-  // Titels die we nu per seizoen volgen, hadden vroeger één meting voor de
-  // hele serie. Die oude regel meet iets anders en hoort niet meer thuis in de
-  // lijst — anders blijft ze staan met het onjuiste label 'verlanglijst'.
-  // We verwijderen niets: de geschiedenis blijft bewaard, maar de regel wordt
-  // gearchiveerd en niet meer getoond of bijgewerkt.
-  const perSeasonMovies = new Set();
-  Object.values(tracked).forEach((t) => {
-    if (t.season) perSeasonMovies.add(t.movie_id);
-  });
-
-  Object.values(byId).forEach((h) => {
-    const movieId = h.movie_id || String(h.id).split('|')[0];
-    if (!tracked[h.id] && perSeasonMovies.has(movieId)) {
-      h.archived = true;
-      h.archived_reason = 'vervangen door metingen per seizoen';
-      return;
-    }
-    if (!tracked[h.id]) {
-      tracked[h.id] = {
-        id: h.id,
-        movie_id: movieId,
-        title: h.title,
-        label: h.label || h.title,
-        release_year: h.release_year,
-        poster_path: h.poster_path || '',
-        format: h.format || 'bluray',
-        owned: false,
-      };
-    }
-  });
-
-  const list = Object.values(tracked);
-  const today = new Date().toISOString().slice(0, 10);
-  let updated = 0;
-  let skipped = 0;
-
-  const SAVE_EVERY = 25;
-  let sinceSave = 0;
-  const save = () => withWriteLock(() => driveSaveNamedFile('price_history.json', Object.values(byId)));
-
-  for (let i = 0; i < list.length; i++) {
-    const t = list[i];
-
-    // De voortgangsmelding is bijzaak. Gaat er in de interface iets mis — een
-    // element dat niet bestaat, bijvoorbeeld — dan mag dat een verversing van
-    // honderden titels niet afbreken.
-    if (onProgress) {
-      try {
-        onProgress(i + 1, list.length, t.label || t.title);
-      } catch (uiErr) {
-        console.warn('Voortgang tonen mislukt (verversen gaat gewoon door):', uiErr);
-      }
-    }
-
-    const q = buildPriceQuery(t);
-
-    let data = null;
-    try {
-      // Het formaat gaat apart mee zodat de Worker advertenties kan weren die
-      // wel de titel maar niet het juiste formaat bevatten.
-      const resp = await fetch(
-        `${workerUrl}?q=${encodeURIComponent(q)}&markt=${encodeURIComponent(markt)}` +
-          `&formaat=${encodeURIComponent(t.format || '')}` +
-          `&variant=${encodeURIComponent((t.variants || []).join(',') || 'standaard')}`
-      );
-      const body = await resp.json();
-      if (!resp.ok) throw new Error(body.error || 'fout ' + resp.status);
-      if (body.found) data = body;
-    } catch (err) {
-      console.warn('Prijs ophalen mislukt voor', t.title, err);
-    }
-
-    if (!data) {
-      skipped++;
-      continue;
-    }
-
-    const entry =
-      byId[t.id] ||
-      (byId[t.id] = {
-        id: t.id,
-        movie_id: t.movie_id,
-        title: t.title,
-        label: t.label || t.title,
-        season: t.season || null,
-        release_year: t.release_year,
-        poster_path: t.poster_path,
-        format: t.format,
-        owned: t.owned,
-        history: [],
-      });
-    entry.owned = t.owned; // kan wijzigen als een verlanglijst-titel intussen gekocht is
-    if (!entry.format) entry.format = t.format;
-    if (!entry.movie_id) entry.movie_id = t.movie_id;
-
-    entry.history = (entry.history || []).filter((h) => h.date !== today);
-    entry.history.push({
-      date: today,
-      ebay_median: data.ebay_median,
-      ebay_q1: data.ebay_q1,
-      ebay_q3: data.ebay_q3,
-      ebay_low: data.ebay_low,
-      ebay_high: data.ebay_high,
-      ebay_avg: data.ebay_avg,
-      ebay_currency: data.ebay_currency,
-      ebay_count: data.ebay_count,
-      ebay_filter_level: data.ebay_filter_level,
-      ebay_primary_market: data.ebay_primary_market,
-      // Per markt bewaren we alleen de kerncijfers, anders groeit het bestand
-      // onnodig hard bij wekelijks meten.
-      markets: data.markets
-        ? Object.fromEntries(
-            Object.entries(data.markets)
-              .filter(([, v]) => v && v.found)
-              .map(([k, v]) => [k, { median: v.ebay_median, currency: v.ebay_currency, count: v.ebay_count }])
-          )
-        : undefined,
-    });
-    updated++;
-    sinceSave++;
-
-    // Tussentijds bewaren. Bij een grote collectie duurt een verversing lang;
-    // gaat er dan iets mis, dan mag je niet alles kwijt zijn. Je kunt hierdoor
-    // ook gerust het tabblad sluiten.
-    if (sinceSave >= SAVE_EVERY) {
-      try {
-        await save();
-        sinceSave = 0;
-      } catch (saveErr) {
-        console.warn('Tussentijds opslaan mislukt, we proberen het later opnieuw:', saveErr);
-      }
-    }
-
-    // Nette throttle richting eBay.
-    await new Promise((r) => setTimeout(r, 300));
+  // Prijzen zijn optioneel: zonder prijsdata werkt de rest gewoon.
+  let prices = [];
+  try {
+    prices = (await driveLoadPrices()).prices;
+  } catch (e) {
+    console.warn('Prijsgegevens niet beschikbaar:', e);
   }
 
-  await save();
-  return { updated, skipped, total: list.length };
-}
+  const state = { scope: 'owned' }; // 'owned' | 'all'
 
-/* ==========================================================================
- * Verzekeringsoverzicht (fase 9)
- * ==========================================================================
- * Een regel per fysiek exemplaar dat je bezit, met de laatst bekende
- * richtprijs. Bedoeld om bij je verzekeringspapieren te bewaren of aan een
- * expert te geven na brand, diefstal of waterschade.
- * ========================================================================== */
+  function scoped() {
+    return state.scope === 'owned' ? movies.filter((m) => !m.wishlist) : movies;
+  }
 
-async function buildInsuranceRows() {
-  const { movies } = await driveLoadMovies();
-  const { prices } = await driveLoadPrices();
+  function renderKpis(list) {
+    const owned = movies.filter((m) => !m.wishlist).length;
+    const wish = movies.filter((m) => m.wishlist).length;
+    const watched = list.filter((m) => m.watched).length;
+    const watchedPct = list.length ? Math.round((watched / list.length) * 100) : 0;
 
-  const priceByKey = {};
-  prices.forEach((p) => {
-    priceByKey[p.id] = p;
-  });
+    // Speelduur: films tellen hun eigen runtime; bij reeksen rekenen we de
+    // afleveringen van de seizoenen die je bezit mee (runtime = afleveringsduur).
+    let minutes = 0;
+    list.forEach((m) => {
+      const rt = Number(m.runtime) || 0;
+      if (m.seasons && m.seasons.length) {
+        m.seasons.filter((s) => s.owned).forEach((s) => { minutes += rt * (Number(s.episode_count) || 0); });
+      } else {
+        minutes += rt;
+      }
+    });
+    const days = minutes / 60 / 24;
 
-  // Gearchiveerde metingen (bv. hele-serie-prijzen van vóór de seizoensopdeling)
-  // tellen niet mee; het exemplaar zelf blijft wel in het overzicht staan.
-  const priceFor = (...keys) => {
-    for (const k of keys) {
-      const e = priceByKey[k];
-      if (e && !e.archived && e.history && e.history.length) return e.history[e.history.length - 1];
-    }
-    return null;
-  };
+    els.kpis.innerHTML = [
+      statsKpi('Titels in beeld', String(list.length), state.scope === 'owned' ? 'enkel in bezit' : 'incl. verlanglijst'),
+      statsKpi('In bezit', String(owned), wish ? `${wish} op verlanglijst` : 'geen verlanglijst'),
+      statsKpi('Bekeken', watchedPct + '%', `${watched} van ${list.length}`),
+      statsKpi('Speelduur', Math.round(minutes / 60).toLocaleString('nl-BE') + ' u', days >= 1 ? `≈ ${days.toFixed(1)} dagen non-stop` : ''),
+    ].join('');
+  }
 
-  const rows = [];
-  movies.forEach((m) => {
-    normalizeMovieEntry(m);
-    const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
-
-    if (ownedSeasons.length) {
-      // Series: één regel per seizoen dat je bezit.
-      const ed = m.editions.filter((e) => !e.wishlist)[0] || m.editions[0] || {};
-      const variants = editionVariantKeys(ed);
-      ownedSeasons.forEach((s) => {
-        const fmt = s.format || m.format;
-        const last = priceFor(
-          priceKeyFor(m.id, fmt, { season: s.season_number, variants }),
-          `${m.id}|${fmt}|s${s.season_number}`,
-          `${m.id}|${fmt}`,
-          m.id
-        );
-        const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
-        const low = last ? (last.ebay_q1 != null ? last.ebay_q1 : last.ebay_low != null ? last.ebay_low : value) : null;
-        rows.push({
-          title: `${m.title} — seizoen ${s.season_number}`,
-          year: m.release_year || '',
-          format: formatLabel(fmt),
-          steelbook: editionVariantLabels(ed).join(', '),
-          boxset: ed.boxset || '',
-          notes: s.name || '',
-          acquired: ed.date_added || '',
-          value,
-          low,
-          currency: (last && last.ebay_currency) || 'EUR',
-          measured: (last && last.date) || '',
+  function renderFormats(list) {
+    const counts = {};
+    list.forEach((m) => {
+      // Bij reeksen telt elk seizoen dat je bezit mee in zijn eigen formaat;
+      // bij films elk exemplaar (dezelfde film op DVD én 4K telt dus dubbel).
+      if (m.seasons && m.seasons.some((s) => s.owned)) {
+        m.seasons.filter((s) => s.owned).forEach((s) => {
+          const f = s.format || m.format;
+          counts[f] = (counts[f] || 0) + 1;
         });
-      });
+      } else {
+        (m.editions || [{ format: m.format, wishlist: m.wishlist }])
+          .filter((e) => !e.wishlist)
+          .forEach((e) => {
+            counts[e.format] = (counts[e.format] || 0) + 1;
+          });
+      }
+    });
+    const rows = (typeof MEDIA_FORMATS !== 'undefined' ? MEDIA_FORMATS : [])
+      .filter((f) => counts[f.value])
+      .map((f) => ({ label: f.label, value: counts[f.value], color: f.color }));
+    els.formats.innerHTML = statsBarChart(rows, { showShare: true });
+  }
+
+  function renderTypes(list) {
+    const counts = {};
+    list.forEach((m) => { counts[m.content_type] = (counts[m.content_type] || 0) + 1; });
+    const rows = Object.keys(STATS_TYPE_LABELS).map((t) => ({
+      label: STATS_TYPE_LABELS[t],
+      value: counts[t] || 0,
+      color: '#2FA4A9',
+    }));
+    els.types.innerHTML = statsBarChart(rows, { showShare: true });
+  }
+
+  function renderDecades(list) {
+    const counts = {};
+    let unknown = 0;
+    list.forEach((m) => {
+      const d = statsDecade(m);
+      if (d === null) unknown++;
+      else counts[d] = (counts[d] || 0) + 1;
+    });
+    const rows = Object.keys(counts)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((d) => ({ label: statsDecadeLabel(d), value: counts[d], color: '#C9A227' }));
+    if (unknown) rows.push({ label: 'onbekend', value: unknown, color: '#8B8A92' });
+    els.decades.innerHTML = statsBarChart(rows, { showShare: true });
+  }
+
+  function renderGenres(list) {
+    const counts = {};
+    list.forEach((m) => (m.genres || []).forEach((g) => { counts[g] = (counts[g] || 0) + 1; }));
+    const rows = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([label, value]) => ({ label, value, color: '#2FA4A9' }));
+    els.genres.innerHTML = statsBarChart(rows);
+  }
+
+  function renderGrowth(list) {
+    // Per maand groeperen op date_added; daarna cumulatief optellen.
+    const perMonth = {};
+    let missing = 0;
+    list.forEach((m) => {
+      const raw = m.date_added;
+      const d = raw ? new Date(raw) : null;
+      if (!d || isNaN(d)) { missing++; return; }
+      const key = d.toISOString().slice(0, 7); // YYYY-MM
+      perMonth[key] = (perMonth[key] || 0) + 1;
+    });
+
+    const keys = Object.keys(perMonth).sort();
+    if (!keys.length) {
+      els.growth.innerHTML = '<p class="text-sm text-muted py-4">Nog geen datums beschikbaar.</p>';
+      els.growthNote.textContent = '';
       return;
     }
 
-    m.editions.forEach((ed) => {
-      if (ed.wishlist) return; // verlanglijst bezit je niet
+    // Ontbrekende maanden aanvullen, zodat de lijn de echte tijdas volgt.
+    const points = [];
+    let running = 0;
+    const [startY, startM] = keys[0].split('-').map(Number);
+    const [endY, endM] = keys[keys.length - 1].split('-').map(Number);
+    const monthNames = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    for (let y = startY, mth = startM; y < endY || (y === endY && mth <= endM); ) {
+      const key = `${y}-${String(mth).padStart(2, '0')}`;
+      running += perMonth[key] || 0;
+      points.push({ label: `${monthNames[mth - 1]} '${String(y).slice(2)}`, value: running });
+      mth++;
+      if (mth > 12) { mth = 1; y++; }
+    }
 
-      const last = priceFor(
-        priceKeyFor(m.id, ed.format, { variants: editionVariantKeys(ed) }),
-        `${m.id}|${ed.format}`,
-        m.id
-      );
-      const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
+    els.growth.innerHTML = statsLineChart(points, { aria: 'Groei van de collectie over tijd' });
 
-      rows.push({
-        title: m.title,
-        year: m.release_year || '',
-        format: formatLabel(ed.format),
-        steelbook: editionVariantLabels(ed).join(', '),
-        boxset: ed.boxset || '',
-        notes: ed.notes || '',
-        acquired: ed.date_added || '',
-        value,
-        low,
-        currency: (last && last.ebay_currency) || 'EUR',
-        measured: (last && last.date) || '',
+    const busiest = keys.reduce((best, k) => (perMonth[k] > perMonth[best] ? k : best), keys[0]);
+    const [by, bm] = busiest.split('-').map(Number);
+    els.growthNote.textContent =
+      `Drukste maand: ${monthNames[bm - 1]} ${by} (${perMonth[busiest]} titels).` +
+      (missing ? ` ${missing} titel(s) zonder toevoegdatum zijn niet meegeteld.` : '');
+  }
+
+  function renderWatched(list) {
+    const watched = list.filter((m) => m.watched).length;
+    els.watched.innerHTML = statsRatioBar([
+      { label: 'Bekeken', value: watched, color: '#2FA4A9' },
+      { label: 'Nog te kijken', value: list.length - watched, color: '#3A3A45' },
+    ]);
+
+    const formats = typeof MEDIA_FORMATS !== 'undefined' ? MEDIA_FORMATS : [];
+    const rows = formats
+      .map((f) => {
+        // Een titel telt mee bij elk formaat waarin je haar bezit.
+        const inFormat = list.filter((m) =>
+          (m.editions || [{ format: m.format, wishlist: m.wishlist }]).some(
+            (e) => !e.wishlist && e.format === f.value
+          )
+        );
+        const seen = inFormat.filter((m) => m.watched).length;
+        return {
+          label: f.label,
+          value: inFormat.length ? Math.round((seen / inFormat.length) * 100) : 0,
+          sub: inFormat.length ? `${seen}/${inFormat.length}` : '—',
+          color: f.color,
+          _has: inFormat.length,
+        };
+      })
+      .filter((r) => r._has);
+    els.watchedPerFormat.innerHTML = statsBarChart(rows, { keepZero: true });
+  }
+
+  // Kijkgedrag: alleen zinvol zodra je kijkdatums of eigen scores hebt.
+  function renderWatchBehaviour(list) {
+    if (!els.watchKpis) return;
+
+    const entries = [];
+    list.forEach((m) => {
+      (m.watch_log || []).forEach((e) => entries.push({ date: e.date, title: m.title }));
+    });
+
+    const rated = list.filter((m) => m.my_rating != null);
+    const rewatched = list.filter((m) => (m.watch_log || []).length > 1);
+
+    if (!entries.length && !rated.length) {
+      els.watchKpis.innerHTML =
+        '<p class="col-span-full text-sm text-muted">Nog geen kijkdatums of eigen scores. Vanaf nu wordt bij elke titel die je als bekeken markeert de datum bewaard.</p>';
+      els.watchYear.innerHTML = '';
+      els.myRatings.innerHTML = '';
+      return;
+    }
+
+    const thisYear = String(new Date().getFullYear());
+    const thisYearCount = entries.filter((e) => String(e.date).startsWith(thisYear)).length;
+    const avgRating = rated.length
+      ? rated.reduce((sum, m) => sum + Number(m.my_rating), 0) / rated.length
+      : null;
+
+    els.watchKpis.innerHTML = [
+      statsKpi('Kijkmomenten', String(entries.length), 'sinds je datums bijhoudt'),
+      statsKpi('Dit jaar', String(thisYearCount), thisYear),
+      statsKpi('Herzien', String(rewatched.length), 'titels meer dan één keer'),
+      statsKpi('Jouw gemiddelde', avgRating != null ? avgRating.toFixed(1) : '—', `${rated.length} titels beoordeeld`),
+    ].join('');
+
+    // Per jaar
+    const perYear = {};
+    entries.forEach((e) => {
+      const y = String(e.date).slice(0, 4);
+      if (/^\d{4}$/.test(y)) perYear[y] = (perYear[y] || 0) + 1;
+    });
+    const years = Object.keys(perYear).sort();
+    els.watchYear.innerHTML = years.length
+      ? statsBarChart(years.map((y) => ({ label: y, value: perYear[y], color: '#2FA4A9' })))
+      : '<p class="text-sm text-muted py-3">Nog geen kijkdatums.</p>';
+
+    // Verdeling van je eigen scores
+    const perScore = {};
+    rated.forEach((m) => {
+      const s = String(m.my_rating);
+      perScore[s] = (perScore[s] || 0) + 1;
+    });
+    const scores = Object.keys(perScore)
+      .map(Number)
+      .sort((a, b) => b - a);
+    els.myRatings.innerHTML = scores.length
+      ? statsBarChart(
+          scores.map((s) => ({
+            label: `${s}/10`,
+            value: perScore[String(s)],
+            color: s >= 8 ? '#C9A227' : s >= 6 ? '#2FA4A9' : '#8B8A92',
+          }))
+        )
+      : '<p class="text-sm text-muted py-3">Nog geen eigen scores gegeven.</p>';
+  }
+
+  function renderValue(list) {
+    const byId = {};
+    prices.forEach((p) => { byId[p.id] = p; });
+
+    // Prijssleutels zijn sinds fase 9 per exemplaar (`titel|formaat`) en sinds
+    // fase 10 per seizoen (`titel|formaat|sN`). De oude sleutel (enkel het
+    // titel-id) blijft werken zolang je nog niet opnieuw ververst hebt.
+    const valued = [];
+
+    const addValued = (title, year, format, last) => {
+      const value = statsPointValue(last);
+      if (value == null) return;
+      valued.push({
+        title,
+        year,
+        format,
+        value: Number(value),
+        low: Number(statsLowValue(last)),
+        // Munt per meting bewaren: sommige obscure titels hebben alleen Brits
+        // aanbod, en ponden bij euro's optellen zou onzin opleveren.
+        currency: last.ebay_currency || 'EUR',
+        date: last.date,
+      });
+    };
+
+    list.forEach((m) => {
+      const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
+
+      // Bijzondere uitvoeringen hebben een eigen prijssleutel: een steelbook of
+      // director's cut is een andere markt dan de standaarduitgave.
+      const primary = (m.editions || []).filter((e) => !e.wishlist)[0] || (m.editions || [])[0];
+      const variantKey =
+        typeof editionVariantKeys === 'function' && primary ? editionVariantKeys(primary) : [];
+
+      if (ownedSeasons.length) {
+        ownedSeasons.forEach((s) => {
+          const fmt = s.format || m.format;
+          const withVariants =
+            variantKey.length && typeof priceKeyFor === 'function'
+              ? priceKeyFor(m.id, fmt, { season: s.season_number, variants: variantKey })
+              : null;
+          const entry =
+            (withVariants && byId[withVariants]) ||
+            byId[`${m.id}|${fmt}|s${s.season_number}`] ||
+            byId[`${m.id}|${fmt}`] ||
+            byId[m.id];
+          const last = statsLatestPrice(entry);
+          if (last) addValued(`${m.title} — seizoen ${s.season_number}`, m.release_year, fmt, last);
+        });
+        return;
+      }
+
+      const editions = m.editions || [{ format: m.format, wishlist: m.wishlist }];
+      editions.forEach((ed) => {
+        if (ed.wishlist) return;
+        const keys = typeof editionVariantKeys === 'function' ? editionVariantKeys(ed) : [];
+        const withVariants =
+          keys.length && typeof priceKeyFor === 'function'
+            ? priceKeyFor(m.id, ed.format, { variants: keys })
+            : null;
+        const entry = (withVariants && byId[withVariants]) || byId[`${m.id}|${ed.format}`] || byId[m.id];
+        const last = statsLatestPrice(entry);
+        if (last) addValued(m.title, m.release_year, ed.format, last);
       });
     });
-  });
 
-  rows.sort((a, b) => (b.value || 0) - (a.value || 0));
-  return rows;
-}
+    if (!valued.length) {
+      els.value.innerHTML = `
+        <p class="text-sm text-muted">
+          Nog geen prijsdata. Ga naar <a href="prijzen.html" class="text-gold underline">Prijzen</a> en klik op
+          “Ververs prijzen” — daarna verschijnt hier de geschatte waarde van je collectie.
+        </p>`;
+      return;
+    }
 
-/**
- * Totalen per munt. Ponden en euro's mogen niet bij elkaar opgeteld worden;
- * de hoofdmunt is die met de meeste exemplaren, de rest wordt apart gemeld.
- *
- * Naast de richtwaarde (som van de medianen) berekenen we een voorzichtige
- * ondergrens (som van de eerste kwartielen): wat je realistisch minstens
- * voor je collectie zou krijgen.
- */
-function insuranceTotals(rows) {
-  const priced = rows.filter((r) => r.value != null);
+    // Het aantal fysieke exemplaren dat je bezit — de juiste noemer, want een
+    // film op DVD én 4K is twee schijven, en een serie telt per seizoen.
+    let ownedItems = 0;
+    list.forEach((m) => {
+      const seasons = (m.seasons || []).filter((s) => s.owned);
+      if (seasons.length) ownedItems += seasons.length;
+      else ownedItems += (m.editions || [{ wishlist: m.wishlist }]).filter((e) => !e.wishlist).length;
+    });
+    ownedItems = ownedItems || list.length;
 
-  const byCurrency = {};
-  priced.forEach((r) => {
-    const c = (byCurrency[r.currency] = byCurrency[r.currency] || { items: 0, total: 0, low: 0 });
-    c.items++;
-    c.total += r.value;
-    c.low += r.low != null ? r.low : r.value;
-  });
+    // Per munt apart optellen. De hoofdmunt is die met de meeste exemplaren;
+    // wat in een andere munt geprijsd staat, melden we los in plaats van het
+    // er stilzwijgend bij te tellen.
+    const byCurrency = {};
+    valued.forEach((v) => {
+      const c = (byCurrency[v.currency] = byCurrency[v.currency] || { items: [], total: 0, low: 0 });
+      c.items.push(v);
+      c.total += v.value;
+      c.low += v.low;
+    });
+    const currencies = Object.keys(byCurrency).sort((a, b) => byCurrency[b].items.length - byCurrency[a].items.length);
+    const currency = currencies[0] || 'EUR';
+    const main = byCurrency[currency];
+    const others = currencies.slice(1);
 
-  const currencies = Object.keys(byCurrency).sort((a, b) => byCurrency[b].items - byCurrency[a].items);
-  const currency = currencies[0] || 'EUR';
-  const main = byCurrency[currency] || { items: 0, total: 0, low: 0 };
-  const average = main.items ? main.total / main.items : 0;
-  const r2 = (n) => Math.round(n * 100) / 100;
+    const total = main.total;
+    const lowTotal = main.low;
+    const average = total / main.items.length;
+    const coverage = Math.round((main.items.length / ownedItems) * 100);
+    // Ruwe extrapolatie naar alle exemplaren, op basis van het gemiddelde.
+    const projected = average * ownedItems;
+    const top = [...main.items].sort((a, b) => b.value - a.value).slice(0, 5);
+    const oldest = main.items.reduce((o, v) => (String(v.date) < String(o.date) ? v : o), main.items[0]);
 
-  return {
-    items: rows.length,
-    priced: main.items,
-    total: r2(main.total),
-    lowTotal: r2(main.low),
-    average: r2(average),
-    // Ruwe schatting voor exemplaren zonder prijsdata, op basis van het gemiddelde.
-    projected: r2(average * rows.length),
-    currency,
-    otherCurrencies: currencies.slice(1).map((c) => ({
-      currency: c,
-      items: byCurrency[c].items,
-      total: r2(byCurrency[c].total),
-      lowTotal: r2(byCurrency[c].low),
-    })),
-  };
-}
+    els.value.innerHTML = `
+      <div class="grid sm:grid-cols-3 gap-4 mb-5">
+        ${statsKpi('Richtwaarde', statsMoney(total, currency), `${main.items.length} van ${ownedItems} exemplaren (${coverage}%)`)}
+        ${statsKpi('Voorzichtige ondergrens', statsMoney(lowTotal, currency), 'een kwart van het aanbod ligt lager')}
+        ${statsKpi('Geschat totaal', statsMoney(projected, currency), 'alle exemplaren, geëxtrapoleerd')}
+      </div>
 
-function insuranceCsv(rows, totals) {
-  const esc = (v) => {
-    const s = String(v == null ? '' : v);
-    return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const lines = [];
-  const num = (v) => (v != null ? String(v).replace('.', ',') : '');
-  lines.push(
-    ['Titel', 'Jaar', 'Formaat', 'Uitvoering', 'Boxset', 'Opmerkingen', 'In bezit sinds', 'Richtwaarde', 'Ondergrens', 'Munt', 'Prijs gemeten op'].join(';')
-  );
-  rows.forEach((r) => {
-    lines.push(
-      [r.title, r.year, r.format, r.steelbook, r.boxset, r.notes, r.acquired, num(r.value), num(r.low), r.currency, r.measured]
-        .map(esc)
-        .join(';')
-    );
-  });
-  lines.push('');
-  lines.push(['TOTAAL exemplaren', totals.items].map(esc).join(';'));
-  lines.push(['Met prijsdata', totals.priced].map(esc).join(';'));
-  lines.push([`Richtwaarde (${totals.currency})`, num(totals.total)].map(esc).join(';'));
-  lines.push([`Voorzichtige ondergrens (${totals.currency})`, num(totals.lowTotal)].map(esc).join(';'));
-  lines.push([`Geschat totaal hele collectie (${totals.currency})`, num(totals.projected)].map(esc).join(';'));
-  (totals.otherCurrencies || []).forEach((o) => {
-    lines.push([`Apart in ${o.currency} (${o.items} exemplaren, niet omgerekend)`, num(o.total)].map(esc).join(';'));
-  });
-  return lines.join('\r\n');
-}
+      ${
+        others.length
+          ? `<p class="text-xs text-gold font-mono mb-3">Niet meegeteld: ${others
+              .map((c) => `${byCurrency[c].items.length} exemplaren in ${statsEsc(c)} (${statsMoney(byCurrency[c].total, c)})`)
+              .join(' · ')} — andere munt, niet omgerekend.</p>`
+          : ''
+      }
 
-async function downloadInsuranceCsv() {
-  const rows = await buildInsuranceRows();
-  const totals = insuranceTotals(rows);
-  // BOM zodat Excel de accenten goed leest.
-  const blob = new Blob(['﻿' + insuranceCsv(rows, totals)], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `collectie-waardeoverzicht-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  return totals;
-}
+      <p class="text-xs font-mono uppercase text-muted mb-2">Duurste titels</p>
+      ${statsBarChart(
+        top.map((t) => ({
+          label: `${t.title}${t.year ? ' (' + t.year + ')' : ''}`,
+          value: t.value,
+          sub: statsMoney(t.value, currency),
+          color: STATS_FORMAT_COLORS[t.format] || '#C9A227',
+        }))
+      )}
 
-// Afdrukbare pagina in een nieuw venster: handig om als PDF te bewaren.
-async function openInsurancePrintView() {
-  const rows = await buildInsuranceRows();
-  const totals = insuranceTotals(rows);
-  const money = (v, c) => (v == null ? '—' : (c === 'EUR' ? '€' : c + ' ') + v.toFixed(2).replace('.', ','));
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
-
-  const html = `<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8">
-<title>Waardeoverzicht mediacollectie</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; color: #111; }
-  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
-  p.sub { color: #555; font-size: 0.85rem; margin-top: 0; }
-  table { border-collapse: collapse; width: 100%; font-size: 0.8rem; margin-top: 1rem; }
-  th, td { border-bottom: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left; }
-  th { background: #f3f3f3; }
-  td.num { text-align: right; white-space: nowrap; }
-  tfoot td { font-weight: 600; border-top: 2px solid #333; }
-  .note { margin-top: 1.5rem; font-size: 0.75rem; color: #555; line-height: 1.5; }
-  @media print { body { margin: 0.8cm; } }
-</style></head><body>
-<h1>Waardeoverzicht mediacollectie</h1>
-<p class="sub">Opgemaakt op ${new Date().toLocaleDateString('nl-BE')} — ${totals.items} exemplaren, waarvan ${totals.priced} met prijsgegevens</p>
-<table>
-  <thead><tr><th>Titel</th><th>Jaar</th><th>Formaat</th><th>Bijzonderheden</th><th class="num">Ondergrens</th><th class="num">Richtwaarde</th></tr></thead>
-  <tbody>
-    ${rows
-      .map(
-        (r) => `<tr>
-          <td>${esc(r.title)}</td>
-          <td>${esc(r.year)}</td>
-          <td>${esc(r.format)}</td>
-          <td>${esc([r.steelbook, r.boxset, r.notes].filter(Boolean).join(' · '))}</td>
-          <td class="num">${money(r.low, r.currency)}</td>
-          <td class="num">${money(r.value, r.currency)}</td>
-        </tr>`
-      )
-      .join('')}
-  </tbody>
-  <tfoot>
-    <tr><td colspan="4">Totaal van exemplaren met prijsgegevens</td><td class="num">${money(totals.lowTotal, totals.currency)}</td><td class="num">${money(totals.total, totals.currency)}</td></tr>
-    <tr><td colspan="4">Geschat totaal voor de volledige collectie</td><td class="num">—</td><td class="num">${money(totals.projected, totals.currency)}</td></tr>
-  </tfoot>
-</table>
-${
-  (totals.otherCurrencies || []).length
-    ? `<p class="note"><strong>Niet in bovenstaand totaal:</strong> ${totals.otherCurrencies
-        .map((o) => `${o.items} exemplaren geprijsd in ${esc(o.currency)} (${money(o.total, o.currency)})`)
-        .join(', ')}. Deze zijn niet omgerekend, omdat een wisselkoers een nauwkeurigheid zou suggereren die de schatting niet heeft.</p>`
-    : ''
-}
-<p class="note">
-  De bedragen zijn richtprijzen op basis van actieve vraagprijzen op eBay (veilingen buiten beschouwing gelaten).
-  Het zijn geen bevestigde verkoopprijzen en geen taxatie.
-  De <strong>richtwaarde</strong> is de mediaan van vergelijkbare aanbiedingen; de <strong>ondergrens</strong> is
-  het eerste kwartiel — een kwart van het aanbod staat lager geprijsd — en geeft dus een voorzichtige minimumwaarde.
-  Het geschatte totaal rekent het gemiddelde door naar exemplaren zonder prijsgegevens en is het minst
-  betrouwbare cijfer. Bewaar dit overzicht samen met aankoopbewijzen en foto's van je collectie.
-</p>
-<script>window.onload = function () { window.print(); };<\/script>
-</body></html>`;
-
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('Je browser blokkeerde het nieuwe venster. Sta pop-ups toe voor deze site en probeer opnieuw.');
-    return totals;
+      <p class="text-xs text-muted mt-4 leading-relaxed">
+        Schatting op basis van actieve eBay-vraagprijzen, niet van bevestigde verkopen — beschouw dit als een
+        indicatie, geen taxatie. De <strong class="text-ink">richtwaarde</strong> telt de mediaanprijzen op;
+        de <strong class="text-ink">ondergrens</strong> telt per exemplaar het eerste kwartiel, dus wat je
+        realistisch minstens zou krijgen. Oudste gebruikte notering: ${statsEsc(oldest.date || 'onbekend')}.
+        Het geschatte totaal rekent het gemiddelde door naar exemplaren zonder prijsdata en is het minst betrouwbare cijfer.
+      </p>`;
   }
-  win.document.write(html);
-  win.document.close();
-  return totals;
-}
 
-/**
- * Voegt een titel toe aan de prijstracker zonder ze aan je collectie toe te
- * voegen (verlanglijst). details = resultaat van tmdbDetails().
- */
-async function priceTrackNewTitle(details, format) {
-  // Sleutel bevat het formaat, zodat je dezelfde film op DVD en 4K apart
-  // kunt volgen.
-  const slug = slugify(details.title, details.release_year) + '|' + (format || 'bluray');
-  const { prices } = await driveLoadPrices();
-  if (prices.some((p) => p.id === slug)) return { status: 'bestaat', id: slug, title: details.title };
+  function renderAll() {
+    const list = scoped();
 
-  prices.push({
-    id: slug,
-    movie_id: slugify(details.title, details.release_year),
-    title: details.title,
-    release_year: details.release_year,
-    poster_path: details.poster_path || '',
-    format: format || 'bluray',
-    owned: false,
-    history: [],
-  });
-  await withWriteLock(() => driveSaveNamedFile('price_history.json', prices));
-  return { status: 'toegevoegd', id: slug, title: details.title };
-}
+    // Elk onderdeel apart afschermen. Voorheen liep alles achter elkaar: ging
+    // er één berekening mis, dan bleef de rest van de pagina leeg zonder dat
+    // duidelijk was waarom. Nu blijft de schade beperkt tot dat ene blok, en
+    // staat er in dat blok wat er misging.
+    const sections = [
+      ['Kerncijfers', els.kpis, () => renderKpis(list)],
+      ['Per formaat', els.formats, () => renderFormats(list)],
+      ['Per type', els.types, () => renderTypes(list)],
+      ['Per decennium', els.decades, () => renderDecades(list)],
+      ['Top genres', els.genres, () => renderGenres(list)],
+      ['Groei over tijd', els.growth, () => renderGrowth(list)],
+      ['Bekeken', els.watched, () => renderWatched(list)],
+      ['Kijkgedrag', els.watchKpis, () => renderWatchBehaviour(list)],
+      ['Collectiewaarde', els.value, () => renderValue(list)],
+    ];
 
-/**
- * Verwijdert een titel uit de prijstracker (enkel de prijsopvolging; je
- * collectie zelf blijft ongemoeid — al keert een collectie-titel bij de
- * volgende verversing automatisch terug).
- */
-async function priceUntrackTitle(id) {
-  const { prices } = await driveLoadPrices();
-  const filtered = prices.filter((p) => p.id !== id);
-  await withWriteLock(() => driveSaveNamedFile('price_history.json', filtered));
+    const broken = [];
+    sections.forEach(([naam, doel, fn]) => {
+      try {
+        fn();
+      } catch (err) {
+        broken.push(naam + ': ' + err.message);
+        console.error('Statistiek mislukt —', naam, err);
+        if (doel) {
+          doel.innerHTML =
+            '<p class="text-sm text-[#C9A227] py-3">Dit onderdeel kon niet berekend worden.<br>' +
+            '<span class="text-xs text-[#8B8A92] font-mono">' +
+            statsEsc(err.message) +
+            '</span></p>';
+        }
+      }
+    });
+
+    if (broken.length) {
+      const box = document.getElementById('stats-error');
+      if (box) {
+        box.textContent = `${broken.length} van de ${sections.length} onderdelen kon niet berekend worden — zie de blokken hierboven.`;
+        box.classList.remove('hidden');
+      }
+    }
+  }
+
+  // Schakelaar: enkel wat je bezit, of ook je verlanglijst.
+  if (els.scopeChips) {
+    els.scopeChips.querySelectorAll('[data-scope]').forEach((chip) => {
+      chip.classList.toggle('chip-active', chip.dataset.scope === state.scope);
+      chip.addEventListener('click', () => {
+        state.scope = chip.dataset.scope;
+        els.scopeChips.querySelectorAll('[data-scope]').forEach((c) => {
+          c.classList.toggle('chip-active', c.dataset.scope === state.scope);
+        });
+        renderAll();
+      });
+    });
+  }
+
+  renderAll();
 }
