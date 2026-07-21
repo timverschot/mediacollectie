@@ -358,13 +358,48 @@ async function initStatsPage() {
     const byId = {};
     prices.forEach((p) => { byId[p.id] = p; });
 
+    // Prijssleutels zijn sinds fase 9 per exemplaar (`titel|formaat`) en sinds
+    // fase 10 per seizoen (`titel|formaat|sN`). De oude sleutel (enkel het
+    // titel-id) blijft werken zolang je nog niet opnieuw ververst hebt.
     const valued = [];
     let currency = 'EUR';
+
     list.forEach((m) => {
-      const last = statsLatestPrice(byId[m.id]);
-      if (!last) return;
-      if (last.ebay_currency) currency = last.ebay_currency;
-      valued.push({ title: m.title, year: m.release_year, format: m.format, value: Number(last.ebay_avg), date: last.date });
+      const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
+
+      if (ownedSeasons.length) {
+        ownedSeasons.forEach((s) => {
+          const fmt = s.format || m.format;
+          const entry = byId[`${m.id}|${fmt}|s${s.season_number}`] || byId[`${m.id}|${fmt}`] || byId[m.id];
+          const last = statsLatestPrice(entry);
+          if (!last) return;
+          if (last.ebay_currency) currency = last.ebay_currency;
+          valued.push({
+            title: `${m.title} — seizoen ${s.season_number}`,
+            year: m.release_year,
+            format: fmt,
+            value: Number(last.ebay_median != null ? last.ebay_median : last.ebay_avg),
+            date: last.date,
+          });
+        });
+        return;
+      }
+
+      const editions = m.editions || [{ format: m.format, wishlist: m.wishlist }];
+      editions.forEach((ed) => {
+        if (ed.wishlist) return;
+        const entry = byId[`${m.id}|${ed.format}`] || byId[m.id];
+        const last = statsLatestPrice(entry);
+        if (!last) return;
+        if (last.ebay_currency) currency = last.ebay_currency;
+        valued.push({
+          title: m.title,
+          year: m.release_year,
+          format: ed.format,
+          value: Number(last.ebay_median != null ? last.ebay_median : last.ebay_avg),
+          date: last.date,
+        });
+      });
     });
 
     if (!valued.length) {
@@ -376,19 +411,29 @@ async function initStatsPage() {
       return;
     }
 
+    // Het aantal fysieke exemplaren dat je bezit — de juiste noemer, want een
+    // film op DVD én 4K is twee schijven, en een serie telt per seizoen.
+    let ownedItems = 0;
+    list.forEach((m) => {
+      const seasons = (m.seasons || []).filter((s) => s.owned);
+      if (seasons.length) ownedItems += seasons.length;
+      else ownedItems += (m.editions || [{ wishlist: m.wishlist }]).filter((e) => !e.wishlist).length;
+    });
+    ownedItems = ownedItems || list.length;
+
     const total = valued.reduce((sum, v) => sum + v.value, 0);
     const average = total / valued.length;
-    const coverage = Math.round((valued.length / list.length) * 100);
-    // Ruwe extrapolatie naar de volledige selectie, op basis van het gemiddelde.
-    const projected = average * list.length;
+    const coverage = Math.round((valued.length / ownedItems) * 100);
+    // Ruwe extrapolatie naar alle exemplaren, op basis van het gemiddelde.
+    const projected = average * ownedItems;
     const top = [...valued].sort((a, b) => b.value - a.value).slice(0, 5);
     const oldest = valued.reduce((o, v) => (String(v.date) < String(o.date) ? v : o), valued[0]);
 
     els.value.innerHTML = `
       <div class="grid sm:grid-cols-3 gap-4 mb-5">
-        ${statsKpi('Waarde met prijsdata', statsMoney(total, currency), `${valued.length} van ${list.length} titels (${coverage}%)`)}
-        ${statsKpi('Gemiddeld per titel', statsMoney(average, currency), 'op basis van eBay-vraagprijzen')}
-        ${statsKpi('Geschat totaal', statsMoney(projected, currency), 'hele selectie, geëxtrapoleerd')}
+        ${statsKpi('Waarde met prijsdata', statsMoney(total, currency), `${valued.length} van ${ownedItems} exemplaren (${coverage}%)`)}
+        ${statsKpi('Gemiddeld per exemplaar', statsMoney(average, currency), 'op basis van eBay-vraagprijzen')}
+        ${statsKpi('Geschat totaal', statsMoney(projected, currency), 'alle exemplaren, geëxtrapoleerd')}
       </div>
 
       <p class="text-xs font-mono uppercase text-muted mb-2">Duurste titels</p>
