@@ -23,7 +23,7 @@ const PAGE_SIZE = 60;
 
 // Weergavekeuze onthouden tussen bezoeken.
 const VIEW_STORAGE_KEY = 'mediacollectie_view';
-const VALID_VIEWS = ['grid', 'compact', 'text'];
+const VALID_VIEWS = ['grid', 'shelf', 'compact', 'text'];
 
 function loadStoredView() {
   try {
@@ -38,6 +38,9 @@ function loadStoredView() {
 // In de tekst- en compacte weergave laden we bewust meer titels per keer:
 // er zijn geen afbeeldingen, dus scrollen blijft licht.
 function pageSizeForView(view) {
+  // De plank toont álles (cover-flow bladert horizontaal), de tekst- en
+  // compacte lijst laden meer per keer.
+  if (view === 'shelf') return 9999;
   return view === 'text' ? 400 : view === 'compact' ? 150 : PAGE_SIZE;
 }
 
@@ -132,6 +135,10 @@ function initCollectionApp(config) {
     locationRow: document.getElementById('location-row'),
     universeChips: document.getElementById('universe-chips'),
     universeRow: document.getElementById('universe-row'),
+    ambient: document.getElementById('ambient-glow'),
+    shelfStage: document.getElementById('shelf-stage'),
+    shelfTrack: document.getElementById('shelf-track'),
+    shelfMeta: document.getElementById('shelf-meta'),
     statusChips: document.getElementById('status-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
@@ -755,7 +762,33 @@ function initCollectionApp(config) {
     }
   }
 
+  // Kaarten getrapt laten verschijnen na het bouwen van het raster.
+  function runReveal() {
+    const cards = els.grid.querySelectorAll('.reveal');
+    cards.forEach((c, i) => {
+      // Cap de vertraging zodat een grote lijst niet traag oogt.
+      c.style.transitionDelay = Math.min(i, 24) * 28 + 'ms';
+      requestAnimationFrame(() => requestAnimationFrame(() => c.classList.add('in')));
+    });
+  }
+
+  // Sfeerlicht koppelen aan de kaarten van de huidige weergave.
+  function wireAmbient(container) {
+    container.querySelectorAll('[data-accent-id]').forEach((el) => {
+      el.addEventListener('mouseenter', () => setAmbient(el.dataset.accentId, false));
+    });
+    container.addEventListener('mouseleave', clearAmbient);
+  }
+
   function render() {
+    // Plankweergave heeft een eigen opbouw.
+    if (state.view === 'shelf') {
+      renderShelf();
+      return;
+    }
+    els.grid.classList.remove('hidden');
+    if (els.shelfStage) els.shelfStage.classList.add('hidden');
+
     const units = buildRenderUnits();
     const visible = units.slice(0, state.visibleCount);
     const wishCount = state.filtered.filter((i) => i.wishlist).length;
@@ -803,6 +836,118 @@ function initCollectionApp(config) {
         handleDeleteTitle(btn.dataset.deleteId, btn.dataset.deleteTitle);
       });
     });
+
+    runReveal();
+    wireAmbient(els.grid);
+  }
+
+  // ---------- Plankweergave / cover-flow (fase 20) ----------
+
+  let shelfActive = 0;
+  const SHELF_PAD = 20; // 10px links + rechts
+
+  // Leest de actuele slidebreedte uit de CSS-variabele, zodat de centrering
+  // klopt op zowel breedbeeld als gsm.
+  function shelfItemWidth() {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--shelf-item');
+    const n = parseInt(v, 10);
+    return isNaN(n) ? 220 : n;
+  }
+
+  function renderShelf() {
+    if (!els.shelfStage || !els.shelfTrack) return;
+    // Eerst de chip-status bijwerken; daarna het raster verbergen, want
+    // applyViewClasses() overschrijft de klasse van het raster.
+    applyViewClasses();
+    els.grid.classList.add('hidden');
+    els.loadMore.classList.add('hidden');
+    els.shelfStage.classList.remove('hidden');
+
+    const units = buildRenderUnits();
+    const wishCount = state.filtered.filter((i) => i.wishlist).length;
+    els.count.textContent =
+      state.filtered.length + ' titel' + (state.filtered.length === 1 ? '' : 's') +
+      (wishCount ? ` · ${wishCount} verlanglijst` : '');
+    els.empty.classList.toggle('hidden', state.filtered.length !== 0);
+
+    shelfUnits = units;
+    if (shelfActive >= units.length) shelfActive = 0;
+
+    els.shelfTrack.innerHTML = units
+      .map((u, i) => {
+        const item = u.type === 'group' ? u.items[0] : u.item;
+        const cover = posterUrl(item);
+        const title = u.type === 'group' ? u.saga : item.title;
+        return `
+          <div class="shelf-slide" data-shelf-i="${i}">
+            <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] ring-1 ring-white/10 shadow-2xl">
+              ${
+                cover
+                  ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" loading="lazy" class="w-full h-full object-cover">`
+                  : posterFallbackHtml(title)
+              }
+              ${u.type === 'group' ? `<span class="saga-count">${u.items.length} delen</span>` : ribbonsHtml(item)}
+            </div>
+          </div>`;
+      })
+      .join('');
+
+    els.shelfTrack.querySelectorAll('[data-shelf-i]').forEach((s) => {
+      s.addEventListener('click', () => {
+        const i = Number(s.dataset.shelfI);
+        if (i === shelfActive) {
+          const u = shelfUnits[i];
+          if (u.type === 'group') openGroupModal(u.saga);
+          else openModal(u.item.id);
+        } else {
+          shelfActive = i;
+          updateShelf();
+        }
+      });
+    });
+
+    updateShelf();
+  }
+
+  let shelfUnits = [];
+
+  function updateShelf() {
+    if (!els.shelfTrack || !shelfUnits.length) return;
+    const slides = els.shelfTrack.querySelectorAll('.shelf-slide');
+    slides.forEach((s, i) => {
+      const d = i - shelfActive;
+      const scale = d === 0 ? 1 : 0.72;
+      const opacity = d === 0 ? 1 : 0.5;
+      const ry = Math.max(-1, Math.min(1, -d)) * 22;
+      s.style.transform = `perspective(1000px) rotateY(${ry}deg) scale(${scale})`;
+      s.style.opacity = opacity;
+    });
+    const stageW = els.shelfStage.clientWidth || 800;
+    const itemW = shelfItemWidth();
+    const stride = itemW + SHELF_PAD;
+    els.shelfTrack.style.transform = `translateX(${stageW / 2 - (shelfActive * stride + itemW / 2)}px)`;
+
+    const u = shelfUnits[shelfActive];
+    if (u) {
+      const item = u.type === 'group' ? u.items[0] : u.item;
+      const title = u.type === 'group' ? u.saga : item.title;
+      const sub =
+        u.type === 'group'
+          ? `${u.items.length} delen`
+          : `${item.release_year || ''}${item.rating ? ' · ★ ' + item.rating.toFixed(1) : ''} · ${ownedFormats(item)
+              .map(formatLabel)
+              .join(', ')}`;
+      els.shelfMeta.innerHTML = `<p class="font-display text-3xl tracking-wide text-ink">${escapeHtml(
+        title
+      )}</p><p class="font-mono text-xs text-muted mt-1">${escapeHtml(sub)}</p>`;
+      setAmbient(u.type === 'group' ? u.saga : item.id, true);
+    }
+  }
+
+  function shelfStep(delta) {
+    if (state.view !== 'shelf' || !shelfUnits.length) return;
+    shelfActive = Math.max(0, Math.min(shelfUnits.length - 1, shelfActive + delta));
+    updateShelf();
   }
 
   // ---------- Acties (optimistic) ----------
@@ -906,6 +1051,47 @@ function initCollectionApp(config) {
       .join('');
   }
 
+  // ---------- Sfeerkleur (fase 20) ----------
+  // Een stabiele, filmische accentkleur per titel, uit een gecureerd palet.
+  // Bewust deterministisch uit het id: dat werkt meteen, offline, en kost niets.
+  const ACCENTS = ['#C9A227', '#2FA4A9', '#C14B3A', '#2A6FB0', '#639922', '#7F77DD', '#C14B7E', '#B8935C', '#1F9E6E', '#4FB3C9'];
+  const accentCache = {};
+  function accentFor(id) {
+    if (accentCache[id]) return accentCache[id];
+    let h = 0;
+    const s = String(id || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return (accentCache[id] = ACCENTS[h % ACCENTS.length]);
+  }
+
+  function setAmbient(id, strong) {
+    if (!els.ambient) return;
+    const c = accentFor(id);
+    els.ambient.style.setProperty('--amb', c + (strong ? 'cc' : '77'));
+    els.ambient.style.background = `radial-gradient(55% 45% at 50% 22%, ${c}${strong ? 'cc' : '77'}, transparent 70%)`;
+    els.ambient.style.opacity = strong ? '0.85' : '0.7';
+  }
+  function clearAmbient() {
+    if (els.ambient) els.ambient.style.opacity = '0';
+  }
+
+  // Score, formaten en bekeken-status voor de snelblik-overlay.
+  function peekHtml(item) {
+    const rating = item.rating ? '★ ' + item.rating.toFixed(1) : '';
+    const fmts = (ownedFormats(item).length ? ownedFormats(item) : allFormats(item)).map(formatShort).join(' · ');
+    const tag = item.watched
+      ? '<span class="peek-tag">✓ bekeken</span>'
+      : '<span class="peek-tag unseen">nog kijken</span>';
+    return `
+      <div class="peek">
+        <div class="peek-top">
+          <span class="peek-star">${rating}</span>
+          <span class="peek-fmt">${escapeHtml(fmts)}</span>
+        </div>
+        ${tag}
+      </div>`;
+  }
+
   function seasonBadgeInfo(item) {
     if (!item.seasons || !item.seasons.length) return null;
     const ownedCount = item.seasons.filter((s) => s.owned).length;
@@ -922,12 +1108,14 @@ function initCollectionApp(config) {
     const seasonBadge = seasonBadgeInfo(item);
 
     return `
-      <div data-open-id="${escapeHtml(item.id)}" class="case-card group text-left cursor-pointer" role="button" tabindex="0">
-        <div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 transition">
+      <div data-open-id="${escapeHtml(item.id)}" data-accent-id="${escapeAttr(item.id)}" class="case-card reveal group text-left cursor-pointer" role="button" tabindex="0">
+        <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40">
+          ${cover ? '<div class="poster-skel"></div>' : ''}
           ${
             cover
               ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(item.title)}" loading="lazy"
-                   class="w-full h-full object-cover"
+                   class="w-full h-full object-cover relative z-[2]"
+                   onload="this.previousElementSibling && this.previousElementSibling.remove()"
                    onerror="this.replaceWith(posterFallback('${escapeAttr(item.title)}'))">`
               : posterFallbackHtml(item.title)
           }
@@ -939,7 +1127,8 @@ function initCollectionApp(config) {
               : ''
           }
           ${item.wishlist ? '<span class="wish-banner">Verlanglijst</span>' : ''}
-          <button type="button" class="delete-btn" data-delete-id="${escapeAttr(item.id)}" data-delete-title="${escapeAttr(item.title)}" title="Verwijderen uit collectie" aria-label="Verwijderen uit collectie">&times;</button>
+          ${peekHtml(item)}
+          <button type="button" class="delete-btn z-[4]" data-delete-id="${escapeAttr(item.id)}" data-delete-title="${escapeAttr(item.title)}" title="Verwijderen uit collectie" aria-label="Verwijderen uit collectie">&times;</button>
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
         <p class="text-xs text-[#8B8A92] font-mono">${item.release_year || ''}</p>
@@ -955,8 +1144,8 @@ function initCollectionApp(config) {
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '';
 
     return `
-      <div data-open-group="${escapeAttr(unit.saga)}" class="case-card group text-left cursor-pointer" role="button" tabindex="0">
-        <div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 transition saga-stack">
+      <div data-open-group="${escapeAttr(unit.saga)}" data-accent-id="${escapeAttr(unit.saga)}" class="case-card reveal group text-left cursor-pointer" role="button" tabindex="0">
+        <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 saga-stack">
           ${
             cover
               ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(unit.saga)}" loading="lazy" class="w-full h-full object-cover">`
@@ -3487,6 +3676,30 @@ function initCollectionApp(config) {
       });
     });
     applyViewClasses();
+  }
+
+  // Plank-navigatie: pijlknoppen, pijltjestoetsen en herberekenen bij resize.
+  if (els.shelfStage) {
+    const prev = els.shelfStage.querySelector('[data-shelf-prev]');
+    const next = els.shelfStage.querySelector('[data-shelf-next]');
+    if (prev) prev.addEventListener('click', () => shelfStep(-1));
+    if (next) next.addEventListener('click', () => shelfStep(1));
+    document.addEventListener('keydown', (e) => {
+      if (state.view !== 'shelf') return;
+      // Niet kapen terwijl je in een invoerveld of een open pop-up zit.
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      const anyModalOpen = [els.modal, els.personModal, els.episodeModal, els.pickModal, els.dupesModal]
+        .some((m) => m && !m.classList.contains('hidden'));
+      if (anyModalOpen) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); shelfStep(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); shelfStep(1); }
+    });
+    let shelfResizeTimer = null;
+    window.addEventListener('resize', () => {
+      if (state.view !== 'shelf') return;
+      clearTimeout(shelfResizeTimer);
+      shelfResizeTimer = setTimeout(updateShelf, 120);
+    });
   }
 
   if (els.groupToggle) {
