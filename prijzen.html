@@ -36,7 +36,7 @@
 
   // eBay-marktplaats voor de prijzen (EBAY_NL = ebay.nl, in euro's;
   // alternatieven: EBAY_BE, EBAY_DE, EBAY_FR, EBAY_GB, ...)
-  var PRICE_MARKT = 'EBAY_NL';
+var PRICE_MARKT = 'EBAY_NL,EBAY_DE,EBAY_GB';
 </script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
@@ -86,6 +86,7 @@
       <h1 class="font-display text-4xl tracking-wide text-ink">Prijstracker</h1>
       <nav class="flex gap-6">
         <a href="index.html" class="nav-link">Collectie</a>
+        <a href="universums.html" class="nav-link">Universums</a>
         <a href="statistieken.html" class="nav-link">Statistieken</a>
         <a href="prijzen.html" class="nav-link active">Prijzen</a>
         <a href="beheer.html" class="nav-link">Beheer</a>
