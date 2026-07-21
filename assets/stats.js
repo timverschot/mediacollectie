@@ -467,10 +467,24 @@ async function initStatsPage() {
     list.forEach((m) => {
       const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
 
+      // Bijzondere uitvoeringen hebben een eigen prijssleutel: een steelbook of
+      // director's cut is een andere markt dan de standaarduitgave.
+      const primary = (m.editions || []).filter((e) => !e.wishlist)[0] || (m.editions || [])[0];
+      const variantKey =
+        typeof editionVariantKeys === 'function' && primary ? editionVariantKeys(primary) : [];
+
       if (ownedSeasons.length) {
         ownedSeasons.forEach((s) => {
           const fmt = s.format || m.format;
-          const entry = byId[`${m.id}|${fmt}|s${s.season_number}`] || byId[`${m.id}|${fmt}`] || byId[m.id];
+          const withVariants =
+            variantKey.length && typeof priceKeyFor === 'function'
+              ? priceKeyFor(m.id, fmt, { season: s.season_number, variants: variantKey })
+              : null;
+          const entry =
+            (withVariants && byId[withVariants]) ||
+            byId[`${m.id}|${fmt}|s${s.season_number}`] ||
+            byId[`${m.id}|${fmt}`] ||
+            byId[m.id];
           const last = statsLatestPrice(entry);
           if (last) addValued(`${m.title} — seizoen ${s.season_number}`, m.release_year, fmt, last);
         });
@@ -480,7 +494,12 @@ async function initStatsPage() {
       const editions = m.editions || [{ format: m.format, wishlist: m.wishlist }];
       editions.forEach((ed) => {
         if (ed.wishlist) return;
-        const entry = byId[`${m.id}|${ed.format}`] || byId[m.id];
+        const keys = typeof editionVariantKeys === 'function' ? editionVariantKeys(ed) : [];
+        const withVariants =
+          keys.length && typeof priceKeyFor === 'function'
+            ? priceKeyFor(m.id, ed.format, { variants: keys })
+            : null;
+        const entry = (withVariants && byId[withVariants]) || byId[`${m.id}|${ed.format}`] || byId[m.id];
         const last = statsLatestPrice(entry);
         if (last) addValued(m.title, m.release_year, ed.format, last);
       });
