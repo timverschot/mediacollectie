@@ -230,9 +230,30 @@ function initPriceTracker() {
  */
 function buildPriceQuery(t) {
   const formatWord = FORMAT_KEYWORDS_PRICES[t.format] || '';
-  if (t.season) return `${t.title} season ${t.season} ${formatWord}`.replace(/\s+/g, ' ').trim();
-  if (t.whole_series) return `${t.title} complete series ${formatWord}`.replace(/\s+/g, ' ').trim();
-  return `${t.title} ${t.release_year || ''} ${formatWord}`.replace(/\s+/g, ' ').trim();
+  // Elke uitvoering is een eigen markt: een limited edition steelbook is iets
+  // heel anders dan de standaarduitgave. De woorden horen in de zoekterm.
+  const variantWords = (t.variants || [])
+    .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).search)
+    .filter(Boolean)
+    .join(' ');
+  const extra = variantWords ? ' ' + variantWords : '';
+
+  if (t.season) return `${t.title} season ${t.season} ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
+  if (t.whole_series) return `${t.title} complete series ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
+  return `${t.title} ${t.release_year || ''} ${formatWord}${extra}`.replace(/\s+/g, ' ').trim();
+}
+
+// Sleutel per gevolgd exemplaar. Elke combinatie van uitvoeringen krijgt een
+// eigen sleutel, zodat een steelbook niet met de standaarduitgave op één hoop
+// belandt. De volgorde ligt vast, dus dezelfde combinatie geeft altijd
+// dezelfde sleutel.
+function priceKeyFor(movieId, format, opts) {
+  const o = opts || {};
+  let key = `${movieId}|${format}`;
+  if (o.season) key += `|s${o.season}`;
+  const variants = o.variants || [];
+  if (variants.length) key += '|' + variants.join('+');
+  return key;
 }
 
 async function priceRefreshAll(workerUrl, markt, onProgress) {
@@ -267,18 +288,22 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
       // reeks zijn heel verschillend geprijsd; door "seizoen N" in de
       // zoekterm te zetten vergelijk je appels met appels. Het jaartal laten
       // we weg — dat is de eerste uitzending en staat zelden in advertenties.
+      const owned = m.editions.filter((e) => !e.wishlist)[0] || m.editions[0];
+      const variants = editionVariantKeys(owned);
+      const suffix = variants.length ? ' (' + editionVariantLabels(owned).join(', ') + ')' : '';
       ownedSeasons.forEach((s) => {
         const fmt = s.format || m.format;
-        const key = `${m.id}|${fmt}|s${s.season_number}`;
+        const key = priceKeyFor(m.id, fmt, { season: s.season_number, variants });
         tracked[key] = {
           id: key,
           movie_id: m.id,
           title: m.title,
-          label: `${m.title} — seizoen ${s.season_number}`,
+          label: `${m.title} — seizoen ${s.season_number}${suffix}`,
           release_year: m.release_year,
           poster_path: m.poster_path || '',
           format: fmt,
           season: s.season_number,
+          variants,
           owned: true,
         };
       });
@@ -286,15 +311,18 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
     }
 
     m.editions.forEach((ed) => {
-      const key = m.id + '|' + ed.format;
+      const variants = editionVariantKeys(ed);
+      const labels = editionVariantLabels(ed);
+      const key = priceKeyFor(m.id, ed.format, { variants });
       tracked[key] = {
         id: key,
         movie_id: m.id,
         title: m.title,
-        label: m.title,
+        label: m.title + (labels.length ? ' (' + labels.join(', ') + ')' : ''),
         release_year: m.release_year,
         poster_path: m.poster_path || '',
         format: ed.format,
+        variants,
         // Series zonder seizoensgegevens: als geheel opvragen.
         whole_series: m.content_type === 'tv',
         owned: !ed.wishlist,
@@ -348,7 +376,9 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
       // Het formaat gaat apart mee zodat de Worker advertenties kan weren die
       // wel de titel maar niet het juiste formaat bevatten.
       const resp = await fetch(
-        `${workerUrl}?q=${encodeURIComponent(q)}&markt=${encodeURIComponent(markt)}&formaat=${encodeURIComponent(t.format || '')}`
+        `${workerUrl}?q=${encodeURIComponent(q)}&markt=${encodeURIComponent(markt)}` +
+          `&formaat=${encodeURIComponent(t.format || '')}` +
+          `&variant=${encodeURIComponent((t.variants || []).join(',') || 'standaard')}`
       );
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.error || 'fout ' + resp.status);
@@ -447,17 +477,23 @@ async function buildInsuranceRows() {
 
     if (ownedSeasons.length) {
       // Series: één regel per seizoen dat je bezit.
-      const ed = m.editions[0] || {};
+      const ed = m.editions.filter((e) => !e.wishlist)[0] || m.editions[0] || {};
+      const variants = editionVariantKeys(ed);
       ownedSeasons.forEach((s) => {
         const fmt = s.format || m.format;
-        const last = priceFor(`${m.id}|${fmt}|s${s.season_number}`, `${m.id}|${fmt}`, m.id);
+        const last = priceFor(
+          priceKeyFor(m.id, fmt, { season: s.season_number, variants }),
+          `${m.id}|${fmt}|s${s.season_number}`,
+          `${m.id}|${fmt}`,
+          m.id
+        );
         const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
         const low = last ? (last.ebay_q1 != null ? last.ebay_q1 : last.ebay_low != null ? last.ebay_low : value) : null;
         rows.push({
           title: `${m.title} — seizoen ${s.season_number}`,
           year: m.release_year || '',
           format: formatLabel(fmt),
-          steelbook: '',
+          steelbook: editionVariantLabels(ed).join(', '),
           boxset: ed.boxset || '',
           notes: s.name || '',
           acquired: ed.date_added || '',
@@ -473,14 +509,18 @@ async function buildInsuranceRows() {
     m.editions.forEach((ed) => {
       if (ed.wishlist) return; // verlanglijst bezit je niet
 
-      const last = priceFor(`${m.id}|${ed.format}`, m.id);
+      const last = priceFor(
+        priceKeyFor(m.id, ed.format, { variants: editionVariantKeys(ed) }),
+        `${m.id}|${ed.format}`,
+        m.id
+      );
       const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
 
       rows.push({
         title: m.title,
         year: m.release_year || '',
         format: formatLabel(ed.format),
-        steelbook: ed.steelbook ? 'ja' : '',
+        steelbook: editionVariantLabels(ed).join(', '),
         boxset: ed.boxset || '',
         notes: ed.notes || '',
         acquired: ed.date_added || '',
@@ -547,7 +587,7 @@ function insuranceCsv(rows, totals) {
   const lines = [];
   const num = (v) => (v != null ? String(v).replace('.', ',') : '');
   lines.push(
-    ['Titel', 'Jaar', 'Formaat', 'Steelbook', 'Boxset', 'Opmerkingen', 'In bezit sinds', 'Richtwaarde', 'Ondergrens', 'Munt', 'Prijs gemeten op'].join(';')
+    ['Titel', 'Jaar', 'Formaat', 'Uitvoering', 'Boxset', 'Opmerkingen', 'In bezit sinds', 'Richtwaarde', 'Ondergrens', 'Munt', 'Prijs gemeten op'].join(';')
   );
   rows.forEach((r) => {
     lines.push(
@@ -615,7 +655,7 @@ async function openInsurancePrintView() {
           <td>${esc(r.title)}</td>
           <td>${esc(r.year)}</td>
           <td>${esc(r.format)}</td>
-          <td>${esc([r.steelbook ? 'Steelbook' : '', r.boxset, r.notes].filter(Boolean).join(' · '))}</td>
+          <td>${esc([r.steelbook, r.boxset, r.notes].filter(Boolean).join(' · '))}</td>
           <td class="num">${money(r.low, r.currency)}</td>
           <td class="num">${money(r.value, r.currency)}</td>
         </tr>`
