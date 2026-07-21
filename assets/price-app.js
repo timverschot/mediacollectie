@@ -56,7 +56,9 @@ function initPriceTracker() {
 
     return loader
       .then((data) => {
-        state.all = Array.isArray(data) ? data : [];
+        // Gearchiveerde regels (bv. hele-serie-metingen van vóór de
+        // seizoensopdeling) blijven in het bestand staan, maar tonen we niet.
+        state.all = (Array.isArray(data) ? data : []).filter((e) => !e.archived);
         render();
       })
       .catch((err) => {
@@ -299,12 +301,29 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
       };
     });
   });
+  // Titels die we nu per seizoen volgen, hadden vroeger één meting voor de
+  // hele serie. Die oude regel meet iets anders en hoort niet meer thuis in de
+  // lijst — anders blijft ze staan met het onjuiste label 'verlanglijst'.
+  // We verwijderen niets: de geschiedenis blijft bewaard, maar de regel wordt
+  // gearchiveerd en niet meer getoond of bijgewerkt.
+  const perSeasonMovies = new Set();
+  Object.values(tracked).forEach((t) => {
+    if (t.season) perSeasonMovies.add(t.movie_id);
+  });
+
   Object.values(byId).forEach((h) => {
+    const movieId = h.movie_id || String(h.id).split('|')[0];
+    if (!tracked[h.id] && perSeasonMovies.has(movieId)) {
+      h.archived = true;
+      h.archived_reason = 'vervangen door metingen per seizoen';
+      return;
+    }
     if (!tracked[h.id]) {
       tracked[h.id] = {
         id: h.id,
-        movie_id: h.movie_id || String(h.id).split('|')[0],
+        movie_id: movieId,
         title: h.title,
+        label: h.label || h.title,
         release_year: h.release_year,
         poster_path: h.poster_path || '',
         format: h.format || 'bluray',
@@ -411,14 +430,48 @@ async function buildInsuranceRows() {
     priceByKey[p.id] = p;
   });
 
+  // Gearchiveerde metingen (bv. hele-serie-prijzen van vóór de seizoensopdeling)
+  // tellen niet mee; het exemplaar zelf blijft wel in het overzicht staan.
+  const priceFor = (...keys) => {
+    for (const k of keys) {
+      const e = priceByKey[k];
+      if (e && !e.archived && e.history && e.history.length) return e.history[e.history.length - 1];
+    }
+    return null;
+  };
+
   const rows = [];
   movies.forEach((m) => {
     normalizeMovieEntry(m);
+    const ownedSeasons = (m.seasons || []).filter((s) => s.owned);
+
+    if (ownedSeasons.length) {
+      // Series: één regel per seizoen dat je bezit.
+      const ed = m.editions[0] || {};
+      ownedSeasons.forEach((s) => {
+        const fmt = s.format || m.format;
+        const last = priceFor(`${m.id}|${fmt}|s${s.season_number}`, `${m.id}|${fmt}`, m.id);
+        const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
+        rows.push({
+          title: `${m.title} — seizoen ${s.season_number}`,
+          year: m.release_year || '',
+          format: formatLabel(fmt),
+          steelbook: '',
+          boxset: ed.boxset || '',
+          notes: s.name || '',
+          acquired: ed.date_added || '',
+          value,
+          currency: (last && last.ebay_currency) || 'EUR',
+          measured: (last && last.date) || '',
+        });
+      });
+      return;
+    }
+
     m.editions.forEach((ed) => {
       if (ed.wishlist) return; // verlanglijst bezit je niet
 
-      const entry = priceByKey[m.id + '|' + ed.format] || priceByKey[m.id];
-      const last = entry && entry.history && entry.history.length ? entry.history[entry.history.length - 1] : null;
+      const last = priceFor(`${m.id}|${ed.format}`, m.id);
       const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
 
       rows.push({
@@ -429,7 +482,7 @@ async function buildInsuranceRows() {
         boxset: ed.boxset || '',
         notes: ed.notes || '',
         acquired: ed.date_added || '',
-        value: value != null ? value : null,
+        value,
         currency: (last && last.ebay_currency) || 'EUR',
         measured: (last && last.date) || '',
       });
