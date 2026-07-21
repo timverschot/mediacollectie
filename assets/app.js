@@ -799,6 +799,16 @@ function initCollectionApp(config) {
     if (els.shelfStage) els.shelfStage.classList.add('hidden');
 
     const units = buildRenderUnits();
+    // Kom je terug uit de plank, zorg dan dat de ankertitel meegeladen wordt
+    // (ook als die voorbij de eerste pagina ligt), zodat we ernaartoe kunnen.
+    if (gridAnchor) {
+      const idx = units.findIndex((u) =>
+        gridAnchor.group
+          ? u.type === 'group' && u.saga === gridAnchor.group
+          : u.type !== 'group' && u.item.id === gridAnchor.id
+      );
+      if (idx >= 0) state.visibleCount = Math.max(state.visibleCount, idx + 1);
+    }
     const visible = units.slice(0, state.visibleCount);
     const wishCount = state.filtered.filter((i) => i.wishlist).length;
 
@@ -848,12 +858,22 @@ function initCollectionApp(config) {
 
     runReveal();
     wireAmbient(els.grid);
+
+    // Scroll naar de titel waar de plank stond en wis het anker.
+    if (gridAnchor) {
+      const el = [...els.grid.querySelectorAll('[data-open-id],[data-open-group]')].find((c) =>
+        gridAnchor.group ? c.dataset.openGroup === gridAnchor.group : c.dataset.openId === gridAnchor.id
+      );
+      if (el) el.scrollIntoView({ block: 'center' });
+      gridAnchor = null;
+    }
   }
 
   // ---------- Plankweergave / cover-flow (fase 20) ----------
 
   let shelfActive = 0;
   let shelfAnchor = null; // titel/reeks waarop de plank moet openen na wissel vanuit het raster
+  let gridAnchor = null; // titel/reeks waarop het raster moet uitkomen na wissel vanuit de plank
   const SHELF_PAD = 20; // 10px links + rechts
 
   // Onthoudt welke kaart bovenaan in beeld staat, zodat de plank dáár opent
@@ -3729,6 +3749,16 @@ function initCollectionApp(config) {
         // Wissel je vanuit een andere weergave naar de plank, laat die dan
         // meespringen naar de titel die je op dat moment in beeld had.
         if (state.view === 'shelf' && prev !== 'shelf') captureShelfAnchor();
+        // Verlaat je de plank, onthoud dan de gecentreerde titel zodat het
+        // raster daarop uitkomt in plaats van bovenaan te herstarten.
+        if (prev === 'shelf' && state.view !== 'shelf') {
+          const u = shelfUnits[shelfActive];
+          gridAnchor = u
+            ? u.type === 'group'
+              ? { id: null, group: u.saga }
+              : { id: u.item.id, group: null }
+            : null;
+        }
         try {
           localStorage.setItem(VIEW_STORAGE_KEY, state.view);
         } catch {
