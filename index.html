@@ -402,6 +402,8 @@
           <option value="saga_asc">Op reeks (A–Z)</option>
           <option value="year_desc">Releasejaar (nieuw–oud)</option>
           <option value="year_asc">Releasejaar (oud–nieuw)</option>
+          <option value="my_rating_desc">Mijn score (hoog–laag)</option>
+          <option value="watched_desc">Laatst bekeken</option>
         </select>
         <div id="view-chips" class="flex gap-1 shrink-0" role="group" aria-label="Weergave">
           <button type="button" class="chip" data-view="grid" title="Posterraster">▦</button>
@@ -455,6 +457,11 @@
       <div id="boxset-row" class="hidden flex-wrap gap-2 items-center">
         <span class="text-xs font-mono text-muted uppercase mr-1">Boxset</span>
         <div id="boxset-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <div id="location-row" class="hidden flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Locatie</span>
+        <div id="location-chips" class="flex flex-wrap gap-2"></div>
       </div>
 
       </div><!-- /#filter-panel -->
@@ -562,9 +569,24 @@
           </div>
 
           <!-- Fase 2: snelle acties + bewerken -->
-          <div class="pt-3 border-t border-white/10 flex flex-wrap gap-2">
+          <div class="pt-3 border-t border-white/10 flex flex-wrap gap-2 items-center">
             <button type="button" data-toggle-watched class="chip">Markeer als bekeken</button>
             <button type="button" data-edit-open class="chip">✎ Bewerken</button>
+            <span class="flex items-center gap-1.5 ml-auto">
+              <span class="text-muted font-mono uppercase text-[10px]">Mijn score</span>
+              <select data-my-rating class="bg-bg border border-white/10 rounded px-2 py-1 text-xs font-mono text-ink">
+                <option value="">—</option>
+              </select>
+            </span>
+          </div>
+
+          <!-- Fase 13: wanneer heb je dit gezien -->
+          <div data-field="watchlog-section" class="hidden">
+            <div class="flex items-center justify-between gap-2">
+              <p data-field="watchlog-summary" class="text-xs text-muted"></p>
+              <button type="button" data-watchlog-add class="chip !py-1 !px-2.5 text-[10px]">+ Vandaag opnieuw gezien</button>
+            </div>
+            <div data-field="watchlog-list" class="mt-1 space-y-0.5"></div>
           </div>
 
           <div data-edit-panel class="hidden pt-3 border-t border-white/10 space-y-3 bg-bg rounded-lg p-4">
@@ -609,6 +631,10 @@
                 <label>Uit welke boxset?</label>
                 <input type="text" data-edit-boxset placeholder="Bv. Alien Anthology — leeg laten als losse uitgave">
               </div>
+            </div>
+            <div>
+              <label>Waar ligt dit exemplaar?</label>
+              <input type="text" data-edit-location placeholder="Bv. Kast woonkamer plank 2, of Zolder doos 3">
             </div>
             <div>
               <label>Reeks (houdt samenhorende titels bij elkaar)</label>
@@ -665,7 +691,10 @@
           </div>
 
           <div data-field="seasons-section" class="hidden pt-3 border-t border-white/10">
-            <p class="text-muted font-mono uppercase text-xs mb-2">Seizoenen</p>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <p class="text-muted font-mono uppercase text-xs">Seizoenen</p>
+              <p data-field="resume" class="hidden font-mono text-xs text-gold"></p>
+            </div>
             <div data-field="seasons-list" class="space-y-1"></div>
           </div>
           <div class="pt-3 border-t border-white/10">
