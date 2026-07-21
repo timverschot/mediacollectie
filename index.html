@@ -859,6 +859,48 @@
     </div>
   </div>
 
+  <!-- Afleveringpagina: eigen achtergrond en volledige uitleg -->
+  <div id="episode-modal" class="hidden fixed inset-0 z-[59] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/80">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
+      <div class="relative min-h-[3.25rem]">
+        <div data-ep-still-wrap class="hidden">
+          <img data-ep-still src="" alt="" class="block w-full h-48 sm:h-72 object-cover sm:rounded-t-xl">
+          <div class="absolute inset-0 sm:rounded-t-xl bg-gradient-to-t from-surface via-surface/50 to-transparent"></div>
+        </div>
+        <button data-ep-close aria-label="Sluiten"
+          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+      </div>
+
+      <div class="px-5 sm:px-8 pb-8 pt-4 space-y-4">
+        <div>
+          <p data-ep-number class="font-mono text-xs tracking-[0.15em] text-gold uppercase mb-1"></p>
+          <h2 data-ep-title class="font-display text-3xl sm:text-4xl tracking-wide text-ink leading-tight"></h2>
+          <p data-ep-meta class="text-sm text-muted font-mono mt-1"></p>
+        </div>
+
+        <p data-ep-overview class="text-base leading-relaxed text-ink/90"></p>
+
+        <div data-ep-crew-wrap class="hidden grid sm:grid-cols-2 gap-x-6 gap-y-2 pt-2 border-t border-white/10">
+          <p class="text-sm" data-ep-directors-wrap><span class="text-muted font-mono uppercase text-xs">Regie</span><br><span data-ep-directors></span></p>
+          <p class="text-sm" data-ep-writers-wrap><span class="text-muted font-mono uppercase text-xs">Scenario</span><br><span data-ep-writers></span></p>
+        </div>
+
+        <div data-ep-guests-wrap class="hidden pt-2 border-t border-white/10">
+          <p class="text-muted font-mono uppercase text-xs mb-2">Gastrollen</p>
+          <div data-ep-guests class="flex gap-3 overflow-x-auto pb-1"></div>
+        </div>
+
+        <div class="pt-3 border-t border-white/10 flex flex-wrap items-center gap-3">
+          <button type="button" data-ep-watched class="chip">Markeer als gezien</button>
+          <span class="flex gap-2 ml-auto">
+            <button type="button" data-ep-prev class="chip">← Vorige</button>
+            <button type="button" data-ep-next class="chip">Volgende →</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Personenmodaal: profiel + volledige filmografie, met wat je ervan bezit -->
   <div id="person-modal" class="hidden fixed inset-0 z-[55] flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/75">
     <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-4xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
