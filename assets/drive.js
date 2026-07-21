@@ -102,13 +102,22 @@ function driveSignIn() {
     driveOnReady(driveSignIn);
     return;
   }
-  // Een expliciete klik op de inlogknop betekent altijd dat je niet (meer)
-  // bent ingelogd (anders zou dit scherm niet zichtbaar zijn). Vraag daarom
-  // altijd het echte Google-inlogscherm aan ('consent'), nooit een stille
-  // herverbinding — die kan namelijk onopgemerkt mislukken (bv. na het
-  // verlopen van je vorige sessie), waardoor de knop dan niets lijkt te doen.
   accessToken = null;
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+
+  // Eerst een stille poging: heb je de toestemming ooit al gegeven, dan log je
+  // meteen in zonder het toestemmingsscherm te zien. Mislukt dat (eerste keer,
+  // of toestemming ingetrokken), dan tonen we alsnog het echte scherm — zo
+  // blijft de knop altijd werken, maar zonder je elke keer lastig te vallen.
+  const previousCallback = tokenClient.callback;
+  tokenClient.callback = (resp) => {
+    tokenClient.callback = previousCallback;
+    if (resp.error) {
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+      return;
+    }
+    onTokenResponse(resp);
+  };
+  tokenClient.requestAccessToken({ prompt: '' });
 }
 
 function onTokenResponse(resp) {
