@@ -51,8 +51,16 @@ function checkAssetVersions() {
   if (typeof MEDIA_FORMATS === 'undefined' || typeof normalizeMovieEntry === 'undefined') {
     missing.push('assets/drive.js');
   }
-  if (typeof tmdbPerson === 'undefined' || typeof applyTmdbFields === 'undefined') {
+  if (
+    typeof tmdbPerson === 'undefined' ||
+    typeof applyTmdbFields === 'undefined' ||
+    typeof tmdbSeason === 'undefined' ||
+    typeof tmdbSearchKeyword === 'undefined'
+  ) {
     missing.push('assets/admin.js');
+  }
+  if (typeof loadUniverseMembers === 'undefined') {
+    missing.push('assets/universes.js');
   }
   return missing;
 }
@@ -121,6 +129,7 @@ function initCollectionApp(config) {
     groupToggle: document.getElementById('group-sagas-toggle'),
     viewChips: document.getElementById('view-chips'),
     personModal: document.getElementById('person-modal'),
+    episodeModal: document.getElementById('episode-modal'),
     pickModal: document.getElementById('pick-modal'),
     dupesModal: document.getElementById('dupes-modal'),
     saveIndicator: document.getElementById('save-indicator'),
@@ -1511,9 +1520,21 @@ function initCollectionApp(config) {
 
     if (container.dataset.loaded === '1') return;
 
+    // Aparte meldingen per oorzaak — "geen TMDb-koppeling" is misleidend als
+    // in werkelijkheid het bestand assets/admin.js verouderd is.
     const c = typeof getConfig === 'function' ? getConfig() : {};
-    if (!c.tmdbKey || !item.tmdb_id || typeof tmdbSeason !== 'function') {
-      container.innerHTML = '<p class="text-xs text-muted py-2">Geen TMDb-koppeling voor deze titel.</p>';
+    if (typeof tmdbSeason !== 'function') {
+      container.innerHTML =
+        '<p class="text-xs text-gold py-2">Je <code>assets/admin.js</code> is verouderd — ' +
+        'die kent de functie voor afleveringen nog niet. Upload dat bestand opnieuw en herlaad met Ctrl+Shift+R.</p>';
+      return;
+    }
+    if (!c.tmdbKey) {
+      container.innerHTML = '<p class="text-xs text-gold py-2">Vul eerst je TMDb-key in via Beheer → Instellingen.</p>';
+      return;
+    }
+    if (!item.tmdb_id) {
+      container.innerHTML = '<p class="text-xs text-muted py-2">Deze titel heeft geen TMDb-koppeling, dus er zijn geen afleveringen op te halen.</p>';
       return;
     }
 
@@ -1531,6 +1552,137 @@ function initCollectionApp(config) {
     renderEpisodes(item, season, data, container);
   }
 
+  // ---------- Afleveringpagina ----------
+
+  const STILL_BASE = 'https://image.tmdb.org/t/p/w780';
+  let episodeContext = null; // { item, season, data, index }
+
+  function openEpisodeModal(item, season, data, index) {
+    const m = els.episodeModal;
+    if (!m || !data.episodes[index]) return;
+    episodeContext = { item, season, data, index };
+    const e = data.episodes[index];
+
+    const wrap = m.querySelector('[data-ep-still-wrap]');
+    const img = m.querySelector('[data-ep-still]');
+    if (e.still_path) {
+      img.src = STILL_BASE + e.still_path;
+      img.alt = e.name || '';
+      wrap.classList.remove('hidden');
+    } else {
+      img.removeAttribute('src');
+      wrap.classList.add('hidden');
+    }
+
+    m.querySelector('[data-ep-number]').textContent =
+      `${escapeHtml(item.title)} · Seizoen ${season.season_number}, aflevering ${e.episode_number}`;
+    m.querySelector('[data-ep-title]').textContent = e.name || `Aflevering ${e.episode_number}`;
+
+    const meta = [];
+    if (e.air_date) {
+      const d = new Date(e.air_date);
+      meta.push(isNaN(d) ? e.air_date : d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' }));
+    }
+    if (e.runtime) meta.push(e.runtime + ' min');
+    if (e.rating) meta.push(`TMDb ${e.rating.toFixed(1)}${e.vote_count ? ` (${e.vote_count})` : ''}`);
+    m.querySelector('[data-ep-meta]').textContent = meta.join(' · ');
+
+    m.querySelector('[data-ep-overview]').textContent =
+      e.overview || 'Voor deze aflevering is nog geen beschrijving beschikbaar op TMDb.';
+
+    // Regie en scenario van deze aflevering
+    const crewWrap = m.querySelector('[data-ep-crew-wrap]');
+    const dWrap = m.querySelector('[data-ep-directors-wrap]');
+    const wWrap = m.querySelector('[data-ep-writers-wrap]');
+    const hasCrew = (e.directors && e.directors.length) || (e.writers && e.writers.length);
+    crewWrap.classList.toggle('hidden', !hasCrew);
+    if (hasCrew) {
+      dWrap.classList.toggle('hidden', !(e.directors && e.directors.length));
+      wWrap.classList.toggle('hidden', !(e.writers && e.writers.length));
+      m.querySelector('[data-ep-directors]').textContent = (e.directors || []).join(', ');
+      m.querySelector('[data-ep-writers]').textContent = [...new Set(e.writers || [])].join(', ');
+    }
+
+    // Gastrollen, klikbaar naar hun profiel
+    const guestsWrap = m.querySelector('[data-ep-guests-wrap]');
+    const guests = m.querySelector('[data-ep-guests]');
+    const list = e.guest_stars || [];
+    guestsWrap.classList.toggle('hidden', list.length === 0);
+    if (list.length) {
+      guests.innerHTML = list
+        .map(
+          (g) => `
+            <div class="w-20 shrink-0 text-center ${g.id ? 'cursor-pointer group/person' : ''}"
+              ${g.id ? `data-person-id="${escapeAttr(g.id)}" role="button" tabindex="0"` : ''}>
+              <div class="w-20 h-20 rounded-full overflow-hidden bg-bg ring-1 ring-white/10 mb-1 ${
+                g.id ? 'group-hover/person:ring-gold' : ''
+              }">
+                ${
+                  g.profile_path
+                    ? `<img src="${escapeAttr(PROFILE_BASE + g.profile_path)}" alt="${escapeAttr(g.name)}" loading="lazy" class="w-full h-full object-cover">`
+                    : `<div class="w-full h-full flex items-center justify-center text-[#8B8A92] font-mono text-lg">${escapeHtml((g.name || '?').charAt(0))}</div>`
+                }
+              </div>
+              <p class="text-[11px] leading-tight text-ink truncate" title="${escapeAttr(g.name)}">${escapeHtml(g.name)}</p>
+              ${g.character ? `<p class="text-[10px] leading-tight text-muted truncate">${escapeHtml(g.character)}</p>` : ''}
+            </div>`
+        )
+        .join('');
+      guests.querySelectorAll('[data-person-id]').forEach((el) => {
+        el.addEventListener('click', () => {
+          closeEpisodeModal();
+          openPersonModal(el.dataset.personId);
+        });
+      });
+    }
+
+    // Gezien-knop
+    const seen = watchedEpisodes(item, season.season_number).has(e.episode_number);
+    const btn = m.querySelector('[data-ep-watched]');
+    btn.textContent = seen ? '✓ Gezien — haal het vinkje weg' : 'Markeer als gezien';
+    btn.classList.toggle('chip-active', seen);
+    btn.onclick = () => {
+      const before = snapshotProgress(item);
+      const set = watchedEpisodes(item, season.season_number);
+      if (set.has(e.episode_number)) set.delete(e.episode_number);
+      else set.add(e.episode_number);
+      setWatchedEpisodes(item, season.season_number, set);
+      saveEpisodeProgress(item, before);
+      openEpisodeModal(item, season, data, index);
+    };
+
+    // Bladeren binnen het seizoen
+    const prev = m.querySelector('[data-ep-prev]');
+    const next = m.querySelector('[data-ep-next]');
+    prev.disabled = index === 0;
+    next.disabled = index >= data.episodes.length - 1;
+    prev.style.opacity = prev.disabled ? '0.4' : '1';
+    next.style.opacity = next.disabled ? '0.4' : '1';
+    prev.onclick = () => !prev.disabled && openEpisodeModal(item, season, data, index - 1);
+    next.onclick = () => !next.disabled && openEpisodeModal(item, season, data, index + 1);
+
+    m.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+    m.scrollTop = 0;
+  }
+
+  function closeEpisodeModal() {
+    if (!els.episodeModal) return;
+    els.episodeModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+    // Voortgang in de seizoenslijst bijwerken
+    if (episodeContext && currentModalId) openModal(currentModalId);
+    episodeContext = null;
+  }
+
+  if (els.episodeModal) {
+    els.episodeModal.addEventListener('click', (e) => {
+      if (e.target === els.episodeModal) closeEpisodeModal();
+    });
+    const close = els.episodeModal.querySelector('[data-ep-close]');
+    if (close) close.addEventListener('click', closeEpisodeModal);
+  }
+
   function renderEpisodes(item, season, data, container) {
     const seen = watchedEpisodes(item, season.season_number);
 
@@ -1539,31 +1691,35 @@ function initCollectionApp(config) {
         <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-all>Alles aanvinken</button>
         <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-none>Alles uitvinken</button>
       </div>
-      <div class="space-y-0.5">
+      <div class="space-y-1">
         ${data.episodes
-          .map((e) => {
+          .map((e, i) => {
             const isSeen = seen.has(e.episode_number);
             return `
-              <label class="flex items-start gap-2 py-1 px-1 rounded hover:bg-white/5 cursor-pointer">
-                <input type="checkbox" class="mt-1 w-3.5 h-3.5 shrink-0" data-ep="${e.episode_number}" ${isSeen ? 'checked' : ''}>
-                <span class="font-mono text-[10px] text-muted w-10 shrink-0 mt-0.5">${season.season_number}×${String(
-              e.episode_number
-            ).padStart(2, '0')}</span>
-                <span class="flex-1 min-w-0">
-                  <span class="block text-xs text-ink ${isSeen ? 'opacity-60' : ''}">${escapeHtml(e.name || 'Aflevering ' + e.episode_number)}</span>
-                  ${
-                    e.overview
-                      ? `<span class="block text-[10px] text-muted leading-snug line-clamp-2">${escapeHtml(e.overview)}</span>`
-                      : ''
-                  }
-                </span>
-                <span class="font-mono text-[10px] text-muted shrink-0 mt-0.5 text-right">
-                  ${e.air_date ? escapeHtml(e.air_date.slice(0, 4)) : ''}${e.rating ? ' · ' + e.rating.toFixed(1) : ''}
-                </span>
-              </label>`;
+              <div class="flex items-center gap-3 py-2 px-2 rounded hover:bg-white/5">
+                <input type="checkbox" class="w-4 h-4 shrink-0 cursor-pointer" data-ep="${e.episode_number}" ${
+              isSeen ? 'checked' : ''
+            } title="Markeer als gezien">
+                ${
+                  e.still_path
+                    ? `<img src="${escapeAttr('https://image.tmdb.org/t/p/w185' + e.still_path)}" alt="" loading="lazy" class="w-16 h-9 object-cover rounded shrink-0">`
+                    : '<span class="w-16 h-9 rounded bg-bg shrink-0"></span>'
+                }
+                <button type="button" class="flex-1 min-w-0 text-left" data-ep-open="${i}">
+                  <span class="block text-sm text-ink ${isSeen ? 'opacity-60' : ''} truncate">
+                    <span class="font-mono text-xs text-muted mr-1">${season.season_number}×${String(e.episode_number).padStart(2, '0')}</span>
+                    ${escapeHtml(e.name || 'Aflevering ' + e.episode_number)}
+                  </span>
+                  <span class="block text-xs text-muted truncate">${
+                    e.air_date ? escapeHtml(e.air_date) : ''
+                  }${e.rating ? ' · ' + e.rating.toFixed(1) : ''}${e.runtime ? ' · ' + e.runtime + ' min' : ''}</span>
+                </button>
+                <span class="text-muted text-xs shrink-0">›</span>
+              </div>`;
           })
           .join('')}
-      </div>`;
+      </div>
+      <p class="text-[11px] text-muted mt-2">Klik een aflevering aan voor de volledige beschrijving.</p>`;
 
     const applyChange = (mutate) => {
       const before = snapshotProgress(item);
@@ -1578,6 +1734,12 @@ function initCollectionApp(config) {
       cb.addEventListener('change', () => {
         const n = Number(cb.dataset.ep);
         applyChange((set) => (cb.checked ? set.add(n) : set.delete(n)));
+      });
+    });
+
+    container.querySelectorAll('[data-ep-open]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openEpisodeModal(item, season, data, Number(btn.dataset.epOpen));
       });
     });
     container.querySelector('[data-ep-all]').addEventListener('click', () => {
@@ -2855,6 +3017,7 @@ function initCollectionApp(config) {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
+      else if (els.episodeModal && !els.episodeModal.classList.contains('hidden')) closeEpisodeModal();
       else if (els.pickModal && !els.pickModal.classList.contains('hidden')) closePickModal();
       else if (els.dupesModal && !els.dupesModal.classList.contains('hidden')) closeDupesModal();
       else if (els.personModal && !els.personModal.classList.contains('hidden')) closePersonModal();
