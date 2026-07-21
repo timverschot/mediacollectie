@@ -2117,7 +2117,7 @@ function initCollectionApp(config) {
       .map((e) => {
         const isActive = active && e.eid === active.eid;
         const bits = [];
-        if (e.steelbook) bits.push('Steelbook');
+        editionVariantLabels(e).forEach((l) => bits.push(escapeHtml(l)));
         if (e.boxset) bits.push(escapeHtml(e.boxset));
         if (e.location) bits.push('📍 ' + escapeHtml(e.location));
         if (e.notes) bits.push(escapeHtml(e.notes));
@@ -2930,8 +2930,20 @@ function initCollectionApp(config) {
     m.querySelector('[data-edit-owned]').value = ed.wishlist ? 'wishlist' : 'owned';
     m.querySelector('[data-edit-watched]').checked = !!item.watched;
     m.querySelector('[data-edit-notes]').value = ed.notes || '';
-    const steelbook = m.querySelector('[data-edit-steelbook]');
-    if (steelbook) steelbook.checked = !!ed.steelbook;
+    // Uitvoeringen (steelbook, limited, extended, director's cut) worden uit
+    // de gedeelde lijst opgebouwd, zodat er maar één plek is waar ze staan.
+    const variantsBox = m.querySelector('[data-edit-variants]');
+    if (variantsBox) {
+      variantsBox.innerHTML = EDITION_VARIANTS.map(
+        (v) => `
+          <label class="!normal-case !text-sm text-ink flex items-center gap-2">
+            <input type="checkbox" data-edit-variant="${escapeAttr(v.key)}" class="w-4 h-4"> ${escapeHtml(v.label)}
+          </label>`
+      ).join('');
+      variantsBox.querySelectorAll('[data-edit-variant]').forEach((cb) => {
+        cb.checked = !!ed[cb.dataset.editVariant];
+      });
+    }
     const boxsetInput = m.querySelector('[data-edit-boxset]');
     if (boxsetInput) boxsetInput.value = ed.boxset || '';
     const locationInput = m.querySelector('[data-edit-location]');
@@ -3096,8 +3108,9 @@ function initCollectionApp(config) {
       ed.format = m.querySelector('[data-edit-format]').value;
       ed.wishlist = m.querySelector('[data-edit-owned]').value === 'wishlist';
       ed.notes = m.querySelector('[data-edit-notes]').value.trim();
-      const steelbook = m.querySelector('[data-edit-steelbook]');
-      if (steelbook) ed.steelbook = steelbook.checked;
+      m.querySelectorAll('[data-edit-variant]').forEach((cb) => {
+        ed[cb.dataset.editVariant] = cb.checked;
+      });
       const boxsetInput = m.querySelector('[data-edit-boxset]');
       if (boxsetInput) ed.boxset = boxsetInput.value.trim();
       const locationInput = m.querySelector('[data-edit-location]');
