@@ -113,15 +113,22 @@ async function initUniversesPage() {
   // ---------- Universums tonen ----------
 
   function rowHtml(r) {
-    const marker =
-      r.status === 'owned'
-        ? '<span class="font-mono text-[11px] text-teal shrink-0">✓ in bezit</span>'
-        : r.status === 'wishlist'
-        ? '<span class="font-mono text-[11px] text-gold shrink-0">verlanglijst</span>'
-        : `<button type="button" class="text-gold hover:text-white text-[11px] underline shrink-0" data-wish="${r.tmdb_id}" data-media="${r.media_type}">+ verlanglijst</button>`;
+    // Ontbrekende titels krijgen een vinkje om ze samen op de verlanglijst te
+    // zetten; daarnaast blijft de losse knop bestaan.
+    let left = '<span class="w-4 shrink-0"></span>';
+    let marker;
+    if (r.status === 'owned') {
+      marker = '<span class="font-mono text-[11px] text-teal shrink-0">✓ in bezit</span>';
+    } else if (r.status === 'wishlist') {
+      marker = '<span class="font-mono text-[11px] text-gold shrink-0">verlanglijst</span>';
+    } else {
+      left = `<input type="checkbox" class="w-4 h-4 shrink-0 cursor-pointer" data-uni-pick="${r.tmdb_id}" data-media="${r.media_type}" title="Aanvinken om samen op de verlanglijst te zetten">`;
+      marker = `<button type="button" class="text-gold hover:text-white text-[11px] underline shrink-0" data-wish="${r.tmdb_id}" data-media="${r.media_type}">+ verlanglijst</button>`;
+    }
 
     return `
       <div class="flex items-center gap-3 py-1.5 px-1 ${r.status === 'owned' ? '' : 'opacity-80'}">
+        ${left}
         <span class="font-mono text-[11px] text-muted w-10 shrink-0">${r.release_year || '—'}</span>
         <span class="flex-1 min-w-0 truncate text-sm text-ink">${uniEsc(r.title)}${
       r.media_type === 'tv' ? ' <span class="text-muted font-mono text-[10px]">serie</span>' : ''
@@ -129,6 +136,9 @@ async function initUniversesPage() {
         ${marker}
       </div>`;
   }
+
+  // Aangevinkte ontbrekende titels, per universum bijgehouden.
+  const bulkPick = {};
 
   function renderUniverseBody(container, universe, status) {
     const filter = viewFilter[universe.id] || 'all';
@@ -146,6 +156,98 @@ async function initUniversesPage() {
     body.querySelectorAll('[data-wish]').forEach((btn) => {
       btn.addEventListener('click', () => addToWishlist(Number(btn.dataset.wish), btn.dataset.media, btn));
     });
+
+    bulkPick[universe.id] = bulkPick[universe.id] || [];
+    const updateBar = () => {
+      const bar = container.querySelector('[data-uni-bulk]');
+      const count = container.querySelector('[data-uni-bulk-count]');
+      const list = bulkPick[universe.id];
+      if (bar) bar.classList.toggle('hidden', list.length === 0);
+      if (count) count.textContent = `${list.length} aangevinkt`;
+    };
+
+    body.querySelectorAll('[data-uni-pick]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const id = Number(cb.dataset.uniPick);
+        const row = status.rows.find((r) => r.tmdb_id === id);
+        if (!row) return;
+        if (cb.checked) bulkPick[universe.id].push(row);
+        else bulkPick[universe.id] = bulkPick[universe.id].filter((x) => x.tmdb_id !== id);
+        updateBar();
+      });
+    });
+    updateBar();
+
+    // Knoppen van de balk (worden bij elke render opnieuw gekoppeld).
+    const wishBtn = container.querySelector('[data-uni-bulk-wish]');
+    if (wishBtn) {
+      wishBtn.onclick = () => bulkToWishlist(container, universe);
+    }
+    const clearBtn = container.querySelector('[data-uni-bulk-clear]');
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        bulkPick[universe.id] = [];
+        body.querySelectorAll('[data-uni-pick]').forEach((cb) => (cb.checked = false));
+        updateBar();
+      };
+    }
+  }
+
+  async function bulkToWishlist(container, universe) {
+    const list = [...(bulkPick[universe.id] || [])];
+    if (!list.length || !config.tmdbKey) return;
+
+    const status = container.querySelector('[data-uni-bulk-status]');
+    const wishBtn = container.querySelector('[data-uni-bulk-wish]');
+    if (wishBtn) wishBtn.disabled = true;
+
+    let added = 0;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (status) status.textContent = `(${i + 1}/${list.length}) ${r.title}…`;
+      try {
+        const details = await tmdbDetails(r.tmdb_id, r.media_type === 'tv' ? 'tv' : 'movie', config.tmdbKey);
+        const id = slugify(details.title, details.release_year);
+        if (collection.some((m) => m.id === id)) continue;
+        const today = new Date().toISOString().slice(0, 10);
+        const entry = {
+          id,
+          content_type: r.media_type === 'tv' ? 'tv' : 'movie',
+          date_added: today,
+          watched: false,
+          editions: [
+            {
+              eid: 'e1',
+              format: 'bluray',
+              notes: '',
+              boxset: '',
+              location: '',
+              wishlist: true,
+              date_added: today,
+              custom_front_cover_id: '',
+              custom_back_cover_id: '',
+              custom_front_cover: '',
+              custom_back_cover: '',
+            },
+          ],
+          ...details,
+          seasons: details.seasons ? details.seasons.map((s) => ({ ...s, owned: false, format: '' })) : [],
+        };
+        normalizeMovieEntry(entry);
+        await upsertMovieInDrive(entry);
+        collection.push(entry);
+        added++;
+      } catch (err) {
+        console.warn('Overslaan:', r.title, err);
+      }
+      await new Promise((res) => setTimeout(res, 150));
+    }
+
+    bulkPick[universe.id] = [];
+    if (status) status.textContent = `✓ ${added} op de verlanglijst gezet.`;
+    if (wishBtn) wishBtn.disabled = false;
+    // De hele pagina opnieuw opbouwen zodat de tellers en statussen kloppen.
+    await renderAll();
   }
 
   async function addToWishlist(tmdbId, mediaType, btn) {
@@ -220,6 +322,12 @@ async function initUniversesPage() {
           <button type="button" class="chip" data-uni-filter="missing">Nog niet</button>
         </div>
         <div data-uni-body class="space-y-0.5"></div>
+        <div data-uni-bulk class="hidden mt-2 pt-2 border-t border-white/5 flex flex-wrap gap-2 items-center">
+          <span data-uni-bulk-count class="text-xs text-gold font-mono"></span>
+          <button type="button" data-uni-bulk-wish class="chip !py-1 !px-2.5 text-[11px]">→ Naar verlanglijst</button>
+          <button type="button" data-uni-bulk-clear class="chip !py-1 !px-2.5 text-[11px]">Selectie wissen</button>
+          <span data-uni-bulk-status class="text-[11px] font-mono text-muted"></span>
+        </div>
         <p data-uni-note class="text-[11px] text-muted mt-3"></p>
       `;
       els.list.appendChild(section);
