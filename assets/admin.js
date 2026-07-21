@@ -403,6 +403,67 @@ async function tmdbPerson(personId, apiKey) {
   };
 }
 
+/* ==========================================================================
+ * Universums (fase 11)
+ * ==========================================================================
+ * TMDb kent per film maar één collectie ("Iron Man Collection"). Een
+ * overkoepelende franchise zoals het Marvel Cinematic Universe bestaat daar
+ * niet als veld. Wel als TREFWOORD: films én series dragen dan hetzelfde
+ * trefwoord, en via /discover haal je alles op wat eraan hangt.
+ *
+ * Let op: trefwoorden worden door de TMDb-gemeenschap onderhouden. Ze zijn
+ * meestal goed maar niet gegarandeerd volledig.
+ * ========================================================================== */
+
+// Zoekt trefwoorden op naam, bv. "marvel cinematic universe".
+async function tmdbSearchKeyword(query, apiKey) {
+  const d = await tmdbGet('search/keyword', { query }, apiKey);
+  return (d.results || []).slice(0, 20).map((k) => ({ id: k.id, name: k.name }));
+}
+
+/**
+ * Haalt alle titels op die aan een trefwoord hangen. mediaType is 'movie' of
+ * 'tv'. Loopt door de pagina's heen; maxPages voorkomt dat een te breed
+ * trefwoord honderden aanroepen veroorzaakt.
+ */
+async function tmdbDiscoverByKeyword(keywordId, mediaType, apiKey, maxPages) {
+  const limit = maxPages || 10;
+  const out = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= Math.min(totalPages, limit)) {
+    const d = await tmdbGet(
+      `discover/${mediaType}`,
+      {
+        with_keywords: String(keywordId),
+        language: 'nl-NL',
+        include_adult: 'false',
+        page: String(page),
+      },
+      apiKey
+    );
+    totalPages = d.total_pages || 1;
+    (d.results || []).forEach((r) => {
+      const date = r.release_date || r.first_air_date || '';
+      out.push({
+        tmdb_id: r.id,
+        media_type: mediaType,
+        title: r.title || r.name || '',
+        release_year: /^\d{4}/.test(date) ? parseInt(date.slice(0, 4), 10) : null,
+        release_date: date,
+        poster_path: r.poster_path || '',
+        rating: r.vote_average || null,
+      });
+    });
+    page++;
+    // Nette pauze richting TMDb bij meerdere pagina's.
+    if (page <= Math.min(totalPages, limit)) await new Promise((r) => setTimeout(r, 120));
+  }
+
+  return { items: out, truncated: totalPages > limit };
+}
+
 // Beschikbare posters voor een titel, zodat je zelf de afbeelding kan kiezen
 // die bij jouw editie past. include_image_language haalt ook posters zonder
 // taalmarkering op (vaak de mooiste, tekstloze varianten).
