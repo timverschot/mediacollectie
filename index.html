@@ -2,9 +2,19 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Mijn Mediacollectie</title>
 <meta name="description" content="Persoonlijke collectie van films en series op DVD, Blu-ray en 4K Ultra HD.">
+
+<!-- Installeerbaar als app (PWA) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#14141A">
+<link rel="icon" type="image/png" href="assets/icons/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mediacollectie">
+<meta name="mobile-web-app-capable" content="yes">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,6 +51,38 @@
 
 <style>
   body { background-color: #14141A; }
+
+  /* ---------- Mobiel & geïnstalleerde app (fase 6) ---------- */
+
+  /* Ruimte vrijhouden voor de notch en de home-balk wanneer de app
+     schermvullend draait. Op desktop zijn deze waarden gewoon 0. */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  header .sprocket-strip { margin-top: env(safe-area-inset-top); }
+
+  /* Vingervriendelijke raakvlakken op aanraakschermen. Muisgebruikers houden
+     de compacte weergave — vandaar de pointer-query in plaats van een
+     schermbreedte. */
+  @media (pointer: coarse) {
+    .chip { padding: 0.55rem 1rem; }
+    .letter-chip { min-width: 2.25rem; padding: 0.5rem 0.35rem; }
+    .nav-link { padding: 0.35rem 0; }
+    select, input[type="search"] { min-height: 2.75rem; }
+    .delete-btn { opacity: 1; width: 2rem; height: 2rem; }
+  }
+
+  /* Vlot horizontaal vegen door de letterrij en de castrij */
+  #letter-chips, [data-field="cast-list"] {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  /* Geen dubbele scrollbalk in de pop-up op smalle schermen */
+  @media (max-width: 639px) {
+    #detail-modal > div { padding-bottom: env(safe-area-inset-bottom); }
+  }
 
   /* Subtiele filmperforatie-rand bovenaan als sfeerdetail */
   .sprocket-strip {
@@ -181,6 +223,14 @@
     color: #14141A;
   }
 
+  /* De poster overlapt de achtergrondafbeelding — maar enkel als die er is.
+     Zonder achtergrond zou de negatieve marge de poster over de sluitknop
+     trekken, vandaar dat JS de klasse 'with-backdrop' zet. */
+  [data-detail-body].with-backdrop .flip-card { margin-top: -3.5rem; }
+  @media (min-width: 640px) {
+    [data-detail-body].with-backdrop .flip-card { margin-top: -6rem; }
+  }
+
   /* Lightbox: hoesfoto's / posters groot bekijken en inzoomen */
   #lightbox img {
     margin: auto;
@@ -292,13 +342,13 @@
   <!-- Kop -->
   <header class="border-b border-white/5">
     <div class="sprocket-strip h-2 w-full opacity-60"></div>
-    <div class="max-w-7xl mx-auto px-6 py-8 flex items-end justify-between flex-wrap gap-4">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3 sm:gap-4">
       <div>
         <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
-        <h1 class="font-display text-4xl sm:text-5xl tracking-wide text-ink">Mijn Mediacollectie</h1>
+        <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Mijn Mediacollectie</h1>
       </div>
-      <div class="flex items-center gap-4 sm:gap-6 flex-wrap">
-        <nav class="flex gap-4 sm:gap-6">
+      <div class="flex items-center gap-3 sm:gap-6 flex-wrap w-full sm:w-auto">
+        <nav class="flex gap-4 sm:gap-6 overflow-x-auto shrink-0">
           <a href="index.html" class="nav-link active">Collectie</a>
           <a href="statistieken.html" class="nav-link">Statistieken</a>
           <a href="prijzen.html" class="nav-link">Prijzen</a>
@@ -398,24 +448,27 @@
   </footer>
 
   <!-- Detailmodal -->
-  <div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-    <div class="bg-surface rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10">
+  <div id="detail-modal" class="hidden fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/70">
+    <div class="bg-surface rounded-none sm:rounded-xl w-full max-w-none sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl h-full sm:h-auto max-h-none sm:max-h-[90vh] overflow-y-auto overflow-x-hidden shadow-2xl ring-1 ring-white/10">
       <!-- Kop met brede achtergrondafbeelding (TMDb-backdrop), indien beschikbaar -->
       <div class="relative min-h-[3.25rem]">
         <div data-backdrop-wrap class="hidden">
-          <img data-backdrop src="" alt="" class="w-full h-32 sm:h-48 object-cover rounded-t-xl">
-          <div class="absolute inset-0 rounded-t-xl bg-gradient-to-t from-surface via-surface/50 to-transparent"></div>
+          <img data-backdrop src="" alt=""
+            class="block w-full h-48 sm:h-72 lg:h-[22rem] object-cover object-top sm:rounded-t-xl">
+          <!-- Verloop naar de achtergrondkleur, zodat de poster en titel eronder
+               vloeiend uit de afbeelding komen in plaats van er hard op te liggen. -->
+          <div class="absolute inset-0 sm:rounded-t-xl bg-gradient-to-t from-surface via-surface/60 to-transparent"></div>
         </div>
         <button id="modal-close" aria-label="Sluiten"
-          class="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
+          class="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-ink text-2xl leading-none flex items-center justify-center">&times;</button>
       </div>
-      <div class="px-6 pb-8 grid sm:grid-cols-[220px_1fr] gap-6">
-        <div>
+      <div data-detail-body class="px-4 sm:px-6 pb-8 grid sm:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] gap-5 sm:gap-6">
+        <div class="min-w-0">
           <div data-cover-tabs class="hidden mb-2 space-x-2">
             <button type="button" data-cover-tab="poster" class="chip">Poster</button>
             <button type="button" data-cover-tab="hoes" class="chip">Hoesfoto's</button>
           </div>
-          <div class="flip-card aspect-[2/3] w-full max-w-[220px]" title="Klik om te vergroten">
+          <div class="flip-card aspect-[2/3] w-full max-w-[220px] lg:max-w-[260px] mx-auto sm:mx-0 relative z-[1] shadow-2xl rounded-lg" title="Klik om te vergroten">
             <div class="flip-card-inner">
               <div class="flip-face flip-front">
                 <img data-cover="front" src="" alt="">
@@ -427,8 +480,8 @@
           </div>
           <button data-flip-btn class="hidden mt-3 chip w-full text-center">Draai hoes om</button>
         </div>
-        <div class="space-y-3">
-          <h2 data-field="title" class="font-display text-4xl tracking-wide text-ink"></h2>
+        <div class="space-y-3 min-w-0">
+          <h2 data-field="title" class="font-display text-3xl sm:text-4xl lg:text-5xl tracking-wide text-ink"></h2>
           <p data-field="original-title" class="hidden text-sm text-muted italic -mt-2"></p>
           <p data-field="tagline" class="hidden text-sm text-gold italic"></p>
           <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted font-mono items-center">
@@ -663,6 +716,10 @@
   <!-- Voortgang van de eenmalige foto-migratie -->
   <div id="migrate-banner" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[80] bg-surface ring-1 ring-gold/40 rounded-lg px-4 py-2 text-sm font-mono text-ink shadow-xl"></div>
 
+  <!-- Melding wanneer de collectie uit de lokale kopie komt -->
+  <div id="offline-banner" class="hidden fixed left-1/2 -translate-x-1/2 z-[80] bg-surface ring-1 ring-gold/50 rounded-lg px-4 py-2 text-xs font-mono text-gold shadow-xl text-center max-w-[90vw]"
+       style="bottom: calc(1rem + env(safe-area-inset-bottom));"></div>
+
   <!-- Inlogscherm: verschijnt tot de gebruiker met Google inlogt -->
   <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
     <div class="text-center max-w-sm px-6">
@@ -679,6 +736,17 @@
   <script src="assets/add-title.js"></script>
   <script src="assets/app.js"></script>
   <script>
+    // Service worker: maakt de site installeerbaar als app en laat haar ook
+    // zonder verbinding openen. Mislukt de registratie, dan werkt de site
+    // gewoon als gewone website verder.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => {
+          console.warn('Service worker niet geregistreerd:', err);
+        });
+      });
+    }
+
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
 
     driveOnReady(() => {
@@ -693,7 +761,17 @@
       document.getElementById('login-gate').remove();
       initCollectionApp({
         loadData: async () => {
-          const { movies } = await driveLoadMovies();
+          // Lukt Drive niet (geen verbinding), dan tonen we de laatst
+          // bewaarde kopie in plaats van een lege pagina.
+          const { movies, offline, saved_at } = await driveLoadMoviesForDisplay();
+          const banner = document.getElementById('offline-banner');
+          if (offline) {
+            const when = saved_at ? new Date(saved_at).toLocaleString('nl-BE') : 'onbekend moment';
+            banner.textContent = `Geen verbinding — collectie van ${when}. Wijzigingen zijn nu niet mogelijk.`;
+            banner.classList.remove('hidden');
+          } else {
+            banner.classList.add('hidden');
+          }
           return movies;
         },
       });
