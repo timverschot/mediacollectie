@@ -314,6 +314,11 @@ async function tmdbDetails(id, mediaType, apiKey) {
             season_number: s.season_number,
             name: s.name,
             episode_count: s.episode_count,
+            // Bewaard voor de TMDb-achtige seizoenenweergave in de detailmodal.
+            // Komt rechtstreeks uit de detailrespons — geen extra API-call.
+            poster_path: s.poster_path || '',
+            overview: s.overview || '',
+            air_date: s.air_date || '',
           }))
       : undefined;
 
