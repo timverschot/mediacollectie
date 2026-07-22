@@ -97,6 +97,10 @@ function initCollectionApp(config) {
   const state = {
     all: [],
     filtered: [],
+    // Prijs-index: sleutel (zie priceKeyForLocal) -> laatste niet-gearchiveerde
+    // meting uit price_history.json. Wordt na de collectie geladen; blijft leeg
+    // als er nog geen prijsdata is of Drive niet beschikbaar is.
+    priceIndex: {},
     visibleCount: PAGE_SIZE,
     search: '',
     activeFormats: new Set(),
@@ -314,6 +318,13 @@ function initCollectionApp(config) {
       if (typeof loadUniverseData === 'function') {
         loadUniverseData().catch((e) => console.warn('Universums niet geladen:', e));
       }
+
+      // Prijsdata op de achtergrond laden (optioneel). Zodra ze binnen is,
+      // bouwen we de prijs-index en verversen we de weergave, zodat de
+      // richtwaarde bij elke titel verschijnt en 'Sorteer op waarde' klopt.
+      // Faalt dit (geen Drive-sessie, of nog geen prijzen ververst), dan blijft
+      // de collectie gewoon werken — enkel zonder prijzen.
+      loadPriceIndex();
     });
   }
   window.__collectionReload = reload;
@@ -712,6 +723,20 @@ function initCollectionApp(config) {
         return copy.sort((a, b) => (b.release_year || 0) - (a.release_year || 0));
       case 'year_asc':
         return copy.sort((a, b) => (a.release_year || 0) - (b.release_year || 0));
+      case 'value_desc':
+        // Hoogste richtwaarde eerst; titels zonder prijsdata achteraan.
+        return copy.sort((a, b) => (titleValue(b) ?? -1) - (titleValue(a) ?? -1));
+      case 'value_asc':
+        // Laagste richtwaarde eerst, maar titels zónder prijsdata achteraan
+        // (anders zouden die als '0' bovenaan komen).
+        return copy.sort((a, b) => {
+          const va = titleValue(a);
+          const vb = titleValue(b);
+          if (va == null && vb == null) return 0;
+          if (va == null) return 1;
+          if (vb == null) return -1;
+          return va - vb;
+        });
       case 'date_added_desc':
       default:
         return copy.sort((a, b) => new Date(b.date_added) - new Date(a.date_added));
@@ -1116,6 +1141,172 @@ function initCollectionApp(config) {
     return [...set];
   }
 
+  // ---------- Prijzen op de collectiepagina (fase 23) ----------
+  //
+  // De richtwaarde en de range komen uit price_history.json — dezelfde bron als
+  // de prijzen- en verzekeringspagina. We tonen ze hier alleen (lezen), we
+  // verversen niets: verversen gebeurt op de prijzenpagina via de Worker.
+
+  // Sleutel per gevolgd exemplaar. LET OP: moet exact gelijk blijven aan
+  // priceKeyFor() in assets/price-app.js, anders vinden we de metingen niet.
+  function priceKeyForLocal(movieId, format, opts) {
+    const o = opts || {};
+    let key = `${movieId}|${format}`;
+    if (o.season) key += `|s${o.season}`;
+    const variants = o.variants || [];
+    if (variants.length) key += '|' + variants.join('+');
+    return key;
+  }
+
+  // Bouwt state.priceIndex: sleutel -> laatste niet-gearchiveerde meting.
+  // Achtergrondtaak; na afloop verversen we de weergave.
+  function loadPriceIndex() {
+    if (typeof driveLoadPrices !== 'function') return;
+    driveLoadPrices()
+      .then(({ prices }) => {
+        const idx = {};
+        (prices || []).forEach((p) => {
+          if (!p || p.archived || !p.id) return;
+          const hist = p.history || [];
+          if (!hist.length) return;
+          const last = hist[hist.length - 1];
+          idx[p.id] = {
+            value: last.ebay_median != null ? last.ebay_median : last.ebay_avg,
+            q1: last.ebay_q1,
+            q3: last.ebay_q3,
+            low: last.ebay_low,
+            high: last.ebay_high,
+            currency: last.ebay_currency || 'EUR',
+            date: last.date || '',
+          };
+        });
+        state.priceIndex = idx;
+        // Opnieuw filteren/renderen zodat de bedragen verschijnen en een
+        // eventuele sortering-op-waarde meteen klopt.
+        applyFilters();
+      })
+      .catch((e) => console.warn('Prijsgegevens niet geladen:', e));
+  }
+
+  // Zoekt de meting voor een sleutel, met dezelfde terugval als de
+  // verzekeringsexport: eerst de volledige sleutel (met uitvoeringen), dan
+  // titel|formaat, dan het kale titel-id (oude data).
+  function pricePointFor(...keys) {
+    for (const k of keys) {
+      if (k && state.priceIndex[k]) return state.priceIndex[k];
+    }
+    return null;
+  }
+
+  // Richtwaarde + range voor één filmexemplaar (editie).
+  function editionPriceInfo(item, edition) {
+    const variants = editionVariantKeys(edition);
+    const p = pricePointFor(
+      priceKeyForLocal(item.id, edition.format, { variants }),
+      `${item.id}|${edition.format}`,
+      item.id
+    );
+    return normalizePriceInfo(p, edition.format);
+  }
+
+  // Richtwaarde + range voor één seizoen van een serie.
+  function seasonPriceInfo(item, season) {
+    const fmt = season.format || item.format;
+    // Uitvoeringen van het eerste bezeten exemplaar, net als in de export.
+    const ed = (item.editions || []).filter((e) => !e.wishlist)[0] || (item.editions || [])[0] || {};
+    const variants = editionVariantKeys(ed);
+    const p = pricePointFor(
+      priceKeyForLocal(item.id, fmt, { season: season.season_number, variants }),
+      `${item.id}|${fmt}|s${season.season_number}`,
+      `${item.id}|${fmt}`,
+      item.id
+    );
+    return normalizePriceInfo(p, fmt);
+  }
+
+  function normalizePriceInfo(p, format) {
+    if (!p || p.value == null) return null;
+    const low = p.q1 != null ? p.q1 : p.low != null ? p.low : p.value;
+    const high = p.q3 != null ? p.q3 : p.high != null ? p.high : p.value;
+    return { format, value: p.value, low, high, currency: p.currency || 'EUR', date: p.date || '' };
+  }
+
+  // Alle bezeten exemplaren van een titel met hun richtwaarde/range. Series met
+  // seizoensgegevens: één regel per bezeten seizoen; anders één per (niet-
+  // verlanglijst-)editie.
+  function ownedPriceInfos(item) {
+    const ownedSeasons = (item.seasons || []).filter((s) => s.owned);
+    if (ownedSeasons.length) {
+      return ownedSeasons.map((s) => {
+        const info = seasonPriceInfo(item, s);
+        return { label: `Seizoen ${s.season_number}`, format: s.format || item.format, info };
+      });
+    }
+    return (item.editions || [])
+      .filter((e) => !e.wishlist)
+      .map((e) => ({ label: formatLabel(e.format), format: e.format, info: editionPriceInfo(item, e) }));
+  }
+
+  // Somwaarde van een titel (voor de sortering). Titels zonder enige meting
+  // krijgen null, zodat ze achteraan belanden.
+  function titleValue(item) {
+    const infos = ownedPriceInfos(item).map((x) => x.info).filter(Boolean);
+    if (!infos.length) return null;
+    return infos.reduce((sum, i) => sum + (i.value || 0), 0);
+  }
+
+  // Muntsymbool zoals op de prijzenpagina; ponden/euro's worden nooit gemengd.
+  function priceSymbol(cur) {
+    return cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : (cur || '') + ' ';
+  }
+
+  // Kort bedrag: hele euro's zonder decimalen (€6), anders met komma (€13,95).
+  function priceMoney(value, cur) {
+    if (value == null) return '';
+    const sym = priceSymbol(cur);
+    const n = Math.round(value * 100) / 100;
+    const txt = Number.isInteger(n) ? String(n) : n.toFixed(2).replace('.', ',');
+    return sym + txt;
+  }
+
+  // Eén compacte prijsregel: richtwaarde + range. compact=true laat het label
+  // (formaat) weg wanneer de context dat al toont.
+  function priceRangeText(info) {
+    if (!info) return '';
+    const mid = priceMoney(info.value, info.currency);
+    const showRange = info.low != null && info.high != null && info.low !== info.high;
+    return showRange
+      ? `${mid} · ${priceMoney(info.low, info.currency)}–${priceMoney(info.high, info.currency)}`
+      : mid;
+  }
+
+  // Prijsblok voor op de kaart/rij: per bezeten formaat één regel met de
+  // richtwaarde en de range. Leeg als er (nog) geen prijsdata is.
+  function cardPriceHtml(item, opts) {
+    const inline = opts && opts.inline;
+    const rows = ownedPriceInfos(item).filter((x) => x.info);
+    if (!rows.length) return '';
+    const lineHtml = rows
+      .map((x) => {
+        const label = rows.length > 1 ? `<span class="text-muted">${escapeHtml(formatShort(x.format))}</span> ` : '';
+        return `<span class="whitespace-nowrap">${label}${escapeHtml(priceRangeText(x.info))}</span>`;
+      })
+      .join(inline ? ' <span class="text-muted">·</span> ' : '<br>');
+    return `<p class="mt-0.5 text-[11px] font-mono text-teal/90 leading-tight" title="Richtwaarde op eBay (mediaan) met de middenrange">${lineHtml}</p>`;
+  }
+
+  // Compacte totaalwaarde voor de tekst-/compacte rij (één bedrag; de
+  // opsplitsing per formaat staat op de kaart en in de detailmodal).
+  function rowValueHtml(item) {
+    const v = titleValue(item);
+    if (v == null) return '';
+    const infos = ownedPriceInfos(item).map((x) => x.info).filter(Boolean);
+    const cur = infos.length ? infos[0].currency : 'EUR';
+    return `<span class="font-mono text-[11px] text-teal/90 w-16 text-right shrink-0" title="Totale richtwaarde van dit exemplaar">${escapeHtml(
+      priceMoney(v, cur)
+    )}</span>`;
+  }
+
   function ribbonInfo(item) {
     const formats = ownedFormats(item);
     if (formats.length > 1) return { label: 'Gemengd', cls: '', formats };
@@ -1241,6 +1432,7 @@ function initCollectionApp(config) {
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
         <p class="text-xs text-[#8B8A92] font-mono">${item.release_year || ''}</p>
+        ${cardPriceHtml(item)}
       </div>
     `;
   }
@@ -1313,6 +1505,7 @@ function initCollectionApp(config) {
             : ''
         }
         ${item.wishlist ? '<span class="font-mono text-[10px] text-gold shrink-0">wens</span>' : ''}
+        ${rowValueHtml(item)}
         <span class="font-mono text-[11px] text-muted w-10 text-right shrink-0">${item.release_year || ''}</span>
         ${formatTagHtml(item)}
       </div>`;
@@ -2514,6 +2707,7 @@ function initCollectionApp(config) {
     list.innerHTML = eds
       .map((e) => {
         const isActive = active && e.eid === active.eid;
+        const priceInfo = editionPriceInfo(item, e);
         const bits = [];
         editionVariantLabels(e).forEach((l) => bits.push(escapeHtml(l)));
         if (e.boxset) bits.push(escapeHtml(e.boxset));
@@ -2533,6 +2727,13 @@ function initCollectionApp(config) {
           e.wishlist ? ' <span class="text-gold font-mono text-[10px]">verlanglijst</span>' : ''
         }</span>
               ${bits.length ? `<span class="block text-[11px] text-muted truncate">${bits.join(' · ')}</span>` : ''}
+              ${
+                priceInfo
+                  ? `<span class="block text-[11px] font-mono text-teal/90" title="Richtwaarde op eBay (mediaan) met de middenrange">${escapeHtml(
+                      priceRangeText(priceInfo)
+                    )}${priceInfo.date ? ` <span class="text-muted">· gemeten ${escapeHtml(priceInfo.date)}</span>` : ''}</span>`
+                  : ''
+              }
             </span>
             ${hasPhotos ? '<span class="font-mono text-[10px] text-teal shrink-0" title="Eigen hoesfoto\'s">foto</span>' : ''}
             <button type="button" class="text-muted hover:text-red-400 text-xs underline shrink-0"
@@ -3305,6 +3506,14 @@ function initCollectionApp(config) {
                   <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
                   <span class="flex items-center gap-2 shrink-0">
                     <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
+                    ${(() => {
+                      const pi = seasonPriceInfo(item, s);
+                      return pi
+                        ? `<span class="font-mono text-[11px] text-teal/90" title="Richtwaarde op eBay (mediaan) met de middenrange">${escapeHtml(
+                            priceRangeText(pi)
+                          )}</span>`
+                        : '';
+                    })()}
                     <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
                   </span>
                 </div>
