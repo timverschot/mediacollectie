@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v14';
+const VERSION = 'v15';
 const SHELL_CACHE = `mediacollectie-shell-${VERSION}`;
 const IMAGE_CACHE = `mediacollectie-images-${VERSION}`;
 const MAX_IMAGES = 600;
