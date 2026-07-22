@@ -649,6 +649,10 @@ function initCollectionApp(config) {
       if (state.activeStatus.size) {
         const status = item.wishlist ? 'wishlist' : 'owned';
         if (!state.activeStatus.has(status)) return false;
+      } else if (item.wishlist) {
+        // Standaard toont de collectie enkel wat je bezit; de verlanglijst is een
+        // opt-in via het statusfilter, niet iets dat je moet wegfilteren.
+        return false;
       }
       if (state.activeWatched.size) {
         const w = item.watched ? 'watched' : 'unwatched';
@@ -859,13 +863,22 @@ function initCollectionApp(config) {
     runReveal();
     wireAmbient(els.grid);
 
-    // Scroll naar de titel waar de plank stond en wis het anker.
+    // Scroll naar de titel waar de plank stond en wis het anker. Uitgesteld tot
+    // de volgende frame: het raster was tot zojuist verborgen, en meteen scrollen
+    // (vóór de layout klaar is) doet in veel browsers niets.
     if (gridAnchor) {
-      const el = [...els.grid.querySelectorAll('[data-open-id],[data-open-group]')].find((c) =>
-        gridAnchor.group ? c.dataset.openGroup === gridAnchor.group : c.dataset.openId === gridAnchor.id
-      );
-      if (el) el.scrollIntoView({ block: 'center' });
+      const key = gridAnchor;
       gridAnchor = null;
+      requestAnimationFrame(() => {
+        const el = [...els.grid.querySelectorAll('[data-open-id],[data-open-group]')].find((c) =>
+          key.group ? c.dataset.openGroup === key.group : c.dataset.openId === key.id
+        );
+        if (!el) return;
+        const bar = document.querySelector('.sticky');
+        const barH = bar ? bar.getBoundingClientRect().height : 0;
+        const y = window.scrollY + el.getBoundingClientRect().top - barH - 24;
+        window.scrollTo({ top: Math.max(0, y) });
+      });
     }
   }
 
