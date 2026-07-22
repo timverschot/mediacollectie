@@ -176,6 +176,11 @@
     .nav-link { padding: 0.35rem 0; }
     select, input[type="search"] { min-height: 2.75rem; }
     .delete-btn { opacity: 1; width: 2rem; height: 2rem; }
+    /* Op aanraakschermen is de verwijderknop altijd zichtbaar (linksboven),
+       dus verhuist het waarde-pill naar linksonder en schuift de bekeken-stip
+       er net naast — zo botst er niets. */
+    .value-badge { top: auto; bottom: 0.5rem; }
+    .watched-dot { left: 2.9rem; }
   }
 
   /* Vlot horizontaal vegen door de letterrij en de castrij */
@@ -287,6 +292,30 @@
   .season-badge-partial {
     border-color: rgba(201,162,39,0.6);
     color: #C9A227;
+  }
+
+  /* Waarde-pill linksboven op de poster: totale richtwaarde van de titel.
+     Vervaagt bij hover, zodat de verwijderknop en de snelblik ruimte krijgen. */
+  .value-badge {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 3;
+    padding: 0.1rem 0.45rem;
+    border-radius: 9999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: rgba(20,20,26,0.85);
+    color: #C9A227;
+    border: 1px solid rgba(201,162,39,0.35);
+    box-shadow: 0 0 0 2px rgba(20,20,26,0.5);
+    transition: opacity 0.15s ease;
+  }
+  .case-card:hover .value-badge,
+  .case-card:focus-within .value-badge {
+    opacity: 0;
   }
 
   /* Banner onderaan de poster voor verlanglijst-titels */
