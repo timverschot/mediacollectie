@@ -1147,6 +1147,11 @@ function initCollectionApp(config) {
   // de prijzen- en verzekeringspagina. We tonen ze hier alleen (lezen), we
   // verversen niets: verversen gebeurt op de prijzenpagina via de Worker.
 
+  // Benaderende wisselkoersen naar euro, voor titels waarvan enkel een niet-
+  // euromarkt (meestal het VK) een prijs opleverde. Eén vaste koers houdt het
+  // licht en stabiel; werk hem hier bij als je hem wil actualiseren.
+  const FX_TO_EUR = { EUR: 1, GBP: 1.17, USD: 0.92 };
+
   // Sleutel per gevolgd exemplaar. LET OP: moet exact gelijk blijven aan
   // priceKeyFor() in assets/price-app.js, anders vinden we de metingen niet.
   function priceKeyForLocal(movieId, format, opts) {
@@ -1226,9 +1231,23 @@ function initCollectionApp(config) {
 
   function normalizePriceInfo(p, format) {
     if (!p || p.value == null) return null;
-    const low = p.q1 != null ? p.q1 : p.low != null ? p.low : p.value;
-    const high = p.q3 != null ? p.q3 : p.high != null ? p.high : p.value;
-    return { format, value: p.value, low, high, currency: p.currency || 'EUR', date: p.date || '' };
+    const cur = p.currency || 'EUR';
+    // Titels waarvan enkel een niet-euromarkt (meestal het VK) een prijs gaf,
+    // rekenen we om naar euro met een vaste benaderende koers. Zo staat alles
+    // in dezelfde munt: het totaal, de sortering en de weergave kloppen dan.
+    const rate = FX_TO_EUR[cur] != null ? FX_TO_EUR[cur] : 1;
+    const conv = (v) => (v == null ? null : Math.round(v * rate * 100) / 100);
+    const lowRaw = p.q1 != null ? p.q1 : p.low != null ? p.low : p.value;
+    const highRaw = p.q3 != null ? p.q3 : p.high != null ? p.high : p.value;
+    return {
+      format,
+      value: conv(p.value),
+      low: conv(lowRaw),
+      high: conv(highRaw),
+      currency: 'EUR',
+      convertedFrom: cur !== 'EUR' ? cur : null,
+      date: p.date || '',
+    };
   }
 
   // Alle bezeten exemplaren van een titel met hun richtwaarde/range. Series met
@@ -1280,19 +1299,24 @@ function initCollectionApp(config) {
       : mid;
   }
 
-  // Prijsblok voor op de kaart/rij: per bezeten formaat één regel met de
-  // richtwaarde en de range. Leeg als er (nog) geen prijsdata is.
-  function cardPriceHtml(item, opts) {
-    const inline = opts && opts.inline;
-    const rows = ownedPriceInfos(item).filter((x) => x.info);
-    if (!rows.length) return '';
-    const lineHtml = rows
-      .map((x) => {
-        const label = rows.length > 1 ? `<span class="text-muted">${escapeHtml(formatShort(x.format))}</span> ` : '';
-        return `<span class="whitespace-nowrap">${label}${escapeHtml(priceRangeText(x.info))}</span>`;
-      })
-      .join(inline ? ' <span class="text-muted">·</span> ' : '<br>');
-    return `<p class="mt-0.5 text-[11px] font-mono text-teal/90 leading-tight" title="Richtwaarde op eBay (mediaan) met de middenrange">${lineHtml}</p>`;
+  // Waarde-pill voor op de poster: één afgerond totaalbedrag (alle bezeten
+  // exemplaren samen, in euro). Leeg als er (nog) geen prijsdata is. De
+  // opsplitsing per formaat + range staat in de detailmodal.
+  function cardValueBadgeHtml(item) {
+    const total = titleValue(item);
+    if (total == null) return '';
+    const txt = '€' + Math.round(total).toLocaleString('nl-BE');
+    return `<span class="value-badge" title="Totale richtwaarde van deze titel (eBay-mediaan, omgerekend naar euro)">${escapeHtml(
+      txt
+    )}</span>`;
+  }
+
+  // Kleine hint voor in de detailmodal wanneer een bedrag uit een niet-
+  // euromunt is omgerekend (meestal het VK).
+  function convertedHint(info) {
+    if (!info || !info.convertedFrom) return '';
+    const sym = info.convertedFrom === 'GBP' ? '£' : info.convertedFrom === 'USD' ? '$' : info.convertedFrom;
+    return ` <span class="text-muted">· omgerekend uit ${escapeHtml(sym)}</span>`;
   }
 
   // Compacte totaalwaarde voor de tekst-/compacte rij (één bedrag; de
@@ -1420,6 +1444,7 @@ function initCollectionApp(config) {
               : posterFallbackHtml(item.title)
           }
           ${ribbonsHtml(item)}
+          ${cardValueBadgeHtml(item)}
           ${item.watched ? '<span class="watched-dot" title="Bekeken"></span>' : ''}
           ${
             seasonBadge
@@ -1432,7 +1457,6 @@ function initCollectionApp(config) {
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
         <p class="text-xs text-[#8B8A92] font-mono">${item.release_year || ''}</p>
-        ${cardPriceHtml(item)}
       </div>
     `;
   }
@@ -2731,7 +2755,7 @@ function initCollectionApp(config) {
                 priceInfo
                   ? `<span class="block text-[11px] font-mono text-teal/90" title="Richtwaarde op eBay (mediaan) met de middenrange">${escapeHtml(
                       priceRangeText(priceInfo)
-                    )}${priceInfo.date ? ` <span class="text-muted">· gemeten ${escapeHtml(priceInfo.date)}</span>` : ''}</span>`
+                    )}${convertedHint(priceInfo)}${priceInfo.date ? ` <span class="text-muted">· gemeten ${escapeHtml(priceInfo.date)}</span>` : ''}</span>`
                   : ''
               }
             </span>
