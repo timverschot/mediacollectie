@@ -1319,6 +1319,34 @@ function initCollectionApp(config) {
     return ` <span class="text-muted">· omgerekend uit ${escapeHtml(sym)}</span>`;
   }
 
+  // Opgetelde richtwaarde van alle delen in een gegroepeerde reeks (in euro).
+  // Null als geen enkel deel prijsdata heeft.
+  function groupValue(unit) {
+    const vals = unit.items.map(titleValue).filter((v) => v != null);
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0);
+  }
+
+  // Waarde-pill voor een reeks-kaart (som van alle delen).
+  function groupValueBadgeHtml(unit) {
+    const total = groupValue(unit);
+    if (total == null) return '';
+    const txt = '€' + Math.round(total).toLocaleString('nl-BE');
+    return `<span class="value-badge" title="Totale richtwaarde van deze reeks (eBay-mediaan, omgerekend naar euro)">${escapeHtml(
+      txt
+    )}</span>`;
+  }
+
+  // Totaalbedrag van een reeks voor de tekst-/compacte rij.
+  function rowGroupValueHtml(unit) {
+    const total = groupValue(unit);
+    if (total == null) return '';
+    const txt = '€' + Math.round(total).toLocaleString('nl-BE');
+    return `<span class="font-mono text-[11px] text-teal/90 w-16 text-right shrink-0" title="Totale richtwaarde van deze reeks">${escapeHtml(
+      txt
+    )}</span>`;
+  }
+
   // Compacte totaalwaarde voor de tekst-/compacte rij (één bedrag; de
   // opsplitsing per formaat staat op de kaart en in de detailmodal).
   function rowValueHtml(item) {
@@ -1476,6 +1504,7 @@ function initCollectionApp(config) {
               ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(unit.saga)}" loading="lazy" class="w-full h-full object-cover">`
               : posterFallbackHtml(unit.saga)
           }
+          ${groupValueBadgeHtml(unit)}
           <span class="saga-count">${unit.items.length} delen</span>
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(unit.saga)}</p>
@@ -1558,6 +1587,7 @@ function initCollectionApp(config) {
         <span class="w-2 shrink-0"></span>
         <span class="flex-1 min-w-0 truncate text-sm text-ink">${escapeHtml(unit.saga)}</span>
         <span class="font-mono text-[11px] text-gold shrink-0">${unit.items.length} delen</span>
+        ${rowGroupValueHtml(unit)}
         <span class="font-mono text-[11px] text-muted w-20 text-right shrink-0">${escapeHtml(yearRange)}</span>
       </div>`;
   }
