@@ -19,6 +19,8 @@ const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
 const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w780';
 const PROFILE_BASE = 'https://image.tmdb.org/t/p/w185';
 const THUMB_BASE = 'https://image.tmdb.org/t/p/w92';
+const SEASON_POSTER_BASE = 'https://image.tmdb.org/t/p/w185'; // seizoencover in de detailmodal
+const EPISODE_STILL_BASE = 'https://image.tmdb.org/t/p/w300'; // aflevering-still (grotere weergave)
 const PAGE_SIZE = 60;
 
 // Weergavekeuze onthouden tussen bezoeken.
@@ -2293,13 +2295,13 @@ function initCollectionApp(config) {
     if (open) {
       container.classList.add('hidden');
       container.dataset.open = '0';
-      btn.textContent = 'afleveringen ▾';
+      if (btn) btn.textContent = 'afleveringen ▾';
       return;
     }
 
     container.classList.remove('hidden');
     container.dataset.open = '1';
-    btn.textContent = 'afleveringen ▴';
+    if (btn) btn.textContent = 'afleveringen ▴';
 
     if (container.dataset.loaded === '1') return;
 
@@ -2468,41 +2470,54 @@ function initCollectionApp(config) {
 
   function renderEpisodes(item, season, data, container) {
     const seen = watchedEpisodes(item, season.season_number);
+    const epDate = (str) => {
+      const d = new Date(str);
+      return isNaN(d) ? str : d.toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric' });
+    };
 
     container.innerHTML = `
-      <div class="flex flex-wrap gap-2 mb-2">
+      <div class="flex flex-wrap gap-2 mb-3">
         <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-all>Alles aanvinken</button>
         <button type="button" class="chip !py-1 !px-2.5 text-[10px]" data-ep-none>Alles uitvinken</button>
       </div>
-      <div class="space-y-1">
+      <div class="space-y-3">
         ${data.episodes
           .map((e, i) => {
             const isSeen = seen.has(e.episode_number);
+            const still = e.still_path ? EPISODE_STILL_BASE + e.still_path : '';
+            const meta = [
+              e.air_date ? epDate(e.air_date) : '',
+              e.rating ? '★ ' + e.rating.toFixed(1) : '',
+              e.runtime ? e.runtime + ' min' : '',
+            ].filter(Boolean).join(' · ');
             return `
-              <div class="flex items-center gap-3 py-2 px-2 rounded hover:bg-white/5">
-                <input type="checkbox" class="w-4 h-4 shrink-0 cursor-pointer" data-ep="${e.episode_number}" ${
-              isSeen ? 'checked' : ''
-            } title="Markeer als gezien">
-                ${
-                  e.still_path
-                    ? `<img src="${escapeAttr('https://image.tmdb.org/t/p/w185' + e.still_path)}" alt="" loading="lazy" class="w-16 h-9 object-cover rounded shrink-0">`
-                    : '<span class="w-16 h-9 rounded bg-bg shrink-0"></span>'
-                }
-                <button type="button" class="flex-1 min-w-0 text-left" data-ep-open="${i}">
-                  <span class="block text-sm text-ink ${isSeen ? 'opacity-60' : ''} truncate">
-                    <span class="font-mono text-xs text-muted mr-1">${season.season_number}×${String(e.episode_number).padStart(2, '0')}</span>
-                    ${escapeHtml(e.name || 'Aflevering ' + e.episode_number)}
-                  </span>
-                  <span class="block text-xs text-muted truncate">${
-                    e.air_date ? escapeHtml(e.air_date) : ''
-                  }${e.rating ? ' · ' + e.rating.toFixed(1) : ''}${e.runtime ? ' · ' + e.runtime + ' min' : ''}</span>
+              <div class="flex gap-3 sm:gap-4 ${isSeen ? 'opacity-70' : ''}">
+                <button type="button" data-ep-open="${i}" class="shrink-0 w-32 sm:w-44 rounded-md overflow-hidden ring-1 ring-white/10 hover:ring-gold/50 bg-[#14141A] block transition">
+                  ${
+                    still
+                      ? `<img src="${escapeAttr(still)}" alt="" loading="lazy" class="w-full aspect-video object-cover">`
+                      : '<div class="w-full aspect-video flex items-center justify-center text-muted text-[10px]">geen beeld</div>'
+                  }
                 </button>
-                <span class="text-muted text-xs shrink-0">›</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-2">
+                    <button type="button" data-ep-open="${i}" class="text-left min-w-0 group/ep">
+                      <p class="text-sm text-ink leading-tight group-hover/ep:text-gold">
+                        <span class="font-mono text-xs text-muted mr-1">${season.season_number}×${String(e.episode_number).padStart(2, '0')}</span>${escapeHtml(e.name || 'Aflevering ' + e.episode_number)}
+                      </p>
+                      ${meta ? `<p class="text-[11px] text-muted font-mono mt-0.5">${escapeHtml(meta)}</p>` : ''}
+                    </button>
+                    <label class="flex items-center gap-1.5 text-[11px] text-muted shrink-0 cursor-pointer" title="Markeer als gezien">
+                      <input type="checkbox" class="w-4 h-4 cursor-pointer" data-ep="${e.episode_number}" ${isSeen ? 'checked' : ''}> gezien
+                    </label>
+                  </div>
+                  ${e.overview ? `<p class="text-xs text-muted mt-1 clamp-2 leading-snug">${escapeHtml(e.overview)}</p>` : ''}
+                </div>
               </div>`;
           })
           .join('')}
       </div>
-      <p class="text-[11px] text-muted mt-2">Klik een aflevering aan voor de volledige beschrijving.</p>`;
+      <p class="text-[11px] text-muted mt-3">Klik op het beeld of de titel voor de volledige beschrijving.</p>`;
 
     const applyChange = (mutate) => {
       const before = snapshotProgress(item);
@@ -3553,57 +3568,83 @@ function initCollectionApp(config) {
         `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
       seasonsList.innerHTML = item.seasons
         .map((s) => {
+          // Seizoencover: eigen seizoenposter indien beschikbaar (na een
+          // verversing via Beheer), anders de serieposter, anders een plek.
+          const poster = s.poster_path
+            ? SEASON_POSTER_BASE + s.poster_path
+            : item.poster_path
+            ? SEASON_POSTER_BASE + item.poster_path
+            : '';
+          const yr = (s.air_date || '').slice(0, 4);
+          const posterHtml = poster
+            ? `<img src="${escapeAttr(poster)}" alt="${escapeAttr(s.name)}" loading="lazy" class="w-full aspect-[2/3] object-cover">`
+            : `<div class="w-full aspect-[2/3] flex items-center justify-center text-muted text-[10px] text-center px-1">geen beeld</div>`;
+
           if (s.owned) {
             const p = seasonProgress(item, s);
+            const pi = seasonPriceInfo(item, s);
             return `
-              <div class="border-b border-white/5 last:border-0 pb-2 mb-2 last:pb-0 last:mb-0">
-                <div class="flex items-center justify-between text-sm gap-2">
-                  <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-                  <span class="flex items-center gap-2 shrink-0">
-                    <span class="font-mono text-xs text-gold">${fmtLabel[s.format] || s.format}</span>
-                    ${(() => {
-                      const pi = seasonPriceInfo(item, s);
-                      return pi
-                        ? `<span class="font-mono text-[11px] text-teal/90" title="Richtwaarde op eBay (mediaan) met de middenrange">${escapeHtml(
-                            priceRangeText(pi)
-                          )}</span>`
-                        : '';
-                    })()}
-                    <button type="button" class="text-muted hover:text-red-400 text-xs underline" data-remove-season="${s.season_number}">verwijderen</button>
-                  </span>
-                </div>
-                <div class="flex items-center gap-2 mt-1">
-                  <div class="flex-1 h-1 bg-bg rounded-full overflow-hidden">
-                    <div class="h-full rounded-full ${p.pct === 100 ? 'bg-teal' : 'bg-gold'}" style="width:${p.pct}%"></div>
+              <div class="border-b border-white/10 last:border-0 py-3 first:pt-0">
+                <div class="flex gap-3 sm:gap-4">
+                  <button type="button" data-episodes="${s.season_number}" class="shrink-0 w-20 sm:w-24 rounded-md overflow-hidden ring-1 ring-white/10 hover:ring-gold/50 bg-[#14141A] block transition" title="Toon afleveringen">
+                    ${posterHtml}
+                  </button>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-start justify-between gap-2">
+                      <button type="button" data-episodes="${s.season_number}" class="text-left min-w-0 group/season">
+                        <p class="font-display tracking-wide text-lg text-ink leading-tight truncate group-hover/season:text-gold">${escapeHtml(s.name)}</p>
+                        <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · <span class="text-gold">${fmtLabel[s.format] || s.format}</span>${
+              pi ? ` · <span class="text-teal/90">${escapeHtml(priceRangeText(pi))}</span>` : ''
+            }</p>
+                      </button>
+                      <button type="button" class="text-muted hover:text-red-400 text-xs underline shrink-0" data-remove-season="${s.season_number}">verwijderen</button>
+                    </div>
+                    ${s.overview ? `<p class="text-xs text-muted mt-1.5 clamp-2 leading-snug">${escapeHtml(s.overview)}</p>` : ''}
+                    <div class="flex items-center gap-2 mt-2">
+                      <div class="flex-1 h-1.5 bg-bg rounded-full overflow-hidden">
+                        <div class="h-full rounded-full ${p.pct === 100 ? 'bg-teal' : 'bg-gold'}" style="width:${p.pct}%"></div>
+                      </div>
+                      <span class="font-mono text-[10px] text-muted shrink-0">${p.seen}/${p.total || '?'}</span>
+                      <button type="button" data-episodes="${s.season_number}" data-episodes-toggle="${s.season_number}" class="text-gold hover:text-white text-[11px] underline shrink-0">afleveringen ▾</button>
+                    </div>
                   </div>
-                  <span class="font-mono text-[10px] text-muted shrink-0">${p.seen}/${p.total || '?'}</span>
-                  <button type="button" class="text-gold hover:text-white text-[10px] underline shrink-0" data-episodes="${s.season_number}">afleveringen ▾</button>
                 </div>
-                <div data-episodes-for="${s.season_number}" class="hidden mt-2 pl-1" data-open="0" data-loaded="0"></div>
+                <div data-episodes-for="${s.season_number}" class="hidden mt-3" data-open="0" data-loaded="0"></div>
               </div>
             `;
           }
           return `
-            <div class="flex items-center justify-between text-sm opacity-70 gap-2">
-              <span class="truncate min-w-0">${escapeHtml(s.name)} <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span></span>
-              <span class="flex items-center gap-2 shrink-0">
-                <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-0.5 text-xs font-mono" data-season="${s.season_number}">
-                  ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
-                </select>
-                <button type="button" class="text-gold hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
-              </span>
+            <div class="flex gap-3 sm:gap-4 border-b border-white/10 last:border-0 py-3 first:pt-0 opacity-80">
+              <div class="shrink-0 w-20 sm:w-24 rounded-md overflow-hidden ring-1 ring-white/10 bg-[#14141A]">
+                ${posterHtml}
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="font-display tracking-wide text-lg text-ink leading-tight truncate">${escapeHtml(s.name)}</p>
+                <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · <span class="text-muted">niet in bezit</span></p>
+                ${s.overview ? `<p class="text-xs text-muted mt-1.5 clamp-2 leading-snug">${escapeHtml(s.overview)}</p>` : ''}
+                <div class="flex items-center gap-2 mt-2">
+                  <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-1 text-xs font-mono" data-season="${s.season_number}">
+                    ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
+                  </select>
+                  <button type="button" class="text-gold hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
+                </div>
+              </div>
             </div>
           `;
         })
         .join('');
 
-      // Uitklappen naar de afleveringen van een seizoen
-      seasonsList.querySelectorAll('[data-episodes]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const num = Number(btn.dataset.episodes);
+      // Uitklappen naar de afleveringen van een seizoen. Meerdere triggers
+      // (cover, titel én de tekstknop) klappen uit; de tekstknop
+      // (data-episodes-toggle) is degene waarvan het label ▾/▴ wisselt — zo
+      // overschrijven we nooit per ongeluk de cover of de titel.
+      seasonsList.querySelectorAll('[data-episodes]').forEach((trigger) => {
+        trigger.addEventListener('click', () => {
+          const num = Number(trigger.dataset.episodes);
           const season = item.seasons.find((s) => s.season_number === num);
           const box = seasonsList.querySelector(`[data-episodes-for="${num}"]`);
-          if (season && box) toggleSeasonEpisodes(item, season, box, btn);
+          const label = seasonsList.querySelector(`[data-episodes-toggle="${num}"]`);
+          if (season && box) toggleSeasonEpisodes(item, season, box, label);
         });
       });
 
