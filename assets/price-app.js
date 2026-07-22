@@ -365,9 +365,23 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
   let updated = 0;
   let skipped = 0;
 
+  const SAVE_EVERY = 25;
+  let sinceSave = 0;
+  const save = () => withWriteLock(() => driveSaveNamedFile('price_history.json', Object.values(byId)));
+
   for (let i = 0; i < list.length; i++) {
     const t = list[i];
-    if (onProgress) onProgress(i + 1, list.length, t.title);
+
+    // De voortgangsmelding is bijzaak. Gaat er in de interface iets mis — een
+    // element dat niet bestaat, bijvoorbeeld — dan mag dat een verversing van
+    // honderden titels niet afbreken.
+    if (onProgress) {
+      try {
+        onProgress(i + 1, list.length, t.label || t.title);
+      } catch (uiErr) {
+        console.warn('Voortgang tonen mislukt (verversen gaat gewoon door):', uiErr);
+      }
+    }
 
     const q = buildPriceQuery(t);
 
@@ -434,12 +448,25 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
         : undefined,
     });
     updated++;
+    sinceSave++;
+
+    // Tussentijds bewaren. Bij een grote collectie duurt een verversing lang;
+    // gaat er dan iets mis, dan mag je niet alles kwijt zijn. Je kunt hierdoor
+    // ook gerust het tabblad sluiten.
+    if (sinceSave >= SAVE_EVERY) {
+      try {
+        await save();
+        sinceSave = 0;
+      } catch (saveErr) {
+        console.warn('Tussentijds opslaan mislukt, we proberen het later opnieuw:', saveErr);
+      }
+    }
 
     // Nette throttle richting eBay.
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  await withWriteLock(() => driveSaveNamedFile('price_history.json', Object.values(byId)));
+  await save();
   return { updated, skipped, total: list.length };
 }
 
@@ -515,6 +542,11 @@ async function buildInsuranceRows() {
         m.id
       );
       const value = last ? (last.ebay_median != null ? last.ebay_median : last.ebay_avg) : null;
+      // Ondergrens net als bij de seizoenen-tak: eerste kwartiel, anders de
+      // laagste prijs, anders de richtwaarde. Zonder deze regel gooide de
+      // export een ReferenceError ('low is not defined') en brak zowel de
+      // CSV-download als de printweergave af.
+      const low = last ? (last.ebay_q1 != null ? last.ebay_q1 : last.ebay_low != null ? last.ebay_low : value) : null;
 
       rows.push({
         title: m.title,
