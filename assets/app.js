@@ -1621,6 +1621,7 @@ function initCollectionApp(config) {
           <div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#14141A] ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 transition">
             ${cover ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(item.title)}" loading="lazy" class="w-full h-full object-cover">` : posterFallbackHtml(item.title)}
             <span class="ribbon ${ribbon.cls}">${ribbon.label}</span>
+            ${cardValueBadgeHtml(item)}
             ${item.wishlist ? '<span class="wish-banner">Verlanglijst</span>' : ''}
           </div>
           <p class="mt-1 text-xs truncate">${escapeHtml(item.title)}</p>
