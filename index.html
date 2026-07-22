@@ -137,6 +137,10 @@
   .peek-tag { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:8.5px; text-transform:uppercase; letter-spacing:.04em; border:1px solid rgba(47,164,169,.55); color:#2FA4A9; border-radius:9999px; padding:2px 7px; }
   .peek-tag.unseen { border-color: rgba(139,138,146,.5); color:#8B8A92; }
 
+  /* Tekst afkappen na 2 of 3 regels (voor seizoen-/afleveringsbeschrijvingen). */
+  .clamp-2 { display:-webkit-box; -webkit-line-clamp:2; line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .clamp-3 { display:-webkit-box; -webkit-line-clamp:3; line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
   /* Pop-ups openen met een korte veerbeweging. */
   #detail-modal:not(.hidden) > div,
   #person-modal:not(.hidden) > div,
