@@ -558,6 +558,12 @@ async function addTitleSubmit(e) {
           season_number: s.season_number,
           name: s.name,
           episode_count: s.episode_count,
+          // Seizoencover, -beschrijving en -datum meenemen, zodat de TMDb-achtige
+          // seizoenenweergave meteen de juiste cover per seizoen toont (anders
+          // viel alles terug op de algemene serieposter).
+          poster_path: s.poster_path || '',
+          overview: s.overview || '',
+          air_date: s.air_date || '',
           owned,
           format: owned && sel ? sel.value : '',
         };
