@@ -957,7 +957,7 @@ function initCollectionApp(config) {
             <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] ring-1 ring-white/10 shadow-2xl">
               ${
                 cover
-                  ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" loading="lazy" class="w-full h-full object-cover">`
+                  ? `<img data-src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" class="shelf-img w-full h-full object-cover">`
                   : posterFallbackHtml(title)
               }
               ${u.type === 'group' ? `<span class="saga-count">${u.items.length} delen</span>` : ribbonsHtml(item)}
@@ -985,11 +985,28 @@ function initCollectionApp(config) {
 
   let shelfUnits = [];
 
+  // Zoveel slides links en rechts van de actieve houden we "levend" (poster
+  // geladen, 3D-transform aan). Alles daarbuiten lossen we, zodat het geheugen
+  // begrensd blijft — anders houdt een grote collectie honderden grote posters
+  // tegelijk in beeld en crasht de browser op een gsm.
+  const SHELF_WINDOW = 5;
+
   function updateShelf() {
     if (!els.shelfTrack || !shelfUnits.length) return;
     const slides = els.shelfTrack.querySelectorAll('.shelf-slide');
     slides.forEach((s, i) => {
       const d = i - shelfActive;
+      const img = s.querySelector('.shelf-img');
+      if (Math.abs(d) > SHELF_WINDOW) {
+        // Ver weg (en toch onzichtbaar buiten de plank): poster lossen en de
+        // 3D-laag opheffen om geheugen vrij te geven.
+        if (img && img.getAttribute('src')) img.removeAttribute('src');
+        s.style.transform = 'none';
+        s.style.opacity = '0';
+        return;
+      }
+      // Binnen bereik: poster laden (indien nog niet) en positioneren.
+      if (img && !img.getAttribute('src') && img.dataset.src) img.setAttribute('src', img.dataset.src);
       const scale = d === 0 ? 1 : 0.72;
       const opacity = d === 0 ? 1 : 0.5;
       const ry = Math.max(-1, Math.min(1, -d)) * 22;
