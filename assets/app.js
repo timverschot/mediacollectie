@@ -633,7 +633,7 @@ function initCollectionApp(config) {
     const q = state.search.trim().toLowerCase();
     let list = state.all.filter((item) => {
       if (q) {
-        const inTitle = item.title.toLowerCase().includes(q);
+        const inTitle = String(item.title || '').toLowerCase().includes(q);
         const inOriginal = (item.original_title || '').toLowerCase().includes(q);
         const inCast = (item.cast || []).some((name) => name.toLowerCase().includes(q));
         const inDirector = (item.director || '').toLowerCase().includes(q);
@@ -1305,6 +1305,10 @@ function initCollectionApp(config) {
   // exemplaren samen, in euro). Leeg als er (nog) geen prijsdata is. De
   // opsplitsing per formaat + range staat in de detailmodal.
   function cardValueBadgeHtml(item) {
+    // Op verlanglijst-kaarten geen pill: die zou op gsm botsen met de
+    // volle-breedte "Verlanglijst"-banner onderaan de poster. De waarde blijft
+    // zichtbaar in de detailmodal.
+    if (item.wishlist) return '';
     const total = titleValue(item);
     if (total == null) return '';
     const txt = '€' + Math.round(total).toLocaleString('nl-BE');
@@ -1470,7 +1474,7 @@ function initCollectionApp(config) {
               ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(item.title)}" loading="lazy"
                    class="w-full h-full object-cover relative z-[2]"
                    onload="this.previousElementSibling && this.previousElementSibling.remove()"
-                   onerror="this.replaceWith(posterFallback('${escapeAttr(item.title)}'))">`
+                   onerror="this.replaceWith(posterFallback(this.alt))">`
               : posterFallbackHtml(item.title)
           }
           ${ribbonsHtml(item)}
@@ -4036,9 +4040,13 @@ function initCollectionApp(config) {
     }
   });
 
+  // Debounce: op een grote collectie is een volledige her-render per toetsaanslag
+  // merkbaar traag op gsm. We wachten kort tot het typen even stilvalt.
+  let searchDebounce = null;
   els.search.addEventListener('input', (e) => {
     state.search = e.target.value;
-    applyFilters();
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(applyFilters, 150);
   });
 
   els.sort.addEventListener('change', (e) => {
@@ -4122,6 +4130,28 @@ function initCollectionApp(config) {
       if (e.key === 'ArrowLeft') { e.preventDefault(); shelfStep(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); shelfStep(1); }
     });
+
+    // Veeg-bediening op gsm: een cover-flow hoort te swipen. Verticaal scrollen
+    // blijft werken (touchstart is passief); een duidelijke horizontale veeg
+    // stapt door en onderdrukt de tik-selectie die er anders op zou volgen.
+    let shelfTouchX = null, shelfTouchY = null;
+    els.shelfStage.addEventListener('touchstart', (e) => {
+      if (state.view !== 'shelf' || e.touches.length !== 1) { shelfTouchX = null; return; }
+      shelfTouchX = e.touches[0].clientX;
+      shelfTouchY = e.touches[0].clientY;
+    }, { passive: true });
+    els.shelfStage.addEventListener('touchend', (e) => {
+      if (shelfTouchX == null || state.view !== 'shelf') return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - shelfTouchX;
+      const dy = t.clientY - shelfTouchY;
+      shelfTouchX = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        e.preventDefault();
+        shelfStep(dx < 0 ? 1 : -1);
+      }
+    }, { passive: false });
+
     let shelfResizeTimer = null;
     window.addEventListener('resize', () => {
       if (state.view !== 'shelf') return;

@@ -19,9 +19,14 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v20';
+const VERSION = 'v21';
+// De postercache heeft een EIGEN versie, los van de schil. Zo wist een gewone
+// JS/HTML-update (VERSION ophogen) niet telkens alle gedownloade posters —
+// scheelt fors dataverbruik op gsm. Verhoog IMAGE_VERSION enkel als je de
+// postercache bewust wil legen.
+const IMAGE_VERSION = 'v1';
 const SHELL_CACHE = `mediacollectie-shell-${VERSION}`;
-const IMAGE_CACHE = `mediacollectie-images-${VERSION}`;
+const IMAGE_CACHE = `mediacollectie-images-${IMAGE_VERSION}`;
 const MAX_IMAGES = 600;
 
 // Relatieve paden, zodat dit ook werkt onder een submap op GitHub Pages.
