@@ -1300,24 +1300,36 @@
       var standalone =
         window.navigator.standalone === true ||
         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-      if (isIOS && standalone) {
-        document.getElementById('login-status').innerHTML =
+      var statusEl = document.getElementById('login-status');
+      if (isIOS && standalone && statusEl) {
+        statusEl.innerHTML =
           'Inloggen werkt niet vanuit een schermvullende app op iPhone.<br><br>' +
           'Verwijder dit pictogram van je beginscherm, open de site opnieuw in Safari ' +
           'en zet hem daar opnieuw op je beginscherm. Daarna werkt het wel.';
       }
     })();
 
+    // Alleen zinvol zolang je nog niet ingelogd bent. Was de sessie al
+    // hersteld, dan is de poort intussen verborgen en zou dit een melding
+    // schrijven in een element dat niemand ziet.
     driveOnReady(() => {
-      document.getElementById('login-status').textContent = 'Log in met Google om je collectie te bekijken.';
+      if (!driveIsSignedIn()) driveGateStatus('Log in met Google om je collectie te bekijken.');
     });
 
     window._driveError = function (msg) {
-      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+      driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
+    };
+
+    // Opnieuw ingelogd na een verlopen sessie: niet de hele pagina opnieuw
+    // opbouwen, alleen de collectie opnieuw ophalen.
+    window._driveReauthenticated = function () {
+      if (window.__collectionReload) window.__collectionReload();
     };
 
     window._driveAuthenticated = function () {
-      document.getElementById('login-gate').remove();
+      // De poort wordt centraal verborgen in drive.js (niet meer verwijderd),
+      // zodat ze bij een verlopen sessie terug kan komen met een werkende
+      // inlogknop.
       initCollectionApp({
         loadData: async () => {
           // Lukt Drive niet (geen verbinding), dan tonen we de laatst

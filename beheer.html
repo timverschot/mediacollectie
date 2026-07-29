@@ -365,10 +365,11 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
 
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
     window._driveError = function (msg) {
-      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+      driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
     };
     window._driveAuthenticated = function () {
-      document.getElementById('login-gate').remove();
+      // De inlogpoort wordt centraal verborgen in drive.js (niet verwijderd),
+      // zodat ze bij een verlopen sessie terug kan komen.
       document.getElementById('app-content').classList.remove('hidden');
 
       // Fase 1: TMDb-key syncen met Drive (nieuw toestel? key komt vanzelf mee),

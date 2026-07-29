@@ -169,11 +169,18 @@
 
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
     window._driveError = function (msg) {
-      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+      driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
+    };
+
+    // Opnieuw ingelogd na een verlopen sessie. Deze pagina is puur weergave,
+    // dus opnieuw laden is hier het eenvoudigst én het meest betrouwbaar.
+    window._driveReauthenticated = function () {
+      location.reload();
     };
 
     window._driveAuthenticated = function () {
-      document.getElementById('login-gate').remove();
+      // De inlogpoort wordt centraal verborgen in drive.js (niet verwijderd),
+      // zodat ze bij een verlopen sessie terug kan komen.
       initUniversesPage().catch(function (err) {
         console.error(err);
         var box = document.getElementById('page-error');

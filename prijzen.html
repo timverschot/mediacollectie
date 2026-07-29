@@ -164,7 +164,7 @@ var PRICE_MARKT = 'EBAY_NL,EBAY_DE,EBAY_GB';
   <script>
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
     window._driveError = function (msg) {
-      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+      driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
     };
 
     function workerConfigured() {
@@ -172,7 +172,8 @@ var PRICE_MARKT = 'EBAY_NL,EBAY_DE,EBAY_GB';
     }
 
     window._driveAuthenticated = function () {
-      document.getElementById('login-gate').remove();
+      // De inlogpoort wordt centraal verborgen in drive.js (niet verwijderd),
+      // zodat ze bij een verlopen sessie terug kan komen.
       window.__priceTrackerLoadData = async () => {
         const { prices } = await driveLoadPrices();
         return prices;

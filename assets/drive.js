@@ -287,13 +287,67 @@ function tryRestoreSession() {
 // kortstondig verschijnen van het inlogscherm bij paginawissels wegneemt.
 tryRestoreSession();
 
+/* ==========================================================================
+ * Inlogpoort — gedeeld over alle pagina's (fase 24)
+ * ==========================================================================
+ * Elke pagina heeft dezelfde #login-gate met daarin #login-status. Die poort
+ * werd voorheen per pagina met .remove() weggegooid zodra je inlogde. Dat gaf
+ * twee problemen die samen één verwarrende fout opleverden:
+ *
+ * 1. Alles wat daarna nog naar #login-status schreef (de foutmelder, de
+ *    driveOnReady-melding) liep stuk op null. Die TypeError kwam bovendrijven
+ *    in plaats van de échte oorzaak — je zag "Cannot set properties of null"
+ *    terwijl er in werkelijkheid iets heel anders aan de hand was.
+ * 2. Er was geen weg terug: verliep je token, dan kon je niet opnieuw inloggen
+ *    zonder de pagina te herladen.
+ *
+ * Daarom zit het verbergen en terugbrengen van de poort nu hier, op één plek,
+ * en is alles null-veilig: een pagina zónder poort mag deze functies gewoon
+ * aanroepen.
+ */
+
+function driveGateStatus(msg) {
+  const el = document.getElementById('login-status');
+  if (el) el.textContent = msg;
+}
+
+function driveGateHide() {
+  const gate = document.getElementById('login-gate');
+  if (gate) gate.classList.add('hidden');
+}
+
+// Poort terugbrengen met uitleg. Gebruikt bij een verlopen sessie: de
+// inlogknop zit er nog in en werkt gewoon, dus herladen is niet meer nodig.
+function driveGateShow(msg) {
+  const gate = document.getElementById('login-gate');
+  if (gate) gate.classList.remove('hidden');
+  if (msg) driveGateStatus(msg);
+}
+
+function driveIsSignedIn() {
+  return !!accessToken;
+}
+
 // Stuurt het "ingelogd"-sein pas zodra de hele pagina geparsed is. Dit
 // voorkomt dat het sein verloren gaat wanneer de Google-bibliotheek
 // (die asynchroon laadt) sneller klaar is dan de rest van de pagina, en de
 // pagina zelf (window._driveAuthenticated) dat sein dus nog niet kan opvangen.
+//
+// Het sein gaat maar ÉÉN keer naar _driveAuthenticated. Log je later opnieuw in
+// (na een verlopen sessie), dan zou een tweede aanroep de hele pagina opnieuw
+// opbouwen: dubbele event-listeners, dubbele modals. Daarvoor is er een aparte
+// haak, _driveReauthenticated, waarin een pagina enkel haar gegevens ververst.
+let authNotified = false;
+
 function notifyAuthenticated() {
   const fire = () => {
-    if (window._driveAuthenticated) window._driveAuthenticated();
+    driveGateHide();
+    if (!authNotified) {
+      authNotified = true;
+      if (window._driveAuthenticated) window._driveAuthenticated();
+    } else if (window._driveReauthenticated) {
+      window._driveReauthenticated();
+    }
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fire, { once: true });
@@ -358,6 +412,34 @@ function onTokenError(err) {
   reportError(type);
 }
 
+// Token bewaren, zonder het "ingelogd"-sein te geven. Apart gezet zodat het
+// vernieuwen van een verlopen token (ensureToken) de pagina niet opnieuw laat
+// opstarten — dat hoort alleen bij een échte nieuwe aanmelding.
+function storeToken(resp) {
+  accessToken = resp.access_token;
+  tokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000;
+  try {
+    localStorage.setItem(
+      DRIVE_TOKEN_CACHE_KEY,
+      JSON.stringify({ access_token: accessToken, expires_at: tokenExpiresAt })
+    );
+  } catch {
+    // Als localStorage niet beschikbaar is, blijft inloggen wel werken,
+    // dan moet je het straks alleen opnieuw doen op een andere pagina.
+  }
+}
+
+// Sessie is niet meer geldig: token weggooien en de inlogpoort terugbrengen,
+// zodat je gewoon opnieuw kan inloggen zonder de pagina te herladen.
+function driveSessionExpired() {
+  accessToken = null;
+  tokenExpiresAt = 0;
+  try {
+    localStorage.removeItem(DRIVE_TOKEN_CACHE_KEY);
+  } catch {}
+  driveGateShow('Je Google-sessie is verlopen. Log opnieuw in om verder te gaan — je gegevens blijven bewaard.');
+}
+
 function onTokenResponse(resp) {
   const wasSilent = silentAttemptInProgress;
   silentAttemptInProgress = false;
@@ -372,17 +454,7 @@ function onTokenResponse(resp) {
     reportError(resp.error);
     return;
   }
-  accessToken = resp.access_token;
-  tokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000;
-  try {
-    localStorage.setItem(
-      DRIVE_TOKEN_CACHE_KEY,
-      JSON.stringify({ access_token: accessToken, expires_at: tokenExpiresAt })
-    );
-  } catch {
-    // Als localStorage niet beschikbaar is, blijft inloggen wel werken,
-    // dan moet je het straks alleen opnieuw doen op een andere pagina.
-  }
+  storeToken(resp);
   notifyAuthenticated();
 }
 
@@ -411,23 +483,86 @@ function whenTokenClientReady(timeoutMs) {
   });
 }
 
+/**
+ * Zorgt dat er een geldig token is vóór een Drive-aanroep. Is het token bijna
+ * verlopen, dan proberen we het stil te vernieuwen.
+ *
+ * Die stille poging lukt vaak níet (Google wil er meestal een klik bij zien).
+ * Dat is geen ramp, maar het moet wel netjes eindigen. Vandaar drie dingen die
+ * hier eerder ontbraken en samen die verwarrende "Cannot set properties of
+ * null"-melding veroorzaakten:
+ *
+ * 1. `silentAttemptInProgress` gaat aan, zodat onTokenError deze mislukking
+ *    niet als een gewone inlogfout aan de gebruiker meldt.
+ * 2. Ook `error_callback` wordt tijdelijk overgenomen. Google meldt een
+ *    mislukte stille poging namelijk dáár, niet via de gewone callback — zonder
+ *    dit bleef de belofte eeuwig open staan en hing de app.
+ * 3. Een tijdslimiet, zodat er ook bij een uitblijvend antwoord een duidelijke
+ *    fout komt in plaats van stilte.
+ *
+ * Loopt er al een vernieuwing (de collectie én de prijzen laden bijvoorbeeld
+ * tegelijk), dan wachten alle aanroepers op diezelfde poging. Twee gelijktijdige
+ * pogingen zouden elkaars callbacks overschrijven.
+ */
+let tokenRenewal = null;
+
 async function ensureToken() {
   if (accessToken && tokenExpiresAt > Date.now() + 30000) {
     return accessToken;
   }
+  if (tokenRenewal) return tokenRenewal;
+  tokenRenewal = renewToken().finally(() => {
+    tokenRenewal = null;
+  });
+  return tokenRenewal;
+}
+
+async function renewToken() {
   await whenTokenClientReady();
   return new Promise((resolve, reject) => {
     const previousCallback = tokenClient.callback;
-    tokenClient.callback = (resp) => {
+    const previousErrorCallback = tokenClient.error_callback;
+    let settled = false;
+
+    const restore = () => {
       tokenClient.callback = previousCallback;
-      if (resp.error) {
-        reject(new Error(resp.error));
-        return;
-      }
-      onTokenResponse(resp);
+      tokenClient.error_callback = previousErrorCallback;
+      silentAttemptInProgress = false;
+      clearTimeout(timer);
+    };
+
+    const fail = (detail) => {
+      if (settled) return;
+      settled = true;
+      restore();
+      console.info('Stille tokenvernieuwing mislukt:', detail || '(geen details)');
+      driveSessionExpired();
+      reject(new Error('Je Google-sessie is verlopen. Log opnieuw in en probeer het daarna nog eens.'));
+    };
+
+    const succeed = (resp) => {
+      if (settled) return;
+      settled = true;
+      restore();
+      storeToken(resp);
+      driveGateHide();
       resolve(accessToken);
     };
-    tokenClient.requestAccessToken({ prompt: '' });
+
+    const timer = setTimeout(() => fail('geen antwoord binnen 20 seconden'), 20000);
+
+    silentAttemptInProgress = true;
+    tokenClient.callback = (resp) => {
+      if (!resp || resp.error) fail(resp && resp.error);
+      else succeed(resp);
+    };
+    tokenClient.error_callback = (err) => fail(err && (err.type || err.message));
+
+    try {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch (err) {
+      fail(err && err.message);
+    }
   });
 }
 

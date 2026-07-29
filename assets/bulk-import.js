@@ -327,40 +327,77 @@ function initBulkImportUI(onSaved) {
     const btn = document.getElementById('bulk-text-add');
     btn.disabled = true;
 
-    const entries = [];
+    // In blokken opslaan in plaats van alles in één keer aan het eind.
+    //
+    // Een lijst van 250 titels kost minuten aan TMDb-aanroepen. Ging het daarna
+    // mis bij het wegschrijven — bijvoorbeeld omdat je Google-sessie intussen
+    // verlopen was — dan was al dat werk weg. Nu is elk blok een eigen
+    // schrijfactie: wat opgeslagen is, blijft opgeslagen, en de aangevinkte
+    // vakjes van geslaagde titels gaan uit zodat je gewoon opnieuw op de knop
+    // kan klikken om de rest af te maken.
+    const BLOK = 25;
     const failed = [];
-    for (let i = 0; i < chosen.length; i++) {
-      const cand = chosen[i].candidates[chosen[i].chosen];
-      progress.textContent = `(${i + 1}/${chosen.length}) ${cand.title}…`;
-      progress.className = 'text-sm font-mono text-muted';
-      try {
-        entries.push(await bulkBuildEntry(cand, opts, c.tmdbKey));
-      } catch (err) {
-        failed.push(cand.title);
+    let added = 0;
+    let firstEntry = null;
+    let stoppedBy = null;
+
+    const setProgress = (text, cls) => {
+      progress.textContent = text;
+      progress.className = 'text-sm font-mono ' + (cls || 'text-muted');
+    };
+
+    for (let start = 0; start < chosen.length && !stoppedBy; start += BLOK) {
+      const blok = chosen.slice(start, start + BLOK);
+      const entries = [];
+      const gebouwd = [];
+
+      for (let i = 0; i < blok.length; i++) {
+        const cand = blok[i].candidates[blok[i].chosen];
+        setProgress(`(${start + i + 1}/${chosen.length}) ${cand.title}…`);
+        try {
+          entries.push(await bulkBuildEntry(cand, opts, c.tmdbKey));
+          gebouwd.push(blok[i]);
+        } catch (err) {
+          failed.push(cand.title);
+        }
+        await new Promise((r) => setTimeout(r, 200));
       }
-      await new Promise((r) => setTimeout(r, 200));
+
+      if (!entries.length) continue;
+
+      try {
+        setProgress(`Blok opslaan naar Drive… (${added + entries.length}/${chosen.length})`);
+        await upsertMoviesBatchInDrive(entries);
+        added += entries.length;
+        if (!firstEntry) firstEntry = entries[0];
+        // Geslaagd: uitvinken, zodat een tweede klik alleen de rest doet.
+        gebouwd.forEach((row) => {
+          row.selected = false;
+          row.already = true;
+        });
+      } catch (err) {
+        stoppedBy = err;
+      }
     }
 
-    if (!entries.length) {
-      progress.textContent = '✗ Niets kunnen toevoegen.';
-      progress.className = 'text-sm font-mono text-red-400';
-      btn.disabled = false;
-      return;
+    renderReview();
+
+    if (stoppedBy) {
+      setProgress(
+        (added ? `${added} opgeslagen, daarna gestopt: ` : 'Opslaan mislukt: ') +
+          stoppedBy.message +
+          (added ? ' — de rest staat nog aangevinkt, klik opnieuw om verder te gaan.' : ''),
+        added ? 'text-gold' : 'text-red-400'
+      );
+    } else if (!added) {
+      setProgress('✗ Niets kunnen toevoegen.', 'text-red-400');
+    } else {
+      setProgress(`✓ ${added} toegevoegd` + (failed.length ? `, ${failed.length} mislukt` : '') + '.', 'text-teal');
     }
 
-    try {
-      progress.textContent = 'Opslaan naar Drive…';
-      await upsertMoviesBatchInDrive(entries);
-      progress.textContent =
-        `✓ ${entries.length} toegevoegd` + (failed.length ? `, ${failed.length} mislukt` : '') + '.';
-      progress.className = 'text-sm font-mono text-teal';
-      if (onSaved) onSaved(entries[0]);
-    } catch (err) {
-      progress.textContent = '✗ ' + err.message;
-      progress.className = 'text-sm font-mono text-red-400';
-    } finally {
-      btn.disabled = false;
-    }
+    if (failed.length) console.warn('Niet kunnen opzoeken bij TMDb:', failed.join(', '));
+    if (added && onSaved) onSaved(firstEntry);
+    btn.disabled = false;
   });
 }
 

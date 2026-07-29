@@ -242,7 +242,14 @@
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
 
     window._driveError = function (msg) {
-      document.getElementById('login-status').textContent = 'Inloggen mislukt: ' + msg + '. Probeer opnieuw.';
+      driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
+    };
+
+    // Opnieuw ingelogd na een verlopen sessie. Deze pagina rekent alles vers
+    // door uit je collectie en heeft geen invoer die verloren kan gaan, dus
+    // gewoon opnieuw laden is hier het eenvoudigst én het meest betrouwbaar.
+    window._driveReauthenticated = function () {
+      location.reload();
     };
 
     function wireInsuranceButtons() {
@@ -277,8 +284,8 @@
     }
 
     window._driveAuthenticated = function () {
-      var gate = document.getElementById('login-gate');
-      if (gate) gate.remove();
+      // De inlogpoort wordt centraal verborgen in drive.js (niet verwijderd),
+      // zodat ze bij een verlopen sessie terug kan komen.
 
       // De knoppen voor het verzekeringsoverzicht zijn bijzaak. Ging het hier
       // mis, dan werd initStatsPage() nooit bereikt en bleef de hele pagina
