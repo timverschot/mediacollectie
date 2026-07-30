@@ -161,6 +161,47 @@
       <p id="import-prices-status" class="text-sm font-mono mt-2"></p>
     </div>
 
+    <!-- GEVARENZONE — bewust onderscheidend vormgegeven en dichtgeklapt. -->
+    <details id="danger-zone" class="rounded-lg mb-6 ring-1 ring-red-500/30 bg-red-500/5">
+      <summary class="cursor-pointer select-none px-4 py-3 font-mono text-sm uppercase text-red-400">
+        Gevarenzone — collectie leegmaken
+      </summary>
+      <div class="px-4 pb-4 text-sm space-y-3">
+        <p>
+          Begin je met een schone lei? Dit wist <strong>alle titels</strong> uit je collectie.
+          Er wordt eerst automatisch een backup naar je Drive geschreven, die je daarna
+          kan terugzetten via <em>Backups</em> hierboven.
+        </p>
+        <p id="wipe-count" class="font-mono text-xs text-muted">Aantal titels wordt geladen…</p>
+
+        <div class="space-y-1.5">
+          <label class="!normal-case !text-sm text-ink flex items-start gap-2">
+            <input type="checkbox" id="wipe-covers" class="w-4 h-4 mt-0.5">
+            <span>Ook alle hoesfoto’s uit Drive verwijderen
+              <span class="block text-xs text-muted">Laat dit uit als je de backup misschien nog wil terugzetten — die bevat alleen de titels, niet de foto’s.</span>
+            </span>
+          </label>
+          <label class="!normal-case !text-sm text-ink flex items-start gap-2">
+            <input type="checkbox" id="wipe-prices" class="w-4 h-4 mt-0.5">
+            <span>Ook de prijsgeschiedenis wissen
+              <span class="block text-xs text-muted">Jaren aan metingen; die komen niet terug.</span>
+            </span>
+          </label>
+          <label class="!normal-case !text-sm text-ink flex items-start gap-2">
+            <input type="checkbox" id="wipe-universes" class="w-4 h-4 mt-0.5">
+            <span>Ook de universums wissen</span>
+          </label>
+        </div>
+
+        <div class="flex flex-wrap gap-3 items-center pt-1">
+          <label class="!normal-case !text-sm text-ink shrink-0" for="wipe-word">Typ <code class="font-mono text-red-400">WISSEN</code> om te bevestigen:</label>
+          <input type="text" id="wipe-word" autocomplete="off" spellcheck="false" placeholder="WISSEN" class="!w-40">
+          <button type="button" id="wipe-btn" class="btn shrink-0" style="background:#b91c1c;color:#F2F0EA;" disabled>Collectie leegmaken</button>
+        </div>
+        <p id="wipe-status" class="text-sm font-mono"></p>
+      </div>
+    </details>
+
     <div class="flex gap-4 mb-6 border-b border-white/5">
       <button data-tab="single" class="tab-btn pb-3 px-1 border-b-2 border-gold text-ink font-mono text-sm uppercase">Eén titel</button>
       <button data-tab="bulk" class="tab-btn pb-3 px-1 border-b-2 border-transparent text-muted font-mono text-sm uppercase">Bulk (lijst)</button>
@@ -339,6 +380,38 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
         navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
+
+    // Halve upload opvangen. Deze pagina leunt op drie bestanden tegelijk;
+    // ontbreekt er één, dan krijg je anders een cryptische fout die niets zegt
+    // over de oorzaak. index.html en statistieken.html doen dit al.
+    (function beheerCheckAssets() {
+      const missing = [];
+      if (typeof MEDIA_FORMATS === 'undefined' || typeof normalizeMovieEntry === 'undefined' ||
+          typeof driveWipeCollection === 'undefined' || typeof driveBackupNow === 'undefined') {
+        missing.push('assets/drive.js');
+      }
+      if (typeof tmdbSearch === 'undefined' || typeof applyTmdbFields === 'undefined' ||
+          typeof tmdbMediaTypeOf === 'undefined') {
+        missing.push('assets/admin.js');
+      }
+      if (typeof initAddTitleUI === 'undefined' || typeof addTitlePreferredFormat === 'undefined') {
+        missing.push('assets/add-title.js');
+      }
+      if (!missing.length) return;
+      document.addEventListener('DOMContentLoaded', () => {
+        const gate = document.getElementById('login-gate');
+        const doel = document.getElementById('app-content') || document.body;
+        if (gate) gate.classList.add('hidden');
+        doel.classList.remove('hidden');
+        doel.insertAdjacentHTML('afterbegin',
+          '<div class="bg-surface rounded-lg p-4 mb-6 ring-1 ring-gold/40">' +
+          '<p class="text-gold font-mono text-sm mb-2">Bestanden komen niet overeen</p>' +
+          '<p class="text-ink text-sm mb-1">Deze pagina heeft een nieuwere ' +
+          missing.map((f) => '<code>' + f + '</code>').join(' en ') + ' nodig.</p>' +
+          '<p class="text-muted text-xs">Upload dat bestand opnieuw en herlaad met Ctrl+Shift+R.</p></div>');
+      });
+      console.error('Verouderde bestanden op de beheerpagina:', missing.join(', '));
+    })();
 
     function cfg() { return getConfig(); }
     function cfgReady(c) { return !!c.tmdbKey; }
@@ -544,6 +617,92 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     }
 
     document.getElementById('refresh-backups-btn').addEventListener('click', renderBackupList);
+
+    // ---------- Gevarenzone: collectie leegmaken ----------
+
+    (function wireDangerZone() {
+      const zone = document.getElementById('danger-zone');
+      const woordEl = document.getElementById('wipe-word');
+      const btn = document.getElementById('wipe-btn');
+      const statusEl = document.getElementById('wipe-status');
+      const countEl = document.getElementById('wipe-count');
+      if (!zone || !btn) return;
+
+      const setStatus = (t, kleur) => {
+        statusEl.textContent = t || '';
+        statusEl.className = 'text-sm font-mono ' + (kleur || 'text-muted');
+      };
+
+      // De knop blijft grijs tot het woord exact klopt. Bewust hoofdlettergevoelig:
+      // je moet het bewust overtypen, niet per ongeluk raken.
+      const checkWoord = () => { btn.disabled = woordEl.value.trim() !== 'WISSEN'; };
+      woordEl.addEventListener('input', checkWoord);
+      checkWoord();
+
+      // Toon hoeveel titels het zijn, zodat je niet in het wilde weg bevestigt.
+      zone.addEventListener('toggle', async () => {
+        if (!zone.open) return;
+        try {
+          const { movies } = await driveLoadMovies();
+          countEl.textContent =
+            movies.length === 1
+              ? 'Je collectie bevat nu 1 titel.'
+              : `Je collectie bevat nu ${movies.length} titels.`;
+        } catch (err) {
+          countEl.textContent = 'Kon het aantal titels niet ophalen: ' + err.message;
+        }
+      });
+
+      btn.addEventListener('click', async () => {
+        const opties = {
+          covers: document.getElementById('wipe-covers').checked,
+          prices: document.getElementById('wipe-prices').checked,
+          universes: document.getElementById('wipe-universes').checked,
+        };
+
+        let aantal = '?';
+        try {
+          aantal = (await driveLoadMovies()).movies.length;
+        } catch {}
+
+        const extra = [
+          opties.covers ? 'alle hoesfoto’s' : null,
+          opties.prices ? 'de prijsgeschiedenis' : null,
+          opties.universes ? 'de universums' : null,
+        ].filter(Boolean);
+
+        if (
+          !confirm(
+            `${aantal} titels worden gewist` +
+              (extra.length ? `, samen met ${extra.join(' en ')}` : '') +
+              `.\n\nEr wordt eerst een backup naar je Drive geschreven. Doorgaan?`
+          )
+        ) {
+          return;
+        }
+
+        btn.disabled = true;
+        woordEl.disabled = true;
+        try {
+          const uit = await driveWipeCollection(opties, (t) => setStatus(t));
+          const delen = [`${uit.titels} ${uit.titels === 1 ? 'titel' : 'titels'} gewist`];
+          if (uit.covers) delen.push(`${uit.covers} hoesfoto’s verwijderd`);
+          if (uit.prijzen) delen.push('prijsgeschiedenis gewist');
+          if (uit.universums) delen.push('universums gewist');
+          setStatus(
+            '✓ ' + delen.join(', ') + '. Backup bewaard als: ' + (uit.backup || 'geen (collectie was al leeg)'),
+            'text-teal'
+          );
+          woordEl.value = '';
+          renderBackupList();
+        } catch (err) {
+          setStatus('✗ ' + err.message, 'text-red-400');
+        } finally {
+          woordEl.disabled = false;
+          checkWoord();
+        }
+      });
+    })();
 
     // Migratie: oude movies.json (van GitHub) importeren in Drive
     document.getElementById('import-btn').addEventListener('click', async () => {

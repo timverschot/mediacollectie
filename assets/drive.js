@@ -779,10 +779,29 @@ async function upsertMoviesBatchInDrive(entries) {
 }
 
 async function deleteMovieInDrive(id) {
+  return deleteMoviesInDrive([id]);
+}
+
+/**
+ * Verwijdert meerdere titels in één schrijfactie.
+ *
+ * Bewust niet: `for (id of ids) await deleteMovieInDrive(id)`. Dat zou bij
+ * 200 titels 200 keer de volledige movies.json op- én neerhalen — minutenlang,
+ * en met 200 kansen om halverwege te stranden. Nu is het één lees- en één
+ * schrijfactie binnen dezelfde vergrendeling.
+ *
+ * Geeft het aantal daadwerkelijk verwijderde titels terug; id's die al weg
+ * waren tellen niet mee.
+ */
+async function deleteMoviesInDrive(ids) {
+  const weg = new Set(ids || []);
+  if (!weg.size) return 0;
   return withWriteLock(async () => {
     const { movies } = await driveLoadMovies();
-    const filtered = movies.filter((m) => m.id !== id);
-    await driveSaveNamedFile('movies.json', filtered);
+    const filtered = movies.filter((m) => !weg.has(m.id));
+    const verwijderd = movies.length - filtered.length;
+    if (verwijderd) await driveSaveNamedFile('movies.json', filtered);
+    return verwijderd;
   });
 }
 
@@ -1125,6 +1144,117 @@ async function driveAutoBackup() {
 // Zet een gekozen backup terug als actieve collectie. Bewaart eerst de
 // huidige staat als extra backup ('voor-herstel'), zodat herstellen zelf
 // nooit definitief data kan vernietigen.
+/**
+ * Maakt nú een backup, los van het wekelijkse schema. Gebruikt vóór een actie
+ * die veel titels in één keer weghaalt: dan staat er altijd een terugweg klaar
+ * via Beheer → Herstellen, ook als je pas morgen merkt dat je te veel wiste.
+ *
+ * De naam bevat datum én tijd, zodat hij níet meetelt als "de wekelijkse
+ * backup van vandaag" en het gewone schema gewoon doorloopt.
+ * Geeft de bestandsnaam terug, of null als er niets te back-uppen viel.
+ */
+async function driveBackupNow(reden) {
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    if (!movies.length) return null;
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', 'u');
+    const label = (reden || 'handmatig').replace(/[^a-z0-9-]/gi, '');
+    const naam = `${BACKUP_PREFIX}${label}-${stamp}.json`;
+    await driveCreateJsonFile(naam, movies);
+
+    // Hoogstens 3 van deze veiligheidskopieën bewaren, anders groeit het aan.
+    const zelfde = (await driveListBackups()).filter((f) => f.name.startsWith(`${BACKUP_PREFIX}${label}-`));
+    for (const f of zelfde.slice(3)) {
+      try { await driveDeleteFile(f.id); } catch {}
+    }
+    return naam;
+  });
+}
+
+/* ==========================================================================
+ * Volledig leegmaken (fase 28)
+ * ==========================================================================
+ * Bedoeld voor één moment: je hebt getest, je wil met een schone lei aan de
+ * échte collectie beginnen. Nooit iets dat per ongeluk gebeurt — de knop zit
+ * in een aparte gevarenzone op de beheerpagina, met een woord dat je moet
+ * overtypen, en er gaat altijd eerst een backup naar Drive.
+ * ========================================================================== */
+
+// Alle hoesfoto-bestanden in de App Data-map.
+async function driveListCoverFiles() {
+  const q = encodeURIComponent(`name contains 'cover-' and trashed=false`);
+  const resp = await driveApiFetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=1000`
+  );
+  const data = await resp.json();
+  return (data.files || []).filter((f) => /^cover-.*\.(jpg|jpeg|png)$/i.test(f.name));
+}
+
+/**
+ * Maakt de collectie leeg. `opties` bepaalt wat er méé weggaat:
+ *   { covers, prices, universes }  — alle drie standaard uit.
+ *
+ * Let op de volgorde: eerst de backup, dan pas wissen. En hoesfoto's staan
+ * bewust standaard uit — de backup bevat alleen movies.json, dus wie de foto's
+ * weggooit en later een backup terugzet, houdt titels over die naar bestanden
+ * verwijzen die niet meer bestaan.
+ *
+ * onProgress(tekst) meldt elke stap. Geeft een overzicht terug van wat er weg is.
+ */
+async function driveWipeCollection(opties, onProgress) {
+  const o = opties || {};
+  const melden = (t) => { if (onProgress) onProgress(t); };
+
+  melden('Backup maken naar Drive…');
+  const backup = await driveBackupNow('voor-reset');
+
+  const uitkomst = { backup, titels: 0, covers: 0, prijzen: false, universums: false };
+
+  melden('Collectie leegmaken…');
+  await withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    uitkomst.titels = movies.length;
+    await driveSaveNamedFile('movies.json', []);
+  });
+
+  if (o.covers) {
+    melden('Hoesfoto’s verwijderen…');
+    const files = await driveListCoverFiles();
+    for (let i = 0; i < files.length; i++) {
+      melden(`Hoesfoto’s verwijderen… (${i + 1}/${files.length})`);
+      try {
+        await driveDeleteFile(files[i].id);
+        uitkomst.covers++;
+      } catch {
+        // Eén onbereikbaar bestand mag de rest niet blokkeren.
+      }
+    }
+    // Blob-URL's van net verwijderde foto's horen ook uit het geheugen.
+    Object.keys(_coverUrlCache).forEach((id) => driveReleaseCoverUrl(id));
+  }
+
+  if (o.prices) {
+    melden('Prijsgeschiedenis wissen…');
+    await withWriteLock(() => driveSaveNamedFile('price_history.json', []));
+    uitkomst.prijzen = true;
+  }
+
+  if (o.universes) {
+    melden('Universums wissen…');
+    await withWriteLock(() => driveSaveNamedFile('universes.json', []));
+    uitkomst.universums = true;
+  }
+
+  // De lokale offline-kopie mag niet blijven staan; die zou de gewiste
+  // collectie bij het volgende bezoek weer tonen alsof er niets gebeurd is.
+  try {
+    localStorage.removeItem(MOVIES_CACHE_KEY);
+  } catch {}
+
+  melden('Klaar.');
+  return uitkomst;
+}
+
 async function driveRestoreBackup(fileId) {
   return withWriteLock(async () => {
     const data = await driveReadJsonFile(fileId);

@@ -53,7 +53,12 @@ function pageSizeForView(view) {
  */
 function checkAssetVersions() {
   const missing = [];
-  if (typeof MEDIA_FORMATS === 'undefined' || typeof normalizeMovieEntry === 'undefined') {
+  if (
+    typeof MEDIA_FORMATS === 'undefined' ||
+    typeof normalizeMovieEntry === 'undefined' ||
+    typeof deleteMoviesInDrive === 'undefined' ||
+    typeof driveBackupNow === 'undefined'
+  ) {
     missing.push('assets/drive.js');
   }
   if (
@@ -119,6 +124,11 @@ function initCollectionApp(config) {
     activeUniverses: new Set(), // universum-id's (bv. MCU)
     activeLetter: null,        // 'A'..'Z' of '#'
     groupSagas: false,
+    // Selectiemodus: vinkjes op de kaarten om meerdere titels tegelijk te
+    // verwijderen. `selected` bevat titel-id's, ook wanneer je een hele reeks
+    // aanvinkt — een reekskaart is een weergave, geen apart record.
+    selectMode: false,
+    selected: new Set(),
     sort: 'date_added_desc',
     // 'grid' = posterraster, 'compact' = rij met miniatuur, 'text' = pure
     // tekstlijst (snelst om door te scrollen, verbruikt geen data)
@@ -153,6 +163,14 @@ function initCollectionApp(config) {
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
+    selectToggle: document.getElementById('select-toggle'),
+    selectBar: document.getElementById('select-bar'),
+    selectCount: document.getElementById('select-count'),
+    selectAll: document.getElementById('select-all'),
+    selectNone: document.getElementById('select-none'),
+    selectDelete: document.getElementById('select-delete'),
+    selectClose: document.getElementById('select-close'),
+    selectStatus: document.getElementById('select-status'),
     viewChips: document.getElementById('view-chips'),
     filterToggle: document.getElementById('filter-toggle'),
     filterPanel: document.getElementById('filter-panel'),
@@ -920,25 +938,52 @@ function initCollectionApp(config) {
 
     els.grid.innerHTML = visible.map(renderUnit).join('');
 
-    els.grid.querySelectorAll('[data-open-id]').forEach((card) => {
-      card.addEventListener('click', () => openModal(card.dataset.openId));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openModal(card.dataset.openId);
-        }
+    // In selectiemodus is een klik op een kaart een vinkje, geen pop-up. Eén
+    // handler op het raster in plaats van twee per kaart: bij 400 rijen in de
+    // tekstweergave scheelt dat merkbaar.
+    if (state.selectMode) {
+      const toggleKaart = (kaart) => {
+        const ids = (kaart.dataset.selIds || '').split(',').filter(Boolean);
+        if (!ids.length) return;
+        const aanzetten = !isUnitSelected(ids);
+        ids.forEach((id) => (aanzetten ? state.selected.add(id) : state.selected.delete(id)));
+        // Alleen deze kaart bijwerken; de rest opnieuw tekenen zou je
+        // scrollpositie en de vlotte bediening kosten.
+        kaart.classList.toggle('is-selected', aanzetten);
+        const mark = kaart.querySelector('.select-mark');
+        if (mark) mark.textContent = aanzetten ? '✓' : '';
+        updateSelectBar();
+      };
+      els.grid.querySelectorAll('[data-sel-ids]').forEach((kaart) => {
+        kaart.addEventListener('click', () => toggleKaart(kaart));
+        kaart.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleKaart(kaart);
+          }
+        });
       });
-    });
+    } else {
+      els.grid.querySelectorAll('[data-open-id]').forEach((card) => {
+        card.addEventListener('click', () => openModal(card.dataset.openId));
+        card.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openModal(card.dataset.openId);
+          }
+        });
+      });
 
-    els.grid.querySelectorAll('[data-open-group]').forEach((card) => {
-      card.addEventListener('click', () => openGroupModal(card.dataset.openGroup));
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openGroupModal(card.dataset.openGroup);
-        }
+      els.grid.querySelectorAll('[data-open-group]').forEach((card) => {
+        card.addEventListener('click', () => openGroupModal(card.dataset.openGroup));
+        card.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openGroupModal(card.dataset.openGroup);
+          }
+        });
       });
-    });
+    }
 
     els.grid.querySelectorAll('[data-delete-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -1213,6 +1258,184 @@ function initCollectionApp(config) {
         if (!els.modal.classList.contains('hidden')) openModal(item.id);
       }
     );
+  }
+
+  /* ---------- Selectiemodus (fase 27) ----------
+   *
+   * Eén titel verwijderen kon al, maar een hele reeks of een volledige
+   * filterselectie niet — bij 200 per ongeluk geïmporteerde titels was dat
+   * 200 keer klikken en bevestigen. Deze modus zet vinkjes op de kaarten en
+   * rijen; het verwijderen zelf zit in handleBulkDelete().
+   */
+
+  // Vanaf hoeveel titels moet je het aantal overtypen? Eén misklik mag geen
+  // halve collectie kosten.
+  const BULK_TYPE_CONFIRM = 25;
+
+  // De titel-id's achter één weergave-eenheid: één titel, of alle delen van
+  // een gegroepeerde reeks.
+  function unitIds(u) {
+    return u.type === 'group' ? u.items.map((m) => m.id) : [u.item.id];
+  }
+
+  function isUnitSelected(ids) {
+    return ids.length > 0 && ids.every((id) => state.selected.has(id));
+  }
+
+  // Het vinkje op een kaart of rij. Leeg buiten de selectiemodus, zodat er in
+  // normaal gebruik geen enkel extra element per kaart wordt aangemaakt.
+  function selectMarkHtml(ids) {
+    if (!state.selectMode) return '';
+    return `<span class="select-mark" aria-hidden="true">${isUnitSelected(ids) ? '✓' : ''}</span>`;
+  }
+
+  // Attributen voor de kaart-root: welke id's hangen eraan, en staat hij aan?
+  function selectAttrs(ids) {
+    if (!state.selectMode) return '';
+    return ` data-sel-ids="${escapeAttr(ids.join(','))}"${isUnitSelected(ids) ? ' data-sel-on="1"' : ''}`;
+  }
+
+  function selectRootClass(ids) {
+    return state.selectMode && isUnitSelected(ids) ? ' is-selected' : '';
+  }
+
+  function updateSelectBar() {
+    if (!els.selectBar) return;
+    els.selectBar.classList.toggle('hidden', !state.selectMode);
+    document.body.classList.toggle('selecting', state.selectMode);
+    if (els.selectToggle) {
+      els.selectToggle.classList.toggle('chip-active', state.selectMode);
+      els.selectToggle.setAttribute('aria-pressed', state.selectMode ? 'true' : 'false');
+    }
+    const n = state.selected.size;
+    if (els.selectCount) {
+      els.selectCount.textContent = n === 1 ? '1 geselecteerd' : `${n} geselecteerd`;
+    }
+    if (els.selectDelete) {
+      els.selectDelete.disabled = n === 0;
+      els.selectDelete.textContent = n ? `Verwijderen (${n})` : 'Verwijderen';
+    }
+  }
+
+  function setSelectStatus(tekst, kleur) {
+    if (!els.selectStatus) return;
+    els.selectStatus.textContent = tekst || '';
+    els.selectStatus.className = 'text-xs font-mono mt-2 ' + (kleur || 'text-muted') + (tekst ? '' : ' hidden');
+  }
+
+  function setSelectMode(aan) {
+    state.selectMode = !!aan;
+    if (!state.selectMode) state.selected.clear();
+    setSelectStatus('');
+    updateSelectBar();
+    render();
+  }
+
+  // Alles wat op dit moment in beeld staat aanvinken. Bewust "in beeld" en niet
+  // "alles wat het filter oplevert": wat je niet ziet, vink je niet per ongeluk aan.
+  function selectAllVisible() {
+    els.grid.querySelectorAll('[data-sel-ids]').forEach((el) => {
+      el.dataset.selIds.split(',').filter(Boolean).forEach((id) => state.selected.add(id));
+    });
+    render();
+    updateSelectBar();
+  }
+
+  /**
+   * Verwijdert alle aangevinkte titels.
+   *
+   * Vier beveiligingen, in deze volgorde:
+   * 1. De bevestiging noemt het aantal én de eerste vijf titels bij naam.
+   * 2. Vanaf BULK_TYPE_CONFIRM moet je het aantal overtypen.
+   * 3. Vlak vóór het verwijderen gaat er een backup naar Drive, terug te zetten
+   *    via Beheer → Herstellen. Lukt die backup niet, dan stoppen we.
+   * 4. Wegschrijven per blok van 25, met voortgang. Valt je sessie halverwege
+   *    weg, dan weet je precies waar het gebleven is en is de rest nog intact.
+   */
+  async function handleBulkDelete() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+
+    const perId = new Map(state.all.map((m) => [m.id, m]));
+    const titels = ids.map((id) => (perId.get(id) || {}).title || id);
+    const voorbeeld =
+      titels.slice(0, 5).map((t) => '\u2022 ' + t).join('\n') +
+      (titels.length > 5 ? `\n\u2026 en ${titels.length - 5} andere` : '');
+
+    if (
+      !confirm(
+        `${ids.length} ${ids.length === 1 ? 'titel' : 'titels'} verwijderen uit je collectie?\n\n` +
+          voorbeeld +
+          `\n\nEr wordt eerst een backup naar je Google Drive geschreven; je kan dit terugzetten via Beheer \u2192 Herstellen.`
+      )
+    ) {
+      return;
+    }
+
+    if (ids.length >= BULK_TYPE_CONFIRM) {
+      const antwoord = prompt(
+        `Je staat op het punt ${ids.length} titels te verwijderen.\n\n` +
+          `Typ het aantal (${ids.length}) om te bevestigen:`
+      );
+      if (antwoord === null) return;
+      if (antwoord.trim() !== String(ids.length)) {
+        setSelectStatus('Het getal kwam niet overeen \u2014 er is niets verwijderd.', 'text-gold');
+        return;
+      }
+    }
+
+    const knoppen = [els.selectDelete, els.selectAll, els.selectNone, els.selectClose].filter(Boolean);
+    knoppen.forEach((b) => (b.disabled = true));
+
+    try {
+      setSelectStatus('Backup maken naar Drive\u2026');
+      try {
+        await driveBackupNow('voor-verwijderen');
+      } catch (err) {
+        setSelectStatus('Backup mislukt, er is niets verwijderd: ' + err.message, 'text-red-400');
+        return;
+      }
+
+      const BLOK = 25;
+      let weg = 0;
+      for (let start = 0; start < ids.length; start += BLOK) {
+        const blok = ids.slice(start, start + BLOK);
+        setSelectStatus(`Verwijderen\u2026 (${Math.min(start + blok.length, ids.length)}/${ids.length})`);
+        await deleteMoviesInDrive(blok);
+
+        // Pas ná het wegschrijven: hoesfoto's opruimen en de titels uit het
+        // scherm halen. Strandt het hierna, dan klopt wat je ziet met Drive.
+        for (const id of blok) {
+          const m = perId.get(id);
+          if (m && typeof driveDeleteCoversOfMovie === 'function') {
+            try {
+              await driveDeleteCoversOfMovie(m);
+            } catch {
+              // Een achtergebleven foto is vervelend, geen reden om te stoppen.
+            }
+          }
+          state.selected.delete(id);
+        }
+        const gedaan = new Set(blok);
+        state.all = state.all.filter((m) => !gedaan.has(m.id));
+        weg += blok.length;
+        buildFacetChips(state.all);
+        applyFilters();
+        updateSelectBar();
+      }
+
+      setSelectStatus(
+        `\u2713 ${weg} ${weg === 1 ? 'titel' : 'titels'} verwijderd. Terugzetten kan via Beheer \u2192 Herstellen.`,
+        'text-teal'
+      );
+    } catch (err) {
+      setSelectStatus('\u2717 Gestopt: ' + err.message + ' \u2014 wat al verwijderd is, blijft verwijderd.', 'text-red-400');
+      buildFacetChips(state.all);
+      applyFilters();
+    } finally {
+      knoppen.forEach((b) => (b.disabled = false));
+      updateSelectBar();
+    }
   }
 
   // ---------- Kaarten ----------
@@ -1584,10 +1807,12 @@ function initCollectionApp(config) {
     // hoesfoto's bekijk je in de detailmodal.
     const cover = posterUrl(item);
     const seasonBadge = seasonBadgeInfo(item);
+    const selIds = [item.id];
 
     return `
-      <div data-open-id="${escapeHtml(item.id)}" data-accent-id="${escapeAttr(item.id)}" class="case-card reveal group text-left cursor-pointer" role="button" tabindex="0">
+      <div data-open-id="${escapeHtml(item.id)}" data-accent-id="${escapeAttr(item.id)}"${selectAttrs(selIds)} class="case-card reveal group text-left cursor-pointer${selectRootClass(selIds)}" role="button" tabindex="0">
         <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40">
+          ${selectMarkHtml(selIds)}
           ${cover ? '<div class="poster-skel"></div>' : ''}
           ${
             cover
@@ -1621,10 +1846,12 @@ function initCollectionApp(config) {
     const cover = posterUrl(first);
     const years = sorted.map((i) => i.release_year).filter(Boolean);
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '';
+    const selIds = unit.items.map((m) => m.id);
 
     return `
-      <div data-open-group="${escapeAttr(unit.saga)}" data-accent-id="${escapeAttr(unit.saga)}" class="case-card reveal group text-left cursor-pointer" role="button" tabindex="0">
+      <div data-open-group="${escapeAttr(unit.saga)}" data-accent-id="${escapeAttr(unit.saga)}"${selectAttrs(selIds)} class="case-card reveal group text-left cursor-pointer${selectRootClass(selIds)}" role="button" tabindex="0">
         <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 saga-stack">
+          ${selectMarkHtml(selIds)}
           ${
             cover
               ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(unit.saga)}" loading="lazy" class="w-full h-full object-cover">`
@@ -1667,10 +1894,13 @@ function initCollectionApp(config) {
          </div>`
       : '';
 
+    const selIds = [item.id];
+
     return `
-      <div data-open-id="${escapeHtml(item.id)}"
-        class="case-card flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded"
+      <div data-open-id="${escapeHtml(item.id)}"${selectAttrs(selIds)}
+        class="case-card row-select flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded${selectRootClass(selIds)}"
         role="button" tabindex="0">
+        ${selectMarkHtml(selIds)}
         ${thumb}
         <span class="w-2 shrink-0">${
           item.watched ? '<span class="block w-1.5 h-1.5 rounded-full bg-teal" title="Bekeken"></span>' : ''
@@ -1705,10 +1935,13 @@ function initCollectionApp(config) {
          </div>`
       : '';
 
+    const selIds = unit.items.map((m) => m.id);
+
     return `
-      <div data-open-group="${escapeAttr(unit.saga)}"
-        class="case-card flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded"
+      <div data-open-group="${escapeAttr(unit.saga)}"${selectAttrs(selIds)}
+        class="case-card row-select flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-white/5 rounded${selectRootClass(selIds)}"
         role="button" tabindex="0">
+        ${selectMarkHtml(selIds)}
         ${thumb}
         <span class="w-2 shrink-0"></span>
         <span class="flex-1 min-w-0 truncate text-sm text-ink">${escapeHtml(unit.saga)}</span>
@@ -1762,6 +1995,30 @@ function initCollectionApp(config) {
         openModal(el.dataset.groupOpen);
       });
     });
+
+    // Hele reeks in één keer weg — bijvoorbeeld een boxset die je verkocht
+    // hebt. Loopt via dezelfde weg als de selectiemodus, dus met backup,
+    // overtypen bij grote aantallen en opslaan per blok.
+    const delBtn = els.groupModal.querySelector('[data-group-delete]');
+    const statusEl = els.groupModal.querySelector('[data-group-status]');
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'text-xs font-mono mt-2 hidden';
+    }
+    if (delBtn) {
+      delBtn.textContent = `Alle ${items.length} ${items.length === 1 ? 'deel' : 'delen'} van deze reeks verwijderen`;
+      delBtn.disabled = false;
+      delBtn.onclick = () => {
+        closeGroupModal();
+        // De reeks wordt de selectie; daarna precies dezelfde bevestiging en
+        // beveiligingen als bij handmatig aanvinken.
+        setSelectMode(true);
+        state.selected = new Set(items.map((m) => m.id));
+        updateSelectBar();
+        render();
+        handleBulkDelete();
+      };
+    }
 
     els.groupModal.classList.remove('hidden');
     document.body.classList.add('overflow-hidden');
@@ -2148,6 +2405,64 @@ function initCollectionApp(config) {
     );
   }
 
+  /**
+   * Per filterrij een klein kruisje om alleen díe rij te wissen (fase 28).
+   *
+   * "Alle filters wissen" bestond al, maar wie op tien genres heeft geklikt en
+   * alleen het formaatfilter kwijt wil, moest die chips één voor één uitzetten.
+   * De knop wordt één keer aangemaakt en daarna alleen getoond of verborgen —
+   * hij hangt aan de rij, niet aan de chips, dus hij overleeft het opnieuw
+   * opbouwen van de chips.
+   */
+  function filterRowDefs() {
+    return [
+      { key: 'formats', set: state.activeFormats, chips: els.formatChips },
+      { key: 'types', set: state.activeTypes, chips: els.typeChips },
+      { key: 'status', set: state.activeStatus, chips: els.statusChips },
+      { key: 'watched', set: state.activeWatched, chips: els.watchedChips },
+      { key: 'genres', set: state.activeGenres, chips: els.genreChips },
+      { key: 'decades', set: state.activeDecades, chips: els.decadeChips },
+      { key: 'certs', set: state.activeCerts, chips: els.certChips },
+      { key: 'variants', set: state.activeVariants, chips: els.variantChips },
+      { key: 'boxsets', set: state.activeBoxsets, chips: els.boxsetChips },
+      { key: 'locations', set: state.activeLocations, chips: els.locationChips },
+      { key: 'universes', set: state.activeUniverses, chips: els.universeChips },
+    ].filter((r) => r.chips && r.chips.parentElement);
+  }
+
+  function clearFilterRow(key) {
+    const r = filterRowDefs().find((x) => x.key === key);
+    if (!r) return;
+    r.set.clear();
+    r.chips.querySelectorAll('.chip-active').forEach((c) => c.classList.remove('chip-active'));
+    applyFilters();
+  }
+
+  function updateRowClearButtons() {
+    filterRowDefs().forEach((r) => {
+      // Let op: formaat, type, status en bekeken delen één container. Daarom
+      // zoeken we op de sleutel én hangen we de knop direct achter de eigen
+      // chips-groep, niet onderaan de rij — anders krijgen die vier samen één
+      // kruisje dat alleen de eerste rij wist.
+      let btn = r.chips.parentElement.querySelector(`[data-row-clear="${r.key}"]`);
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.rowClear = r.key;
+        btn.className = 'row-clear';
+        btn.textContent = '×';
+        btn.title = 'Deze filterrij wissen';
+        btn.setAttribute('aria-label', 'Deze filterrij wissen');
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearFilterRow(r.key);
+        });
+        r.chips.insertAdjacentElement('afterend', btn);
+      }
+      btn.classList.toggle('hidden', r.set.size === 0);
+    });
+  }
+
   function updateFilterButton() {
     if (!els.filterToggle) return;
     const n = activeFilterCount();
@@ -2156,6 +2471,7 @@ function initCollectionApp(config) {
     els.filterToggle.classList.toggle('chip-active', n > 0);
     els.filterToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (els.clearFilters) els.clearFilters.classList.toggle('hidden', n === 0);
+    updateRowClearButtons();
   }
 
   function setFilterPanel(open) {
@@ -4256,6 +4572,10 @@ function initCollectionApp(config) {
         setFilterPanel(false);
         return;
       }
+      if (state.selectMode) {
+        setSelectMode(false);
+        return;
+      }
       if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
       else if (els.episodeModal && !els.episodeModal.classList.contains('hidden')) closeEpisodeModal();
       else if (els.pickModal && !els.pickModal.classList.contains('hidden')) closePickModal();
@@ -4393,6 +4713,23 @@ function initCollectionApp(config) {
       applyFilters();
     });
   }
+
+  // ---------- Selectiemodus ----------
+
+  if (els.selectToggle) {
+    els.selectToggle.addEventListener('click', () => setSelectMode(!state.selectMode));
+  }
+  if (els.selectClose) els.selectClose.addEventListener('click', () => setSelectMode(false));
+  if (els.selectAll) els.selectAll.addEventListener('click', selectAllVisible);
+  if (els.selectNone) {
+    els.selectNone.addEventListener('click', () => {
+      state.selected.clear();
+      render();
+      updateSelectBar();
+    });
+  }
+  if (els.selectDelete) els.selectDelete.addEventListener('click', handleBulkDelete);
+
 
   els.loadMore.addEventListener('click', () => {
     state.visibleCount += pageSizeForView(state.view);

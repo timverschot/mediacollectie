@@ -450,6 +450,58 @@
     border-radius: 0.5rem;
   }
 
+  /* Kruisje om één filterrij te wissen. Klein en grijs: het is een uitweg,
+     geen hoofdbediening. Op aanraakschermen krijgt het onderaan meer ruimte. */
+  .row-clear {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: #8B8A92;
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+  }
+  .row-clear:hover { color: #F2F0EA; background: rgba(242,240,234,0.08); }
+
+  /* ---------- Selectiemodus ---------- */
+
+  /* Het vinkje ligt over de poster of vooraan de rij. Groot genoeg om met een
+     duim te raken, ook al is het maar een rondje van 22 px: het hele kaartje
+     is in selectiemodus het raakvlak. */
+  .select-mark {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    z-index: 6;
+    width: 1.45rem;
+    height: 1.45rem;
+    border-radius: 9999px;
+    border: 2px solid rgba(242,240,234,0.6);
+    background: rgba(20,20,26,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    line-height: 1;
+    color: transparent;
+  }
+  .row-select .select-mark { position: static; margin-right: 0.15rem; flex-shrink: 0; }
+  .is-selected .select-mark {
+    background: #C9A227;
+    border-color: #C9A227;
+    color: #14141A;
+  }
+  /* In selectiemodus is de hele kaart één knop: geen verwijderkruisje, geen
+     snelblik die in de weg zit. */
+  .selecting .delete-btn, .selecting .peek { display: none !important; }
+  .selecting .case-card .poster-wrap { transform: none !important; }
+  .is-selected .poster-wrap { outline: 2px solid #C9A227; outline-offset: 2px; }
+  .is-selected { background: rgba(201,162,39,0.08); }
+  /* Ruimte onderaan zodat de selectiebalk de laatste rij niet bedekt. */
+  .selecting #grid { padding-bottom: 6.5rem; }
+
   /* Signatuur: modal die opent als een fysiek doosje, met flip tussen voor- en achterkant */
   .flip-card {
     perspective: 1600px;
@@ -528,6 +580,7 @@
        stip te overlappen, en rechtsonder zit al de seizoenenteller. */
     .value-badge { top: auto; bottom: 0.5rem; }
     .watched-dot { top: 0.5rem; bottom: auto; left: 2.9rem; }
+    .row-clear { padding: 0.4rem 0.7rem; }
   }
 </style>
 </head>
@@ -591,6 +644,7 @@
           <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen">≡</button>
         </div>
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
+        <button id="select-toggle" type="button" class="chip" aria-pressed="false" title="Meerdere titels aanvinken om ze samen te verwijderen">Selecteren</button>
         <button id="filter-toggle" type="button" class="chip" aria-expanded="false" aria-controls="filter-panel">Filters ▾</button>
       </div>
 
@@ -1062,6 +1116,10 @@
         <button data-group-close aria-label="Sluiten" class="text-muted hover:text-ink text-2xl leading-none px-2">&times;</button>
       </div>
       <div data-group-grid class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3"></div>
+      <div class="mt-5 pt-4 border-t border-white/5">
+        <button type="button" data-group-delete class="text-xs text-muted hover:text-red-400 underline"></button>
+        <p data-group-status class="text-xs font-mono mt-2 hidden"></p>
+      </div>
     </div>
   </div>
 
@@ -1283,6 +1341,22 @@
   <!-- Melding wanneer de collectie uit de lokale kopie komt -->
   <div id="offline-banner" class="hidden fixed left-1/2 -translate-x-1/2 z-[80] bg-surface ring-1 ring-gold/50 rounded-lg px-4 py-2 text-xs font-mono text-gold shadow-xl text-center max-w-[90vw]"
        style="bottom: calc(1rem + env(safe-area-inset-bottom));"></div>
+
+  <!-- Selectiebalk: verschijnt onderaan zodra de selectiemodus aanstaat.
+       Staat boven de offline-banner in z-volgorde en houdt rekening met de
+       home-balk van een iPhone. -->
+  <div id="select-bar"
+       class="hidden fixed left-1/2 -translate-x-1/2 z-[85] bg-surface ring-1 ring-gold/50 rounded-lg shadow-xl px-4 py-3 max-w-[95vw] w-[min(46rem,95vw)]"
+       style="bottom: calc(1rem + env(safe-area-inset-bottom));">
+    <div class="flex flex-wrap items-center gap-2">
+      <span id="select-count" class="font-mono text-sm text-gold mr-auto">0 geselecteerd</span>
+      <button type="button" id="select-all" class="chip !py-1.5">Alles in beeld</button>
+      <button type="button" id="select-none" class="chip !py-1.5">Wissen</button>
+      <button type="button" id="select-delete" class="chip !py-1.5 !border-red-500/50 !text-red-400" disabled>Verwijderen</button>
+      <button type="button" id="select-close" class="chip !py-1.5" aria-label="Selectiemodus sluiten">Klaar</button>
+    </div>
+    <p id="select-status" class="text-xs font-mono text-muted mt-2 hidden"></p>
+  </div>
 
   <!-- Inlogscherm: verschijnt tot de gebruiker met Google inlogt -->
   <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
