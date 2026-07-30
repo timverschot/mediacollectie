@@ -226,6 +226,9 @@ function gapiLoaded() {
   // te laten geven.
 }
 
+// Was de Google-bibliotheek al binnen vóórdat dit bestand geladen werd, dan
+// heeft de <script onload> in de HTML dat onthouden. Meteen na de definitie
+// hieronder halen we dat in — zie onderaan dit blok.
 function gisLoaded() {
   if (!window.google || !google.accounts || !google.accounts.oauth2) {
     reportError('Kon de Google-inlogbibliotheek niet laden.');
@@ -329,6 +332,12 @@ function driveGateShow(msg) {
   const gate = document.getElementById('login-gate');
   if (gate) gate.classList.remove('hidden');
   if (msg) driveGateStatus(msg);
+}
+
+// Inhaalslag voor de wedloop hierboven beschreven.
+if (typeof window !== 'undefined' && window.__gisWachtte) {
+  window.__gisWachtte = false;
+  gisLoaded();
 }
 
 function driveIsSignedIn() {
@@ -805,16 +814,101 @@ async function deleteMoviesInDrive(ids) {
   });
 }
 
+/**
+ * Controleert een te importeren collectiebestand vóórdat er iets wordt
+ * weggeschreven (FASE 31).
+ *
+ * Tot nu toe ging de inhoud van het gekozen bestand er ongezien in: was het
+ * geen lijst, dan kreeg je een onbegrijpelijke foutmelding, en waren het
+ * records zonder `id`, dan belandden die als losse rommel in je collectie —
+ * onzichtbaar, want zonder id kan je ze ook niet meer verwijderen.
+ *
+ * Geeft een rapport terug in plaats van te gooien, zodat de beheerpagina kan
+ * tonen wát er gaat gebeuren en om bevestiging kan vragen.
+ */
+function controleerImportCollectie(data, huidige) {
+  const rapport = { geldig: false, reden: '', totaal: 0, nieuw: 0, vervangt: 0, ongeldig: 0, voorbeelden: [] };
+
+  if (!Array.isArray(data)) {
+    rapport.reden = 'Dit bestand bevat geen lijst met titels. Verwacht werd een JSON-bestand dat begint met [ en eindigt met ].';
+    return rapport;
+  }
+  if (!data.length) {
+    rapport.reden = 'Het bestand bevat nul titels — er valt niets te importeren.';
+    return rapport;
+  }
+
+  const bestaandeIds = new Set((huidige || []).map((m) => m.id));
+  const gezien = new Set();
+
+  data.forEach((entry) => {
+    rapport.totaal++;
+    const heeftId = entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.trim();
+    const heeftTitel = entry && typeof entry.title === 'string' && entry.title.trim();
+    if (!heeftId || !heeftTitel) {
+      rapport.ongeldig++;
+      if (rapport.voorbeelden.length < 3) {
+        rapport.voorbeelden.push(
+          !heeftId ? 'record zonder bruikbare id' : `"${String(entry.title || '?').slice(0, 40)}" zonder titel`
+        );
+      }
+      return;
+    }
+    if (gezien.has(entry.id)) { rapport.ongeldig++; return; } // dubbel in het bestand zelf
+    gezien.add(entry.id);
+    if (bestaandeIds.has(entry.id)) rapport.vervangt++;
+    else rapport.nieuw++;
+  });
+
+  if (rapport.nieuw + rapport.vervangt === 0) {
+    rapport.reden = `Geen enkele van de ${rapport.totaal} records is bruikbaar (elke titel heeft een id en een titel nodig).`;
+    return rapport;
+  }
+  rapport.geldig = true;
+  return rapport;
+}
+
+/**
+ * Leest het bestand, controleert het, en geeft het rapport terug — zonder iets
+ * weg te schrijven. De beheerpagina toont dat rapport en vraagt pas daarna om
+ * bevestiging.
+ */
+async function beoordeelImportBestand(tekst) {
+  let data;
+  try {
+    data = JSON.parse(tekst);
+  } catch (e) {
+    return { geldig: false, reden: 'Dit is geen geldig JSON-bestand (' + e.message + ').' };
+  }
+  const { movies } = await driveLoadMovies();
+  const rapport = controleerImportCollectie(data, movies);
+  rapport.data = rapport.geldig ? data : null;
+  rapport.huidigAantal = movies.length;
+  return rapport;
+}
+
+/**
+ * Voert de import daadwerkelijk uit. Maakt eerst een backup: importeren
+ * overschrijft bestaande titels, en dat was tot nu toe onomkeerbaar.
+ * Records zonder id of titel worden overgeslagen in plaats van meegenomen.
+ */
 async function importMoviesJsonIntoDrive(arr) {
+  const backup = await driveBackupNow('voor-import');
   return withWriteLock(async () => {
     const { movies } = await driveLoadMovies();
+    let overgeslagen = 0;
     arr.forEach((entry) => {
+      const bruikbaar =
+        entry && typeof entry === 'object' &&
+        typeof entry.id === 'string' && entry.id.trim() &&
+        typeof entry.title === 'string' && entry.title.trim();
+      if (!bruikbaar) { overgeslagen++; return; }
       const idx = movies.findIndex((m) => m.id === entry.id);
       if (idx >= 0) movies[idx] = entry;
       else movies.push(entry);
     });
     await driveSaveNamedFile('movies.json', movies);
-    return movies.length;
+    return { totaal: movies.length, overgeslagen, backup };
   });
 }
 
@@ -1037,9 +1131,33 @@ async function driveLoadPrices() {
   return { prices: Array.isArray(prices) ? prices : [] };
 }
 
+function controleerImportPrijzen(data) {
+  const rapport = { geldig: false, reden: '', totaal: 0, ongeldig: 0 };
+  if (!Array.isArray(data)) {
+    rapport.reden = 'Dit bestand bevat geen lijst met prijsmetingen.';
+    return rapport;
+  }
+  if (!data.length) {
+    rapport.reden = 'Het bestand bevat nul metingen.';
+    return rapport;
+  }
+  data.forEach((entry) => {
+    rapport.totaal++;
+    const sleutel = entry && typeof entry === 'object' && (entry.id || entry.title);
+    if (!sleutel) rapport.ongeldig++;
+  });
+  if (rapport.ongeldig === rapport.totaal) {
+    rapport.reden = 'Geen enkele meting heeft een id of titel om op te herkennen.';
+    return rapport;
+  }
+  rapport.geldig = true;
+  return rapport;
+}
+
 async function importPriceHistoryJsonIntoDrive(arr) {
   return withWriteLock(async () => {
     const { prices } = await driveLoadPrices();
+    arr = arr.filter((entry) => entry && typeof entry === 'object' && (entry.id || entry.title));
     arr.forEach((entry) => {
       const key = entry.id || entry.title;
       const idx = prices.findIndex((p) => (p.id || p.title) === key);
@@ -1090,6 +1208,13 @@ async function driveSaveConfig(cfg) {
 // ---------- Backup & export (fase 1) ----------
 
 const BACKUP_PREFIX = 'movies-backup-';
+// FASE 31 — de prijsgeschiedenis krijgt een eigen backupbestand met dezelfde
+// tijdstempel als de collectiebackup. Bewust een apart bestand en niet één
+// gecombineerd bestand: dan blijft het formaat van bestaande backups precies
+// zoals het was, en kan je oudere backups gewoon blijven terugzetten.
+// Prijzen zijn maanden opbouwwerk (metingen die je niet opnieuw kan doen) en
+// stonden tot nu toe in géén enkele backup.
+const PRICE_BACKUP_PREFIX = 'prices-backup-';
 const BACKUP_KEEP = 4; // aantal automatische (wekelijkse) backups dat bewaard blijft
 const BACKUP_INTERVAL_DAYS = 7;
 
@@ -1105,6 +1230,41 @@ async function driveListBackups() {
   );
   const data = await resp.json();
   return (data.files || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+}
+
+// Alle prijsbackups in Drive, nieuwste eerst.
+async function driveListPriceBackups() {
+  const q = encodeURIComponent(`name contains '${PRICE_BACKUP_PREFIX}' and trashed=false`);
+  const resp = await driveApiFetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,createdTime,size)&pageSize=100`
+  );
+  const data = await resp.json();
+  return (data.files || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+}
+
+/**
+ * Zet de prijsgeschiedenis weg onder dezelfde naamstaart als de
+ * collectiebackup, zodat de twee bij elkaar te vinden zijn. Faalt dit, dan mag
+ * dat de collectiebackup nooit tegenhouden — die is belangrijker.
+ * `staart` is bv. '2026-07-30' of 'voor-import-2026-07-30-21u15'.
+ */
+async function _backupPricesMet(staart, maxBewaren) {
+  try {
+    const { prices } = await driveLoadPrices();
+    if (!prices.length) return null;
+    const naam = `${PRICE_BACKUP_PREFIX}${staart}.json`;
+    await driveCreateJsonFile(naam, prices);
+    if (maxBewaren) {
+      const zelfde = (await driveListPriceBackups()).filter((f) => f.name.startsWith(PRICE_BACKUP_PREFIX));
+      for (const f of zelfde.slice(maxBewaren)) {
+        try { await driveDeleteFile(f.id); } catch {}
+      }
+    }
+    return naam;
+  } catch (e) {
+    console.warn('Prijsgeschiedenis niet mee geback-upt (collectie wél):', e);
+    return null;
+  }
 }
 
 // Maakt (maximaal 1× per week) automatisch een backup-kopie van movies.json
@@ -1127,6 +1287,7 @@ async function driveAutoBackup() {
       if (!movies.length) return false; // lege collectie: niets te back-uppen
 
       await driveCreateJsonFile(`${BACKUP_PREFIX}${today}.json`, movies);
+      await _backupPricesMet(today, BACKUP_KEEP);
 
       // Oude automatische backups opruimen (nieuwste BACKUP_KEEP blijven staan).
       const after = (await driveListBackups()).filter((f) => _isDatedBackupName(f.name));
@@ -1161,6 +1322,7 @@ async function driveBackupNow(reden) {
     const label = (reden || 'handmatig').replace(/[^a-z0-9-]/gi, '');
     const naam = `${BACKUP_PREFIX}${label}-${stamp}.json`;
     await driveCreateJsonFile(naam, movies);
+    await _backupPricesMet(`${label}-${stamp}`, 6);
 
     // Hoogstens 3 van deze veiligheidskopieën bewaren, anders groeit het aan.
     const zelfde = (await driveListBackups()).filter((f) => f.name.startsWith(`${BACKUP_PREFIX}${label}-`));
@@ -1272,6 +1434,25 @@ async function driveRestoreBackup(fileId) {
     }
 
     await driveSaveNamedFile('movies.json', data);
+
+    // Hoort er een prijsbackup met dezelfde tijdstempel bij, zet die dan ook
+    // terug. Anders wijst je collectie naar titels waarvan de prijsmetingen
+    // uit een ander moment komen.
+    try {
+      const naam = (await driveListBackups()).find((f) => f.id === fileId);
+      if (naam) {
+        const staart = naam.name.replace(BACKUP_PREFIX, '').replace(/\.json$/, '');
+        const prijsBestand = (await driveListPriceBackups())
+          .find((f) => f.name === `${PRICE_BACKUP_PREFIX}${staart}.json`);
+        if (prijsBestand) {
+          const prijzen = await driveReadJsonFile(prijsBestand.id);
+          if (Array.isArray(prijzen)) await driveSaveNamedFile('price_history.json', prijzen);
+        }
+      }
+    } catch (e) {
+      console.warn('Bijhorende prijsbackup niet teruggezet:', e);
+    }
+
     return data.length;
   });
 }

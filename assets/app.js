@@ -2056,7 +2056,10 @@ function initCollectionApp(config) {
     if (!els.ambient) return;
     const path = item && (item.custom_poster_path || item.poster_path);
     if (path) {
-      els.ambient.style.backgroundImage = `url("${AMBIENT_BASE + path}")`;
+      // encodeURI zodat een posterpad met een aanhalingsteken of haakje niet uit
+      // de CSS-waarde kan breken. TMDb-paden zien er altijd uit als /abc123.jpg,
+      // dus dit verandert in de praktijk niets aan de geladen afbeelding (FASE 31).
+      els.ambient.style.backgroundImage = `url("${encodeURI(AMBIENT_BASE + path)}")`;
       els.ambient.classList.add('has-poster');
       els.ambient.style.opacity = strong ? '0.6' : '0.42';
     } else {

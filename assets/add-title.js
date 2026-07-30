@@ -288,13 +288,16 @@ async function addTitleDoSearch() {
       const title = r.title || r.name;
       const date = r.release_date || r.first_air_date || '';
       const div = document.createElement('div');
+      // Het posterpad komt van TMDb en gaat rechtstreeks een HTML-attribuut in.
+      // Het is nooit misgegaan, maar een pad met een aanhalingsteken zou uit
+      // het attribuut breken — dus ontsnappen, net als overal elders (FASE 31).
       div.className = 'result-card relative';
       div.innerHTML = `
         <label class="absolute top-1 left-1 z-10 flex items-center justify-center w-7 h-7 rounded bg-black/70 cursor-pointer"
           title="Selecteer om samen toe te voegen">
           <input type="checkbox" class="w-4 h-4 bulk-pick" >
         </label>
-        ${r.poster_path ? `<img src="${TMDB_IMG_BASE}${r.poster_path}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
+        ${r.poster_path ? `<img src="${addTitleEscapeHtml(TMDB_IMG_BASE + r.poster_path)}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
         <p class="text-xs leading-tight" title="${addTitleEscapeHtml(title)}">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
       `;

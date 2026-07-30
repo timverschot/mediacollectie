@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v29';
+const VERSION = 'v30';
 // De postercache heeft een EIGEN versie, los van de schil. Zo wist een gewone
 // JS/HTML-update (VERSION ophogen) niet telkens alle gedownloade posters —
 // scheelt fors dataverbruik op gsm. Verhoog IMAGE_VERSION enkel als je de
@@ -38,6 +38,7 @@ const SHELL_ASSETS = [
   './beheer.html',
   './prijzen.html',
   './manifest.json',
+  './assets/tailwind.css',
   './assets/app.js',
   './assets/drive.js',
   './assets/admin.js',
