@@ -137,7 +137,17 @@ async function addTitleBulkSubmit() {
     localStorage.setItem(ADD_FORMAT_KEY, format);
   } catch {}
 
-  const { movies } = await driveLoadMovies();
+  // Je collectie ophalen kan mislukken (verlopen sessie, geen verbinding).
+  // Zonder deze afhandeling klapte de functie hier uit en bleef de knop grijs,
+  // zonder melding.
+  let movies;
+  try {
+    ({ movies } = await driveLoadMovies());
+  } catch (err) {
+    setStatus('✗ ' + err.message, 'text-red-400');
+    btn.disabled = false;
+    return;
+  }
   const existingIds = new Set(movies.map((m) => m.id));
   const today = new Date().toISOString().slice(0, 10);
 
@@ -448,11 +458,18 @@ async function addTitleAddWholeSaga() {
 
     const { movies } = await driveLoadMovies();
     const haveByTmdb = {};
+    const haveIds = new Set(movies.map((m) => m.id));
     movies.forEach((m) => {
       if (m.tmdb_id) haveByTmdb[String(m.tmdb_id)] = m;
     });
 
-    const todo = parts.filter((p) => !haveByTmdb[String(p.tmdb_id)]);
+    // Ook op slug controleren, niet alleen op tmdb_id. Het wegschrijven matcht
+    // namelijk op id en VERVANGT het bestaande record volledig. Heb je een deel
+    // ooit langs een andere weg toegevoegd (of heeft TMDb er twee records van),
+    // dan zou je exemplaren, hoesfoto's, kijklog en score kwijtraken.
+    const todo = parts.filter(
+      (p) => !haveByTmdb[String(p.tmdb_id)] && !haveIds.has(slugify(p.title, p.release_year))
+    );
     if (!todo.length) {
       setStatus('Je hebt alle delen van deze reeks al.', 'text-teal');
       return;
@@ -472,8 +489,17 @@ async function addTitleAddWholeSaga() {
       setStatus(`(${i + 1}/${todo.length}) ${part.title}…`);
       try {
         const partDetails = await tmdbDetails(part.tmdb_id, 'movie', c.tmdbKey);
+        const slug = slugify(partDetails.title, partDetails.release_year);
+        // Tweede zeef: de volledige gegevens kunnen een andere titel (en dus een
+        // andere slug) opleveren dan de reekslijst. Botst die met een bestaande
+        // titel, dan overslaan in plaats van overschrijven.
+        if (haveIds.has(slug)) {
+          console.info('Deel overgeslagen, id bestaat al:', slug);
+          continue;
+        }
+        haveIds.add(slug);
         const entry = {
-          id: slugify(partDetails.title, partDetails.release_year),
+          id: slug,
           content_type: 'movie',
           date_added: new Date().toISOString().slice(0, 10),
           watched: false,
@@ -532,6 +558,24 @@ async function addTitleSubmit(e) {
 
   try {
     const slug = slugify(addTitleSelectedDetails.title, addTitleSelectedDetails.release_year);
+
+    // Voor wélk exemplaar is deze foto? Dat moeten we wéten vóór de upload.
+    //
+    // driveUploadCoverFile zoekt op bestandsnaam en overschrijft een bestaand
+    // bestand. Gebruikten we hier alleen de slug (zoals voorheen), dan kreeg de
+    // 4K van een film die je al op DVD hebt exact dezelfde bestandsnaam: de
+    // foto van je DVD-doosje werd dan overschreven en beide exemplaren wezen
+    // naar hetzelfde bestand. Het bewerkpaneel doet dit al goed met
+    // `item.id + '-' + ed.eid`; hier gebruiken we dezelfde sleutel.
+    let doelEid = 'e1';
+    if (addTitleExistingEntry) {
+      normalizeMovieEntry(addTitleExistingEntry);
+      const gekozenFormaat = document.getElementById('form-format').value;
+      const zelfdeFormaat = addTitleExistingEntry.editions.find((ed) => ed.format === gekozenFormaat);
+      doelEid = zelfdeFormaat ? zelfdeFormaat.eid : nextEditionId(addTitleExistingEntry);
+    }
+    const coverKey = slug + '-' + doelEid;
+
     let frontCoverId = '', backCoverId = '';
 
     const frontFile = document.getElementById('form-front').files[0];
@@ -539,12 +583,17 @@ async function addTitleSubmit(e) {
     if (frontFile) {
       statusEl.textContent = 'Voorkant-hoes uploaden...';
       const b64 = await resizeImageFile(frontFile, 1200);
-      frontCoverId = await driveUploadCoverFile(b64, slug, 'front');
+      frontCoverId = await driveUploadCoverFile(b64, coverKey, 'front');
     }
     if (backFile) {
       statusEl.textContent = 'Achterkant-hoes uploaden...';
       const b64 = await resizeImageFile(backFile, 1200);
-      backCoverId = await driveUploadCoverFile(b64, slug, 'back');
+      backCoverId = await driveUploadCoverFile(b64, coverKey, 'back');
+    }
+    // De blob-cache kan nog de vorige foto onder ditzelfde bestand-ID hebben.
+    if (typeof _coverUrlCache !== 'undefined') {
+      if (frontCoverId) delete _coverUrlCache[frontCoverId];
+      if (backCoverId) delete _coverUrlCache[backCoverId];
     }
 
     // Seizoensdata verzamelen (enkel relevant als de seizoenkiezer zichtbaar is).
@@ -578,7 +627,9 @@ async function addTitleSubmit(e) {
       // (bv. je had de DVD, nu koop je de 4K) in plaats van alles te
       // overschrijven. Bestaat dat formaat al, dan werken we dat exemplaar bij.
       normalizeMovieEntry(existing);
-      const newEdition = addTitleBuildEdition(nextEditionId(existing), { front: frontCoverId, back: backCoverId });
+      // doelEid is hierboven al bepaald, vóór de foto-upload, zodat de
+      // bestandsnaam van de hoesfoto bij het juiste exemplaar hoort.
+      const newEdition = addTitleBuildEdition(doelEid, { front: frontCoverId, back: backCoverId });
       const sameFormat = existing.editions.find((e) => e.format === newEdition.format);
       if (sameFormat) {
         sameFormat.notes = newEdition.notes;

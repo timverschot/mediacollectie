@@ -542,30 +542,58 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
       const c = cfg();
       if (!cfgReady(c)) { openSettings(); return; }
 
+      const btn = document.getElementById('bulk-submit');
+      if (btn.disabled) return; // al bezig
+      btn.disabled = true;
+
       const lines = document.getElementById('bulk-input').value.split('\n').map((l) => l.trim()).filter(Boolean);
       const logEl = document.getElementById('bulk-log');
       logEl.innerHTML = '';
-      const entries = [];
 
-      // Fase 1: bestaande collectie éénmaal inladen, zodat we per regel weten
-      // of het om een nieuwe titel of een update gaat (en bestaande notities/
-      // foto's/bekeken-status kunnen behouden).
+      const regel = (tekst, kleur) => {
+        const p = document.createElement('p');
+        p.textContent = tekst;
+        if (kleur) p.className = kleur;
+        logEl.appendChild(p);
+        return p;
+      };
+
+      // Bestaande collectie éénmaal inladen, zodat we per regel weten of het om
+      // een nieuwe titel of een update gaat.
       let existingById = {};
       try {
         const { movies } = await driveLoadMovies();
         movies.forEach((m) => { existingById[m.id] = m; });
       } catch (err) {
-        const warnLine = document.createElement('p');
-        warnLine.textContent = '⚠ Kon bestaande collectie niet inladen voor duplicaat-check: ' + err.message;
-        warnLine.className = 'text-gold';
-        logEl.appendChild(warnLine);
+        regel('✗ Kon je collectie niet inladen: ' + err.message, 'text-red-400');
+        regel('Er is niets gewijzigd. Log eventueel opnieuw in en probeer het nog eens.', 'text-muted');
+        btn.disabled = false;
+        return;
       }
 
+      // In blokken wegschrijven in plaats van alles aan het eind. Bij 200 regels
+      // duurt het opzoeken minuten; verliep je Google-sessie ondertussen, dan
+      // was voorheen àl dat werk weg.
+      const BLOK = 25;
+      let blok = [];
+      let bewaard = 0;
+      let gestopt = null;
+
+      const blokWegschrijven = async () => {
+        if (!blok.length) return;
+        const teSchrijven = blok;
+        blok = [];
+        const lijn = regel(`Blok opslaan naar Drive… (${bewaard + teSchrijven.length}/${lines.length})`, 'text-muted');
+        await upsertMoviesBatchInDrive(teSchrijven);
+        bewaard += teSchrijven.length;
+        lijn.textContent = `✓ ${bewaard} opgeslagen in je Google Drive.`;
+        lijn.className = 'text-teal';
+      };
+
       for (const line of lines) {
+        if (gestopt) break;
         const [titleRaw, yearRaw, formatRaw, typeRaw] = line.split('|').map((p) => p?.trim());
-        const logLine = document.createElement('p');
-        logLine.textContent = `Zoeken: ${titleRaw}...`;
-        logEl.appendChild(logLine);
+        const logLine = regel(`Zoeken: ${titleRaw}...`);
 
         try {
           const results = await tmdbSearch(`${titleRaw} ${yearRaw || ''}`.trim(), c.tmdbKey);
@@ -582,33 +610,65 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
           const details = await tmdbDetails(best.id, best.media_type, c.tmdbKey);
           const slug = slugify(details.title, details.release_year);
           const existing = existingById[slug];
+          const formaat = formatRaw || (typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd');
+          const vandaag = new Date().toISOString().slice(0, 10);
 
           if (existing) {
-            // Update: bestaande persoonlijke gegevens behouden, metadata verversen.
-            entries.push({
-              ...existing,
-              ...details,
-              id: slug,
-              content_type: typeRaw || existing.content_type || (best.media_type === 'tv' ? 'tv' : 'movie'),
-              format: formatRaw || existing.format || 'bluray',
-            });
+            // Bijwerken. Bewust NIET `{...existing, ...details}`: die spread
+            // overschreef `seasons` met de verse TMDb-lijst, waarmee je
+            // seizoensbezit werd gewist, en zette het formaat op titelniveau
+            // waar het bij het volgende laden toch weer werd overschreven.
+            // applyTmdbFields ververst alleen de TMDb-velden uit een whitelist.
+            normalizeMovieEntry(existing);
+            applyTmdbFields(existing, details);
+            if (typeRaw) existing.content_type = typeRaw;
+            if (formatRaw) {
+              // Formaat hoort bij een exemplaar. Bestaat het al, dan is er
+              // niets te doen; anders komt er een exemplaar bij.
+              const heeftAl = existing.editions.some((ed) => ed.format === formatRaw);
+              if (!heeftAl) {
+                existing.editions.push({
+                  eid: nextEditionId(existing),
+                  format: formatRaw,
+                  notes: '', boxset: '', location: '', wishlist: false, date_added: vandaag,
+                  custom_front_cover_id: '', custom_back_cover_id: '',
+                  custom_front_cover: '', custom_back_cover: '',
+                });
+              }
+            }
+            normalizeMovieEntry(existing);
+            blok.push(existing);
             logLine.textContent = `✓ ${details.title} (${details.release_year}) — bijgewerkt (stond al in je collectie)`;
             logLine.className = 'text-gold';
           } else {
-            entries.push({
+            const entry = {
               id: slug,
               content_type: typeRaw || (best.media_type === 'tv' ? 'tv' : 'movie'),
-              format: formatRaw || 'bluray',
-              date_added: new Date().toISOString().slice(0, 10),
+              date_added: vandaag,
               watched: false,
-              wishlist: false,
-              notes: '',
-              custom_front_cover: '',
-              custom_back_cover: '',
+              editions: [{
+                eid: 'e1',
+                format: formaat,
+                notes: '', boxset: '', location: '', wishlist: false, date_added: vandaag,
+                custom_front_cover_id: '', custom_back_cover_id: '',
+                custom_front_cover: '', custom_back_cover: '',
+              }],
               ...details,
-            });
+              seasons: details.seasons ? details.seasons.map((s) => ({ ...s, owned: false, format: '' })) : [],
+            };
+            normalizeMovieEntry(entry);
+            existingById[slug] = entry;
+            blok.push(entry);
             logLine.textContent = `✓ ${details.title} (${details.release_year})`;
             logLine.className = 'text-teal';
+          }
+
+          if (blok.length >= BLOK) {
+            try {
+              await blokWegschrijven();
+            } catch (err) {
+              gestopt = err;
+            }
           }
         } catch (err) {
           logLine.textContent = `✗ ${titleRaw} — ${err.message}`;
@@ -617,20 +677,26 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
         await new Promise((r) => setTimeout(r, 250));
       }
 
-      if (entries.length) {
-        const doneLine = document.createElement('p');
-        doneLine.textContent = `${entries.length} titels wegschrijven naar je Drive...`;
-        doneLine.className = 'text-muted';
-        logEl.appendChild(doneLine);
+      if (!gestopt) {
         try {
-          await upsertMoviesBatchInDrive(entries);
-          doneLine.textContent = `✓ ${entries.length} titels weggeschreven naar je Google Drive.`;
-          doneLine.className = 'text-teal';
+          await blokWegschrijven();
         } catch (err) {
-          doneLine.textContent = '✗ ' + err.message;
-          doneLine.className = 'text-red-400';
+          gestopt = err;
         }
       }
+
+      if (gestopt) {
+        regel(
+          (bewaard ? `${bewaard} titels zijn wél opgeslagen. Daarna gestopt: ` : 'Opslaan mislukt: ') + gestopt.message,
+          bewaard ? 'text-gold' : 'text-red-400'
+        );
+        if (bewaard) regel('Verwijder de al verwerkte regels uit je lijst en probeer de rest opnieuw.', 'text-muted');
+      } else if (!bewaard) {
+        regel('Niets toegevoegd.', 'text-gold');
+      } else {
+        regel(`Klaar — ${bewaard} titels verwerkt.`, 'text-teal');
+      }
+      btn.disabled = false;
     });
   </script>
 

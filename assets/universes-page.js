@@ -85,7 +85,15 @@ async function initUniversesPage() {
     btn.disabled = true;
     btn.textContent = 'bezig…';
 
-    const name = prompt('Naam voor dit universum:', keywordName) || keywordName;
+    // prompt() geeft null bij Annuleren. Dat met `|| keywordName` opvangen
+    // betekende dat Annuleren het universum tóch toevoegde.
+    const antwoord = prompt('Naam voor dit universum:', keywordName);
+    if (antwoord === null) {
+      btn.disabled = false;
+      btn.textContent = 'Toevoegen';
+      return;
+    }
+    const name = antwoord.trim() || keywordName;
     const universe = makeUniverse(name, { id: keywordId, name: keywordName }, els.includeTv.checked);
     universes = [...universes, universe];
 

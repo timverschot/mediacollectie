@@ -323,8 +323,9 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
         poster_path: m.poster_path || '',
         format: ed.format,
         variants,
-        // Series zonder seizoensgegevens: als geheel opvragen.
-        whole_series: m.content_type === 'tv',
+        // Series zonder seizoensgegevens: als geheel opvragen. Let op: niet
+        // `content_type === 'tv'`, want een animatieserie staat als 'animation'.
+        whole_series: typeof tmdbMediaTypeOf === 'function' ? tmdbMediaTypeOf(m) === 'tv' : m.content_type === 'tv',
         owned: !ed.wishlist,
       };
     });
@@ -367,7 +368,29 @@ async function priceRefreshAll(workerUrl, markt, onProgress) {
 
   const SAVE_EVERY = 25;
   let sinceSave = 0;
-  const save = () => withWriteLock(() => driveSaveNamedFile('price_history.json', Object.values(byId)));
+
+  /**
+   * Tussentijds opslaan zonder andermans werk te wissen.
+   *
+   * Een volledige verversing duurt minuten tot uren. Schreven we hier de
+   * volledige lijst terug zoals we die aan het begin inlazen, dan verdween
+   * alles wat je ondertussen toevoegde of stopte met volgen — zonder melding.
+   * Daarom herlezen we binnen de vergrendeling en voegen we samen op sleutel:
+   * onze net gemeten regels winnen, al het andere blijft zoals het nu in Drive
+   * staat.
+   */
+  const save = () =>
+    withWriteLock(async () => {
+      const { prices: actueel } = await driveLoadPrices();
+      const samen = {};
+      (actueel || []).forEach((p) => {
+        if (p && p.id) samen[p.id] = p;
+      });
+      Object.values(byId).forEach((p) => {
+        if (p && p.id) samen[p.id] = p;
+      });
+      await driveSaveNamedFile('price_history.json', Object.values(samen));
+    });
 
   for (let i = 0; i < list.length; i++) {
     const t = list[i];

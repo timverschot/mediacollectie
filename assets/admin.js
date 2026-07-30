@@ -110,6 +110,28 @@ function resizeImageFile(file, maxWidth) {
 
 // ---------- TMDb ----------
 
+/**
+ * Welk TMDb-mediatype hoort bij een titel uit je collectie: 'movie' of 'tv'?
+ *
+ * Dit is NIET hetzelfde als `content_type`. Dat veld is jouw indeling en kent
+ * drie waarden: movie, tv en animation. Leidde je het mediatype daaruit af met
+ * `content_type === 'tv' ? 'tv' : 'movie'`, dan viel een animatieSERIE terug op
+ * 'movie' — mét een tv-id. TMDb heeft aparte, grotendeels overlappende
+ * id-reeksen, dus `movie/<tv-id>` levert vaak een geldige maar volstrekt andere
+ * film op. Bij "Gegevens verversen" werd dan de titel, poster, cast en rating
+ * van een vreemde film in je record gezet.
+ *
+ * Volgorde: het bewaarde `tmdb_media_type` (vanaf nu meegeschreven bij het
+ * toevoegen), anders de aanwezigheid van seizoenen, anders `content_type`.
+ */
+function tmdbMediaTypeOf(item) {
+  if (!item) return 'movie';
+  if (item.tmdb_media_type === 'tv' || item.tmdb_media_type === 'movie') return item.tmdb_media_type;
+  if (Array.isArray(item.seasons) && item.seasons.length) return 'tv';
+  if (item.tv_status || item.number_of_seasons) return 'tv';
+  return item.content_type === 'tv' ? 'tv' : 'movie';
+}
+
 async function tmdbSearch(query, apiKey) {
   const url = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(apiKey)}&language=nl-NL&query=${encodeURIComponent(query)}`;
   const resp = await fetch(url);
@@ -326,6 +348,9 @@ async function tmdbDetails(id, mediaType, apiKey) {
 
   return {
     tmdb_id: id,
+    // Bij welk TMDb-eindpunt hoort dit id: 'movie' of 'tv'. Apart bewaard omdat
+    // het niet uit content_type af te leiden is (zie tmdbMediaTypeOf).
+    tmdb_media_type: mediaType === 'tv' ? 'tv' : 'movie',
     title,
     original_title: d.original_title || d.original_name || '',
     original_language: d.original_language || '',
@@ -585,6 +610,8 @@ const TMDB_MANAGED_FIELDS = [
   'cast', 'cast_details', 'crew_details', 'runtime', 'rating', 'vote_count', 'overview', 'tagline',
   'certification', 'certification_country', 'trailer_key', 'imdb_id',
   'saga_id', 'tv_status', 'number_of_seasons',
+  // Zodat oude records bij hun eerste verversing hun mediatype leren kennen.
+  'tmdb_media_type',
 ];
 
 /**
@@ -633,7 +660,31 @@ async function tmdbRefreshAllTitles(apiKey, onProgress, shouldStop) {
   let sinceSave = 0;
   let stopped = false;
 
-  const save = () => withWriteLock(() => driveSaveNamedFile('movies.json', movies));
+  // Bijgewerkte titels sinds de vorige tussentijdse opslag.
+  let gewijzigd = [];
+
+  /**
+   * Tussentijds opslaan zonder andermans werk te wissen.
+   *
+   * Deze verversing duurt bij een grote collectie minuten. Schreven we hier de
+   * volledige `movies`-array terug, dan overschreven we alles wat je in de
+   * tussentijd op een ander tabblad of op je gsm wijzigde: dat verdween dan
+   * zonder foutmelding, terwijl daar netjes "✓ opgeslagen" had gestaan.
+   * Daarom herlezen we binnen de vergrendeling en voegen we alleen de titels
+   * samen die deze verversing echt heeft aangeraakt. Een titel die je intussen
+   * verwijderde blijft verwijderd (we voegen niets toe, we vervangen alleen).
+   */
+  const save = async () => {
+    if (!gewijzigd.length) return;
+    const teSchrijven = gewijzigd;
+    gewijzigd = [];
+    await withWriteLock(async () => {
+      const { movies: actueel } = await driveLoadMovies();
+      const perId = new Map(teSchrijven.map((m) => [m.id, m]));
+      const samen = actueel.map((m) => perId.get(m.id) || m);
+      await driveSaveNamedFile('movies.json', samen);
+    });
+  };
 
   for (let i = 0; i < movies.length; i++) {
     if (shouldStop && shouldStop()) {
@@ -649,8 +700,9 @@ async function tmdbRefreshAllTitles(apiKey, onProgress, shouldStop) {
     }
 
     try {
-      const fresh = await tmdbDetails(m.tmdb_id, m.content_type === 'tv' ? 'tv' : 'movie', apiKey);
+      const fresh = await tmdbDetails(m.tmdb_id, tmdbMediaTypeOf(m), apiKey);
       applyTmdbFields(m, fresh);
+      gewijzigd.push(m);
       updated++;
       sinceSave++;
     } catch (err) {

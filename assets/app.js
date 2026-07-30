@@ -60,7 +60,8 @@ function checkAssetVersions() {
     typeof tmdbPerson === 'undefined' ||
     typeof applyTmdbFields === 'undefined' ||
     typeof tmdbSeason === 'undefined' ||
-    typeof tmdbSearchKeyword === 'undefined'
+    typeof tmdbSearchKeyword === 'undefined' ||
+    typeof tmdbMediaTypeOf === 'undefined'
   ) {
     missing.push('assets/admin.js');
   }
@@ -974,6 +975,16 @@ function initCollectionApp(config) {
     }
     if (shelfActive >= units.length) shelfActive = 0;
 
+    // Niets gevonden: de plank leegmaken. updateShelf() stopt hieronder meteen
+    // bij een lege lijst, waardoor de naam, het jaar en het sfeerlicht van de
+    // vórige titel bleven staan — alsof die nog geselecteerd was.
+    if (!units.length) {
+      els.shelfTrack.innerHTML = '';
+      if (els.shelfMeta) els.shelfMeta.innerHTML = '';
+      clearAmbient();
+      return;
+    }
+
     els.shelfTrack.innerHTML = units
       .map((u, i) => {
         const item = u.type === 'group' ? u.items[0] : u.item;
@@ -1097,11 +1108,23 @@ function initCollectionApp(config) {
     const prev = { owned: season.owned, format: season.format };
     season.owned = false;
     season.format = '';
+    // Seizoensbezit bepaalt mee welke formaten je hebt, dus de filterchips
+    // moeten opnieuw opgebouwd worden — anders bleef er een chip staan die geen
+    // enkel resultaat meer geeft (of verscheen er geen nieuwe).
+    buildFacetChips(state.all);
     applyFilters();
     openModal(item.id);
     backgroundSave(
       () => upsertMovieInDrive(item),
-      () => { season.owned = prev.owned; season.format = prev.format; openModal(item.id); }
+      () => {
+        season.owned = prev.owned;
+        season.format = prev.format;
+        buildFacetChips(state.all);
+        applyFilters();
+        // Alleen heropenen als de modal nog openstond; anders springt hij
+        // vanzelf weer open nadat je hem net gesloten had.
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
     );
   }
 
@@ -1111,11 +1134,18 @@ function initCollectionApp(config) {
     const prev = { owned: season.owned, format: season.format };
     season.owned = true;
     season.format = format;
+    buildFacetChips(state.all);
     applyFilters();
     openModal(item.id);
     backgroundSave(
       () => upsertMovieInDrive(item),
-      () => { season.owned = prev.owned; season.format = prev.format; openModal(item.id); }
+      () => {
+        season.owned = prev.owned;
+        season.format = prev.format;
+        buildFacetChips(state.all);
+        applyFilters();
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
     );
   }
 
@@ -1233,6 +1263,9 @@ function initCollectionApp(config) {
 
   function normalizePriceInfo(p, format) {
     if (!p || p.value == null) return null;
+    // `point` (helemaal onderaan toegevoegd) is de ruwe meting uit de index.
+    // Daarmee kan ownedPriceInfos zien of twee exemplaren of seizoenen op
+    // dezelfde meting uitkomen — zie de uitleg daar.
     const cur = p.currency || 'EUR';
     // Titels waarvan enkel een niet-euromarkt (meestal het VK) een prijs gaf,
     // rekenen we om naar euro met een vaste benaderende koers. Zo staat alles
@@ -1249,23 +1282,44 @@ function initCollectionApp(config) {
       currency: 'EUR',
       convertedFrom: cur !== 'EUR' ? cur : null,
       date: p.date || '',
+      point: p,
     };
   }
 
-  // Alle bezeten exemplaren van een titel met hun richtwaarde/range. Series met
-  // seizoensgegevens: één regel per bezeten seizoen; anders één per (niet-
-  // verlanglijst-)editie.
+  /**
+   * Alle bezeten exemplaren van een titel met hun richtwaarde/range. Series met
+   * seizoensgegevens: één regel per bezeten seizoen; anders één per
+   * (niet-verlanglijst-)editie.
+   *
+   * Elke meting telt hoogstens één keer mee. Dat is nodig door de terugval in
+   * pricePointFor: een oude meting die alleen onder het kale titel-id staat
+   * (of onder "titel|formaat" bij twee exemplaren van hetzelfde formaat) wordt
+   * anders door élk exemplaar en élk seizoen opgepikt. Een serie met één
+   * gemeten box en zes bezeten seizoenen kwam zo op zesmaal de waarde uit —
+   * bovenaan bij "Sorteer op waarde" en met honderden euro's te veel in de
+   * statistieken. Komt een tweede regel op dezelfde meting uit, dan tonen we
+   * daar geen bedrag: we weten simpelweg niet wat dát exemplaar waard is.
+   */
   function ownedPriceInfos(item) {
+    const gebruikt = new Set();
+    const uniek = (info) => {
+      if (!info) return null;
+      if (info.point && gebruikt.has(info.point)) return null;
+      if (info.point) gebruikt.add(info.point);
+      return info;
+    };
+
     const ownedSeasons = (item.seasons || []).filter((s) => s.owned);
     if (ownedSeasons.length) {
-      return ownedSeasons.map((s) => {
-        const info = seasonPriceInfo(item, s);
-        return { label: `Seizoen ${s.season_number}`, format: s.format || item.format, info };
-      });
+      return ownedSeasons.map((s) => ({
+        label: `Seizoen ${s.season_number}`,
+        format: s.format || item.format,
+        info: uniek(seasonPriceInfo(item, s)),
+      }));
     }
     return (item.editions || [])
       .filter((e) => !e.wishlist)
-      .map((e) => ({ label: formatLabel(e.format), format: e.format, info: editionPriceInfo(item, e) }));
+      .map((e) => ({ label: formatLabel(e.format), format: e.format, info: uniek(editionPriceInfo(item, e)) }));
   }
 
   // Somwaarde van een titel (voor de sortering). Titels zonder enige meting
@@ -2043,7 +2097,10 @@ function initCollectionApp(config) {
     updateFilterButton();
   }
 
-  function clearAllFilters() {
+  // opts.stil = true: alleen de status en de chip-opmaak wissen, zonder meteen
+  // opnieuw te filteren. Gebruikt door applyQuickFilter, dat er daarna zelf een
+  // filter voor in de plaats zet.
+  function clearAllFilters(opts) {
     state.activeFormats.clear();
     state.activeTypes.clear();
     state.activeGenres.clear();
@@ -2064,7 +2121,7 @@ function initCollectionApp(config) {
     els.typeChips.querySelectorAll('[data-type]').forEach((c) => c.classList.remove('chip-active'));
     if (els.statusChips) els.statusChips.querySelectorAll('[data-status]').forEach((c) => c.classList.remove('chip-active'));
     if (els.watchedChips) els.watchedChips.querySelectorAll('[data-watched]').forEach((c) => c.classList.remove('chip-active'));
-    applyFilters();
+    if (!(opts && opts.stil)) applyFilters();
   }
 
   if (els.filterToggle && els.filterPanel) {
@@ -2096,14 +2153,10 @@ function initCollectionApp(config) {
   // pop-up en staat je collectie meteen op dat filter. Bestaande filters worden
   // gewist, anders krijg je onbedoeld een lege lijst.
   function applyQuickFilter(kind, value) {
-    state.activeGenres.clear();
-    state.activeDecades.clear();
-    state.activeCerts.clear();
-    state.activeBoxsets.clear();
-    state.activeLocations.clear();
-    state.activeLetter = null;
-    state.search = '';
-    els.search.value = '';
+    // Écht álle filters wissen, ook formaat, type, status en bekeken. Bleven
+    // die staan, dan kon een klik op een genre een lege lijst opleveren terwijl
+    // het filterpaneel dicht was — je zag dan niet wat er in de weg zat.
+    clearAllFilters({ stil: true });
 
     if (kind === 'genre') state.activeGenres.add(value);
     if (kind === 'decade') state.activeDecades.add(Number(value));
@@ -2183,13 +2236,23 @@ function initCollectionApp(config) {
     if (addBtn) {
       addBtn.onclick = () => {
         const before = JSON.parse(JSON.stringify(item.watch_log || []));
+        // Ook de bekeken-vlag onthouden: die wordt hieronder gezet, dus hoort
+        // hij bij een mislukte opslag ook teruggedraaid te worden. Anders bleef
+        // de titel als bekeken in het raster staan terwijl er "je wijziging is
+        // teruggedraaid" gemeld was.
+        const watchedBefore = item.watched;
         if (!addWatchEntry(item)) return; // vandaag stond er al in
         item.watched = true;
         applyFilters();
         openModal(item.id);
         backgroundSave(
           () => upsertMovieInDrive(item),
-          () => { item.watch_log = before; if (!els.modal.classList.contains('hidden')) openModal(item.id); }
+          () => {
+            item.watch_log = before;
+            item.watched = watchedBefore;
+            applyFilters();
+            if (!els.modal.classList.contains('hidden')) openModal(item.id);
+          }
         );
       };
     }
@@ -2258,9 +2321,20 @@ function initCollectionApp(config) {
     return { season: s, episode: Math.max(...eps) };
   }
 
+  // Alleen afleveringen van seizoenen die je nog BEZIT tellen mee. Verkoop je
+  // een uitgekeken seizoen, dan blijft zijn kijkgeschiedenis bewaard (dat wil je
+  // ook: koop je het opnieuw, dan staat alles er nog). Zou die mee blijven
+  // tellen, dan werd de serie ten onrechte als 'bekeken' gemarkeerd zodra je
+  // daarna nog één aflevering aanvinkte.
   function totalWatchedEpisodes(item) {
     const map = item.watched_episodes || {};
-    return Object.values(map).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+    const bezeten = new Set(
+      (item.seasons || []).filter((s) => s.owned).map((s) => String(s.season_number))
+    );
+    // Geen seizoensgegevens (bv. een serie zonder seizoenenlijst): alles tellen,
+    // anders zou de voortgang altijd op nul blijven staan.
+    if (!bezeten.size) return Object.values(map).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+    return Object.keys(map).reduce((sum, k) => sum + (bezeten.has(k) ? (map[k] || []).length : 0), 0);
   }
 
   function totalOwnedEpisodes(item) {
@@ -2568,7 +2642,10 @@ function initCollectionApp(config) {
       if (maxRuntime) {
         const rt = Number(m.runtime) || 0;
         // Bij series is runtime de afleveringsduur; die past bijna altijd.
-        if (!rt || rt > maxRuntime) return false;
+        // Titels zonder bekende speelduur laten we staan: op een collectie die
+        // nog niet ververst is, filterde "hoogstens 2 uur" anders bijna alles
+        // weg zonder dat je kon zien waarom.
+        if (rt && rt > maxRuntime) return false;
       }
       return true;
     });
@@ -2651,15 +2728,32 @@ function initCollectionApp(config) {
       const counts = {};
       (m.editions || []).forEach((e) => {
         if (e.wishlist) return;
-        counts[e.format] = (counts[e.format] || 0) + 1;
+        // Exemplaren zonder formaat zijn geen dubbel maar een gat in de
+        // gegevens; die zouden anders als "2× " (zonder naam) opduiken.
+        if (!e.format) return;
+        // Uitvoering hoort bij de sleutel: een standaard-DVD naast een
+        // DVD-steelbook zijn twee bewust verschillende exemplaren, met elk een
+        // eigen markt en prijs. Die als dubbel melden is vals alarm, en zet aan
+        // tot verwijderen van iets wat je expres hebt.
+        const uitvoering = (typeof editionVariantKeys === 'function' ? editionVariantKeys(e) : []).join('+');
+        const sleutel = e.format + (uitvoering ? '|' + uitvoering : '');
+        counts[sleutel] = (counts[sleutel] || 0) + 1;
       });
       Object.keys(counts)
         .filter((f) => counts[f] > 1)
         .forEach((f) => {
+          const [fmt, uitvoering] = f.split('|');
+          const labels =
+            uitvoering && typeof EDITION_VARIANTS !== 'undefined'
+              ? uitvoering
+                  .split('+')
+                  .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).label || k)
+                  .join(' + ')
+              : '';
           results.push({
             kind: 'edition',
             items: [m],
-            text: `${counts[f]}× ${formatLabel(f)} van dezelfde titel`,
+            text: `${counts[f]}× ${formatLabel(fmt)}${labels ? ' (' + labels + ')' : ''} van dezelfde titel`,
           });
         });
     });
@@ -2667,7 +2761,9 @@ function initCollectionApp(config) {
     const byKey = {};
     state.all.forEach((m) => {
       if (m.wishlist) return;
-      const key = sortTitle(m) + '|' + (m.release_year || '');
+      // Het type hoort in de sleutel: een film en een serie met dezelfde naam
+      // en hetzelfde jaar zijn geen dubbel.
+      const key = sortTitle(m) + '|' + (m.release_year || '') + '|' + (m.content_type || '');
       (byKey[key] = byKey[key] || []).push(m);
     });
     Object.values(byKey)
@@ -3217,10 +3313,17 @@ function initCollectionApp(config) {
     // deze collectie heeft — bijvoorbeeld een andere uitgave of een deel dat
     // TMDb elders onderbrengt.
     const sagaName = sagaOf(item);
-    const extras = state.all.filter((m) => {
-      if (sagaOf(m) !== sagaName) return false;
-      return !parts.some((p) => findMine(p) === m);
-    });
+    // Titels die jij zelf bij deze reeks hebt gezet maar die TMDb er niet bij
+    // rekent. Alleen zinvol bij een ingevulde reeksnaam: is die leeg, dan
+    // matcht `sagaOf(m) === ''` élke titel zonder reeks — en stond hier ineens
+    // je hele collectie, met duizenden rijen HTML per keer dat je de titel
+    // opende.
+    const extras = sagaName
+      ? state.all.filter((m) => {
+          if (sagaOf(m) !== sagaName) return false;
+          return !parts.some((p) => findMine(p) === m);
+        })
+      : [];
 
     const ownedCount =
       parts.filter((p) => {
@@ -3837,7 +3940,7 @@ function initCollectionApp(config) {
       loadBtn.disabled = true;
       statusEl.textContent = 'posters ophalen…';
       try {
-        const posters = await tmdbPosters(item.tmdb_id, item.content_type === 'tv' ? 'tv' : 'movie', c.tmdbKey);
+        const posters = await tmdbPosters(item.tmdb_id, tmdbMediaTypeOf(item), c.tmdbKey);
         if (!posters.length) {
           statusEl.textContent = 'geen alternatieve posters gevonden';
           return;
@@ -3929,7 +4032,14 @@ function initCollectionApp(config) {
       item.content_type = m.querySelector('[data-edit-content]').value;
       item.watched = m.querySelector('[data-edit-watched]').checked;
       const sagaInput = m.querySelector('[data-edit-saga]');
-      if (sagaInput) item.saga = sagaInput.value.trim();
+      if (sagaInput) {
+        item.saga = sagaInput.value.trim();
+        // Wis je de reeksnaam, wis dan ook de koppeling naar de TMDb-reeks.
+        // Anders bleef het reeksblok in de detailweergave actief op een lege
+        // naam, en dat trok elke titel zonder reeks mee in "ook door jou bij
+        // deze reeks gezet".
+        if (!item.saga) item.saga_id = null;
+      }
 
       // Exemplaarniveau:
       ed.format = m.querySelector('[data-edit-format]').value;
@@ -3990,7 +4100,10 @@ function initCollectionApp(config) {
     status.textContent = 'TMDb-gegevens ophalen...';
     status.className = 'text-sm font-mono text-muted';
     try {
-      const mediaType = item.content_type === 'tv' ? 'tv' : 'movie';
+      // Niet uit content_type afleiden: 'animation' zou dan als 'movie' worden
+      // opgevraagd, en een animatieserie kreeg zo de gegevens van een
+      // wildvreemde film. tmdbMediaTypeOf kijkt naar het bewaarde mediatype.
+      const mediaType = tmdbMediaTypeOf(item);
       const fresh = await tmdbDetails(item.tmdb_id, mediaType, c.tmdbKey);
 
       // Samenvoegen gebeurt centraal in admin.js: TMDb-velden worden ververst,

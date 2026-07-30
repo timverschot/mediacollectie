@@ -853,28 +853,61 @@ function _isCoverDataUrl(v) {
   return typeof v === 'string' && v.startsWith('data:image');
 }
 
-// Eenmalige migratie: zet alle foto's die nog als data-URL in movies.json
-// zitten om naar losse Drive-bestanden. onProgress(klaar, totaal) per titel.
+/**
+ * Eenmalige migratie: zet alle foto's die nog als data-URL in movies.json
+ * zitten om naar losse Drive-bestanden. onProgress(klaar, totaal) per titel.
+ *
+ * Werkt per EXEMPLAAR, niet per titel. Dat is wezenlijk: normalizeMovieEntry()
+ * kopieert een oude data-URL van het hoofdniveau naar editions[0], en
+ * syncLegacyFieldsFromEditions() zet het hoofdniveau daarna weer terug vanuit
+ * dat exemplaar. Migreerde je alleen het hoofdniveau, dan werd het net
+ * toegekende Drive-bestand-ID bij de volgende lading overschreven met een lege
+ * waarde en stond de data-URL er weer — waardoor de migratie bij élk bezoek
+ * opnieuw draaide en movies.json nooit kleiner werd.
+ */
 async function driveMigrateCoversToFiles(onProgress) {
   const { movies } = await driveLoadMovies();
-  const todo = movies.filter((m) => _isCoverDataUrl(m.custom_front_cover) || _isCoverDataUrl(m.custom_back_cover));
+  const heeftDataUrl = (m) =>
+    (m.editions || []).some((e) => _isCoverDataUrl(e.custom_front_cover) || _isCoverDataUrl(e.custom_back_cover)) ||
+    _isCoverDataUrl(m.custom_front_cover) ||
+    _isCoverDataUrl(m.custom_back_cover);
+  const todo = movies.filter(heeftDataUrl);
   if (!todo.length) return 0;
 
   let done = 0;
   for (const m of todo) {
-    if (_isCoverDataUrl(m.custom_front_cover)) {
-      m.custom_front_cover_id = await driveUploadCoverFile(m.custom_front_cover.split(',')[1], m.id, 'front');
-      m.custom_front_cover = '';
+    for (const ed of m.editions || []) {
+      // Dezelfde bestandsnaam als het bewerkpaneel gebruikt, zodat een DVD- en
+      // een 4K-doosje van dezelfde film elkaar niet overschrijven.
+      const coverKey = m.id + '-' + ed.eid;
+      if (_isCoverDataUrl(ed.custom_front_cover)) {
+        ed.custom_front_cover_id = await driveUploadCoverFile(ed.custom_front_cover.split(',')[1], coverKey, 'front');
+        ed.custom_front_cover = '';
+      }
+      if (_isCoverDataUrl(ed.custom_back_cover)) {
+        ed.custom_back_cover_id = await driveUploadCoverFile(ed.custom_back_cover.split(',')[1], coverKey, 'back');
+        ed.custom_back_cover = '';
+      }
     }
-    if (_isCoverDataUrl(m.custom_back_cover)) {
-      m.custom_back_cover_id = await driveUploadCoverFile(m.custom_back_cover.split(',')[1], m.id, 'back');
-      m.custom_back_cover = '';
-    }
+    // Restanten op het hoofdniveau (een record zonder editions[] hoort niet te
+    // bestaan, maar we laten er geen data-URL achter).
+    if (_isCoverDataUrl(m.custom_front_cover)) m.custom_front_cover = '';
+    if (_isCoverDataUrl(m.custom_back_cover)) m.custom_back_cover = '';
+    // Hoofdniveau opnieuw afleiden uit het representatieve exemplaar.
+    syncLegacyFieldsFromEditions(m);
+
     done++;
     if (onProgress) onProgress(done, todo.length);
   }
 
-  await withWriteLock(() => driveSaveNamedFile('movies.json', movies));
+  // Herlezen binnen de vergrendeling en samenvoegen op id: deze migratie kan
+  // minuten duren, en ondertussen kan je op een ander toestel iets wijzigen.
+  await withWriteLock(async () => {
+    const { movies: actueel } = await driveLoadMovies();
+    const gemigreerd = new Map(todo.map((m) => [m.id, m]));
+    const samen = actueel.map((m) => gemigreerd.get(m.id) || m);
+    await driveSaveNamedFile('movies.json', samen);
+  });
   return todo.length;
 }
 

@@ -191,37 +191,45 @@ function initBulkImportUI(onSaved) {
     const btn = document.getElementById('bulk-text-analyse');
     btn.disabled = true;
 
-    const { movies } = await driveLoadMovies();
-    const haveIds = new Set(movies.map((m) => m.id));
-    const haveTmdb = new Set(movies.filter((m) => m.tmdb_id).map((m) => String(m.tmdb_id)));
+    // Alles binnen try/finally: mislukt het ophalen van je collectie (verlopen
+    // sessie, geen verbinding), dan bleef de knop voorheen grijs zonder één
+    // woord uitleg, en was je geplakte lijst na het herladen weg.
+    try {
+      const { movies } = await driveLoadMovies();
+      const haveIds = new Set(movies.map((m) => m.id));
+      const haveTmdb = new Set(movies.filter((m) => m.tmdb_id).map((m) => String(m.tmdb_id)));
 
-    bulkRows = [];
-    for (let i = 0; i < parsed.length; i++) {
-      setStatus(`(${i + 1}/${parsed.length}) ${parsed[i].title}…`);
-      let candidates = [];
-      try {
-        candidates = await bulkFindCandidates(parsed[i], c.tmdbKey);
-      } catch (err) {
-        console.warn('Zoeken mislukt:', parsed[i].title, err);
+      bulkRows = [];
+      for (let i = 0; i < parsed.length; i++) {
+        setStatus(`(${i + 1}/${parsed.length}) ${parsed[i].title}…`);
+        let candidates = [];
+        try {
+          candidates = await bulkFindCandidates(parsed[i], c.tmdbKey);
+        } catch (err) {
+          console.warn('Zoeken mislukt:', parsed[i].title, err);
+        }
+        const best = candidates[0] || null;
+        const already =
+          best && (haveTmdb.has(String(best.tmdb_id)) || haveIds.has(slugify(best.title, best.release_year)));
+
+        bulkRows.push({
+          source: parsed[i],
+          candidates,
+          chosen: 0,
+          // Al in bezit of niets gevonden: standaard uitgevinkt.
+          selected: !!best && !already,
+          already,
+        });
+        await new Promise((r) => setTimeout(r, 150));
       }
-      const best = candidates[0] || null;
-      const already =
-        best && (haveTmdb.has(String(best.tmdb_id)) || haveIds.has(slugify(best.title, best.release_year)));
 
-      bulkRows.push({
-        source: parsed[i],
-        candidates,
-        chosen: 0,
-        // Al in bezit of niets gevonden: standaard uitgevinkt.
-        selected: !!best && !already,
-        already,
-      });
-      await new Promise((r) => setTimeout(r, 150));
+      renderReview();
+      showStep('review');
+    } catch (err) {
+      setStatus('✗ ' + err.message, 'text-red-400');
+    } finally {
+      btn.disabled = false;
     }
-
-    btn.disabled = false;
-    renderReview();
-    showStep('review');
   });
 
   // ---------- Stap 2: bevestigen ----------
@@ -291,9 +299,13 @@ function initBulkImportUI(onSaved) {
     });
   }
 
+  // "Alles aan" slaat bewust de rijen over die je al in je collectie hebt.
+  // Zou hij die wél aanvinken, dan vervangt het toevoegen die titels volledig
+  // (upsertMoviesBatchInDrive doet movies[idx] = entry) en verlies je hun
+  // bekeken-status, eigen score, kijklog, notities en extra exemplaren.
   document.getElementById('bulk-review-all').addEventListener('click', () => {
     bulkRows.forEach((r) => {
-      if (r.candidates.length) r.selected = true;
+      if (r.candidates.length && !r.already) r.selected = true;
     });
     renderReview();
   });
@@ -307,9 +319,15 @@ function initBulkImportUI(onSaved) {
 
   document.getElementById('bulk-text-add').addEventListener('click', async () => {
     const c = typeof getConfig === 'function' ? getConfig() : {};
-    const chosen = bulkRows.filter((r) => r.selected && r.candidates[r.chosen]);
+    // Titels die je al hebt worden nooit toegevoegd, ook niet als het vinkje
+    // per ongeluk aanstaat: toevoegen is hier vervangen, en dat zou je
+    // geschiedenis en extra exemplaren wissen. Bijwerken doe je per titel.
+    const overgeslagen = bulkRows.filter((r) => r.selected && r.already).length;
+    const chosen = bulkRows.filter((r) => r.selected && !r.already && r.candidates[r.chosen]);
     if (!chosen.length) {
-      progress.textContent = 'Niets aangevinkt.';
+      progress.textContent = overgeslagen
+        ? `Niets toegevoegd — die ${overgeslagen} ${overgeslagen === 1 ? 'titel staat' : 'titels staan'} al in je collectie.`
+        : 'Niets aangevinkt.';
       progress.className = 'text-sm font-mono text-gold';
       return;
     }
@@ -392,7 +410,13 @@ function initBulkImportUI(onSaved) {
     } else if (!added) {
       setProgress('✗ Niets kunnen toevoegen.', 'text-red-400');
     } else {
-      setProgress(`✓ ${added} toegevoegd` + (failed.length ? `, ${failed.length} mislukt` : '') + '.', 'text-teal');
+      setProgress(
+        `✓ ${added} toegevoegd` +
+          (failed.length ? `, ${failed.length} mislukt` : '') +
+          (overgeslagen ? `, ${overgeslagen} overgeslagen (had je al)` : '') +
+          '.',
+        'text-teal'
+      );
     }
 
     if (failed.length) console.warn('Niet kunnen opzoeken bij TMDb:', failed.join(', '));

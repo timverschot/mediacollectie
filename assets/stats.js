@@ -479,7 +479,24 @@ async function initStatsPage() {
 
   function renderValue(list) {
     const byId = {};
-    prices.forEach((p) => { byId[p.id] = p; });
+    // Gearchiveerde metingen overslaan, net als de collectiepagina doet. Volg je
+    // een serie inmiddels per seizoen, dan blijft de oude meting van de complete
+    // box als 'archived' bewaard; die meetellen maakte de collectiewaarde hier
+    // hoger dan de som van de pills op de collectiepagina.
+    prices.forEach((p) => {
+      if (!p || p.archived || !p.id) return;
+      byId[p.id] = p;
+    });
+
+    // Elke meting telt hoogstens één keer mee. Zonder dit pikt élk exemplaar en
+    // élk seizoen dezelfde oude meting op via de terugval hieronder, en telt een
+    // serie met zes seizoenen zesmaal de prijs van één box.
+    const gebruikt = new Set();
+    const nogNietGebruikt = (entry) => {
+      if (!entry || gebruikt.has(entry)) return null;
+      gebruikt.add(entry);
+      return entry;
+    };
 
     // Prijssleutels zijn sinds fase 9 per exemplaar (`titel|formaat`) en sinds
     // fase 10 per seizoen (`titel|formaat|sN`). De oude sleutel (enkel het
@@ -518,11 +535,12 @@ async function initStatsPage() {
             variantKey.length && typeof priceKeyFor === 'function'
               ? priceKeyFor(m.id, fmt, { season: s.season_number, variants: variantKey })
               : null;
-          const entry =
+          const entry = nogNietGebruikt(
             (withVariants && byId[withVariants]) ||
-            byId[`${m.id}|${fmt}|s${s.season_number}`] ||
-            byId[`${m.id}|${fmt}`] ||
-            byId[m.id];
+              byId[`${m.id}|${fmt}|s${s.season_number}`] ||
+              byId[`${m.id}|${fmt}`] ||
+              byId[m.id]
+          );
           const last = statsLatestPrice(entry);
           if (last) addValued(`${m.title} — seizoen ${s.season_number}`, m.release_year, fmt, last);
         });
@@ -537,7 +555,9 @@ async function initStatsPage() {
           keys.length && typeof priceKeyFor === 'function'
             ? priceKeyFor(m.id, ed.format, { variants: keys })
             : null;
-        const entry = (withVariants && byId[withVariants]) || byId[`${m.id}|${ed.format}`] || byId[m.id];
+        const entry = nogNietGebruikt(
+          (withVariants && byId[withVariants]) || byId[`${m.id}|${ed.format}`] || byId[m.id]
+        );
         const last = statsLatestPrice(entry);
         if (last) addValued(m.title, m.release_year, ed.format, last);
       });

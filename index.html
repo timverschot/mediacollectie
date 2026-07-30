@@ -171,21 +171,9 @@
   }
   header .sprocket-strip { margin-top: env(safe-area-inset-top); }
 
-  /* Vingervriendelijke raakvlakken op aanraakschermen. Muisgebruikers houden
-     de compacte weergave — vandaar de pointer-query in plaats van een
-     schermbreedte. */
-  @media (pointer: coarse) {
-    .chip { padding: 0.55rem 1rem; }
-    .letter-chip { min-width: 2.25rem; padding: 0.5rem 0.35rem; }
-    .nav-link { padding: 0.35rem 0; }
-    select, input[type="search"] { min-height: 2.75rem; }
-    .delete-btn { opacity: 1; width: 2rem; height: 2rem; }
-    /* Op aanraakschermen is de verwijderknop altijd zichtbaar (linksboven),
-       dus verhuist het waarde-pill naar linksonder en schuift de bekeken-stip
-       er net naast — zo botst er niets. */
-    .value-badge { top: auto; bottom: 0.5rem; }
-    .watched-dot { left: 2.9rem; }
-  }
+  /* De aanraak-aanpassingen stonden hier, maar staan nu onderaan dit
+     stijlblok — zie de uitleg daar. Ze kwamen vóór de klassen die ze moesten
+     overschrijven en deden daardoor niets, of half. */
 
   /* Vlot horizontaal vegen door de letterrij en de castrij */
   #letter-chips, [data-field="cast-list"] {
@@ -512,6 +500,33 @@
   .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
   .result-card { cursor: pointer; border: 1px solid rgba(242,240,234,0.1); border-radius: 0.5rem; padding: 0.5rem; transition: border-color 0.15s; }
   .result-card:hover, .result-card.selected { border-color: #C9A227; }
+
+  /* ---------- Aanraakschermen: MOET als laatste blijven staan ----------
+     Vingervriendelijke raakvlakken op aanraakschermen. Muisgebruikers houden
+     de compacte weergave — vandaar de pointer-query in plaats van een
+     schermbreedte.
+
+     Dit blok stond eerder middenin het stijlblok, vóór de klassen die het moest
+     overschrijven. Bij gelijke specificiteit wint de laatste regel, dus deed het
+     niets — behalve één keer half, met een zichtbaar gevolg: de waarde-pill
+     kreeg hier `bottom` en hield de `top` van de basisregel. Met een top én een
+     bottom en geen hoogte rekte de pill zich uit over de volledige poster: dat
+     was de verticale prijs-pill. Zet nieuwe aanraak-aanpassingen dus hier,
+     onderaan, en niet ergens hierboven. */
+  @media (pointer: coarse) {
+    .chip { padding: 0.55rem 1rem; }
+    .letter-chip { min-width: 2.25rem; padding: 0.5rem 0.35rem; }
+    .nav-link { padding: 0.35rem 0; }
+    select, input[type="search"] { min-height: 2.75rem; }
+    .delete-btn { opacity: 1; width: 2rem; height: 2rem; }
+    /* Op aanraakschermen is de verwijderknop altijd zichtbaar (linksboven),
+       dus verhuist de waarde-pill naar linksonder.
+       De bekeken-stip gaat naar bovenaan, net naast de verwijderknop. Niet
+       naast de pill: die is bij een bedrag van vier cijfers breed genoeg om de
+       stip te overlappen, en rechtsonder zit al de seizoenenteller. */
+    .value-badge { top: auto; bottom: 0.5rem; }
+    .watched-dot { top: 0.5rem; bottom: auto; left: 2.9rem; }
+  }
 </style>
 </head>
 <body class="font-body text-ink min-h-screen">

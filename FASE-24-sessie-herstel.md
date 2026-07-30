@@ -105,9 +105,52 @@ een stille TypeError in je console: de Google-bibliotheek is asynchroon, dus die
 callback liep altijd ná het verwijderen van de poort. Ook de iPhone-melding
 verderop is nu null-veilig.
 
+### `index.html` — de verticale prijs-pill (toevoeging 29 juli)
+
+De prijs-pill rekte zich op gsm uit over vrijwel de volledige poster. De vorige
+poging (`white-space: nowrap` in v21) loste het niet op, omdat het niet aan het
+afbreken van tekst lag.
+
+De echte oorzaak: het blok `@media (pointer: coarse)` stond **middenin** het
+stijlblok (regel 177), vóór de klassen die het moest overschrijven (regel 231 tot
+493). Bij gelijke specificiteit wint de laatste regel. Gevolg per regel:
+
+| Aanraakregel | Basisregel later? | Uitkomst |
+|---|---|---|
+| `.value-badge { top: auto; bottom: .5rem }` | `top` wél, `bottom` niet | **half toegepast**: top én bottom actief, geen hoogte → pill rekt uit over de hele poster |
+| `.chip { padding: .55rem 1rem }` | ja | deed niets — chips bleven 27 px |
+| `.letter-chip { min-width: 2.25rem }` | ja | deed niets |
+| `.delete-btn { opacity: 1; 2rem }` | ja | deed niets — verwijderknop bleef onzichtbaar op touch |
+| `.watched-dot { left: 2.9rem }` | ja | deed niets |
+| `.nav-link`, `select`, `input[type=search]` | nee | werkten wel |
+
+Het blok staat nu **onderaan** het stijlblok, met een waarschuwing erboven dat
+het daar moet blijven. Daarmee is de pill hersteld én werken de vier
+aanraakverbeteringen voor het eerst.
+
+Eén aanpassing binnen het blok: de bekeken-stip gaat nu naar bovenaan, naast de
+verwijderknop, in plaats van naast de pill. Bij een bedrag van vier cijfers is de
+pill 53 px breed en lag de stip eronder; rechtsonder zit al de seizoenenteller.
+
+Gemeten in Chromium op een viewport van 390 px met aanraakscherm:
+
+| | voor | na |
+|---|---|---|
+| hoogte prijs-pill | 254 px (94% van de poster) | **16 px** |
+| chip-hoogte | 27 px | **34 px** |
+| letterchip | 27×24 px | **36×32 px** |
+| verwijderknop | 26 px, `opacity: 0` | **32 px, zichtbaar** |
+| overlappende elementen op de poster | — | **geen**, op gsm én desktop |
+
+**Let op:** de verwijderknop op de poster is hierdoor voor het eerst zichtbaar op
+je gsm (32 px, linksboven). Dat is wat de code altijd bedoelde, maar het is wel
+nieuw gedrag. Bevalt het niet, dan is het één regel om hem op aanraakschermen
+weg te laten — in de detailmodal staat "Volledige titel verwijderen" ook.
+
 ### `sw.js`
 
-`VERSION` van `v21` naar **`v22`**.
+`VERSION` van `v21` naar **`v23`** (v22 was de sessie-herstelwijziging, v23 voegt
+de pill-fix toe — in één keer uploaden).
 
 ---
 
@@ -124,7 +167,7 @@ beheer.html
 prijzen.html
 statistieken.html
 universums.html
-sw.js                    ← VERSION = 'v22'
+sw.js                    ← VERSION = 'v23'
 ```
 
 Na het uploaden: **Ctrl+Shift+R**.
@@ -147,7 +190,10 @@ in de collectie voordat je opnieuw begint.
 | 6 | In dat scherm op "Inloggen met Google" klikken | Je logt in, de poort verdwijnt, de collectie wordt vers opgehaald. **Niet** dubbele modals of dubbele knoppen |
 | 7 | Test 5 herhalen, maar dan tijdens een lijstinvoer van ±60 | Melding "… opgeslagen, daarna gestopt: Je Google-sessie is verlopen…" met de rest nog aangevinkt |
 | 8 | Na opnieuw inloggen nogmaals op "Toevoegen aan collectie" klikken | Alleen de resterende titels worden toegevoegd, geen dubbels |
-| 9 | Op gsm: installeer/verver de PWA | Nieuwe schil wordt opgehaald dankzij `v22` |
+| 9 | Op gsm: installeer/verver de PWA | Nieuwe schil wordt opgehaald dankzij `v23` |
+| 10 | Op gsm naar de collectie kijken | De prijs-pill is een klein rond label linksonder op de poster, niet meer een verticale strook |
+| 11 | Op gsm een filterchip aanraken | Chips zijn merkbaar hoger (34 px) en makkelijker te raken dan voorheen |
+| 12 | Op gsm naar een poster kijken | Linksboven staat nu een verwijderknop van 32 px. Dit is nieuw — laat weten of je hem daar wil houden |
 
 Test 5 is de belangrijkste: dat is precies het scenario dat vandaag stukliep.
 
