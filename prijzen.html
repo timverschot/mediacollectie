@@ -162,6 +162,15 @@ var PRICE_MARKT = 'EBAY_NL,EBAY_DE,EBAY_GB';
   <script src="assets/admin.js"></script>
   <script src="assets/price-app.js"></script>
   <script>
+    // Service worker: deze pagina was de enige van de vijf zonder registratie,
+    // waardoor ze buiten de offline-schil viel en als losse pagina in de
+    // geïnstalleerde app opende.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
     document.getElementById('login-btn').addEventListener('click', driveSignIn);
     window._driveError = function (msg) {
       driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');

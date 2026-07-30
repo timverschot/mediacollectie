@@ -44,7 +44,9 @@
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
-  // Vul hier je eigen Google OAuth Client ID in (zie README, sectie Google Drive-koppeling).
+  // Vul hier je eigen Google OAuth Client ID in (zie README, §1.2 Google
+  // Drive-koppeling). Dit ID is geen geheim: de beveiliging zit in de
+  // toegestane oorsprongen die je in de Google Cloud Console instelt.
   var GOOGLE_CLIENT_ID = '819389589891-d5mkvj34v8op57r3aolehmtde8fv889p.apps.googleusercontent.com';
 </script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
@@ -632,6 +634,11 @@
         <div id="cert-chips" class="flex flex-wrap gap-2"></div>
       </div>
 
+      <div id="variant-row" class="hidden flex-wrap gap-2 items-center">
+        <span class="text-xs font-mono text-muted uppercase mr-1">Uitvoering</span>
+        <div id="variant-chips" class="flex flex-wrap gap-2"></div>
+      </div>
+
       <div id="boxset-row" class="hidden flex-wrap gap-2 items-center">
         <span class="text-xs font-mono text-muted uppercase mr-1">Boxset</span>
         <div id="boxset-chips" class="flex flex-wrap gap-2"></div>
@@ -1013,6 +1020,10 @@
           <div>
             <label>Uit welke boxset?</label>
             <input type="text" id="form-boxset" placeholder="Leeg laten als losse uitgave">
+          </div>
+          <div>
+            <label>Locatie (optioneel)</label>
+            <input type="text" id="form-location" placeholder="Bv. Kast woonkamer">
           </div>
         </div>
         <div>

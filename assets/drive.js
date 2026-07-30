@@ -5,9 +5,13 @@
  * van je eigen Google Drive: alleen deze app kan erbij, en je ziet de
  * bestanden niet tussen je normale Drive-bestanden staan.
  *
- * Hoesfoto's worden als data-URL rechtstreeks in movies.json meegestuurd
- * (dus als onderdeel van dat ene JSON-bestand) — geen aparte Drive-bestanden
- * of extra downloads nodig om ze te tonen.
+ * Hoesfoto's staan als LOSSE bestanden in diezelfde App Data-map, met de naam
+ * cover-<titel-id>-<exemplaar-id>-<voor|achter>.jpg. In movies.json staat per
+ * exemplaar alleen het Drive-bestand-ID. Zo blijft movies.json klein — dat
+ * bestand wordt bij elke wijziging volledig op- en neergehaald, en met foto's
+ * erin liep dat op tot megabytes per bewerking.
+ * (Vóór fase 2b zaten de foto's als data-URL ín movies.json; oude records
+ * worden eenmalig omgezet door driveMigrateCoversToFiles.)
  *
  * Fase 1-uitbreidingen:
  * - Export (download) van movies.json en price_history.json
@@ -129,7 +133,10 @@ function normalizeMovieEntry(m) {
         notes: m.notes || '',
         boxset: '',
         location: '',
-        steelbook: false,
+        // Alle vier de uitvoeringen meteen zetten; voorheen stond alleen
+        // steelbook hier en kwamen de andere drie pas bij de volgende
+        // normalisatieronde erbij.
+        ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
         wishlist: !!m.wishlist,
         date_added: m.date_added || '',
         custom_front_cover_id: m.custom_front_cover_id || '',
@@ -830,23 +837,94 @@ async function driveUploadCoverFile(base64Jpeg, id, side) {
 
 // Haalt een hoesfoto op en geeft een lokale blob-URL terug (met cache, zodat
 // dezelfde foto maar één keer gedownload wordt per sessie).
+/**
+ * Cache van blob-URL's per Drive-bestand-ID, met een bovengrens.
+ *
+ * Een blob-URL houdt de volledige afbeelding in het geheugen van het tabblad
+ * tot je hem expliciet vrijgeeft met URL.revokeObjectURL(). Dat gebeurde
+ * nergens: elke hoesfoto die je bekeek bleef de hele sessie staan, en die zijn
+ * tot 1200 px geresized. Op een telefoon liep dat na een half uur bladeren op
+ * tot een herstart van de browser.
+ *
+ * Daarom: hoogstens COVER_CACHE_MAX foto's tegelijk, en de langst niet
+ * gebruikte gaat eruit — inclusief revokeObjectURL, want alleen de sleutel
+ * weggooien geeft het geheugen niet terug.
+ */
+const COVER_CACHE_MAX = 24;
 const _coverUrlCache = {};
+const _coverUrlOrder = []; // oudst gebruikt eerst
+
+function _coverCacheTouch(fileId) {
+  const i = _coverUrlOrder.indexOf(fileId);
+  if (i >= 0) _coverUrlOrder.splice(i, 1);
+  _coverUrlOrder.push(fileId);
+}
+
+// Geeft één blob-URL vrij en haalt hem uit de cache. Ook los bruikbaar,
+// bijvoorbeeld nadat een foto vervangen of verwijderd is.
+function driveReleaseCoverUrl(fileId) {
+  const url = _coverUrlCache[fileId];
+  if (!url) return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    // Al vrijgegeven of niet meer geldig: niets aan de hand.
+  }
+  delete _coverUrlCache[fileId];
+  const i = _coverUrlOrder.indexOf(fileId);
+  if (i >= 0) _coverUrlOrder.splice(i, 1);
+}
+
+function _coverCacheTrim() {
+  while (_coverUrlOrder.length > COVER_CACHE_MAX) {
+    driveReleaseCoverUrl(_coverUrlOrder[0]);
+  }
+}
+
 async function driveCoverBlobUrl(fileId) {
-  if (_coverUrlCache[fileId]) return _coverUrlCache[fileId];
+  if (_coverUrlCache[fileId]) {
+    _coverCacheTouch(fileId);
+    return _coverUrlCache[fileId];
+  }
   const resp = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
   const blob = await resp.blob();
   const url = URL.createObjectURL(blob);
   _coverUrlCache[fileId] = url;
+  _coverCacheTouch(fileId);
+  _coverCacheTrim();
   return url;
 }
 
 async function driveDeleteCoverFile(fileId) {
   if (!fileId) return;
+  // Eerst de blob-URL vrijgeven: het bestand bestaat straks niet meer, dus de
+  // kopie in het geheugen hoeft er ook niet meer te zijn.
+  driveReleaseCoverUrl(fileId);
   try {
     await driveDeleteFile(fileId);
   } catch {
     // Al verwijderd of onbereikbaar: geen probleem.
   }
+}
+
+/**
+ * Verwijdert alle hoesfoto's van één exemplaar, of van een hele titel.
+ * Faalt nooit: een foto die al weg is, is precies wat we wilden.
+ */
+async function driveDeleteCoversOfEdition(edition) {
+  if (!edition) return;
+  await driveDeleteCoverFile(edition.custom_front_cover_id);
+  await driveDeleteCoverFile(edition.custom_back_cover_id);
+}
+
+async function driveDeleteCoversOfMovie(movie) {
+  if (!movie) return;
+  for (const ed of movie.editions || []) {
+    await driveDeleteCoversOfEdition(ed);
+  }
+  // Titels van vóór de exemplaren-structuur hebben de ID's op het hoofdniveau.
+  await driveDeleteCoverFile(movie.custom_front_cover_id);
+  await driveDeleteCoverFile(movie.custom_back_cover_id);
 }
 
 function _isCoverDataUrl(v) {

@@ -226,7 +226,7 @@ async function initUniversesPage() {
           editions: [
             {
               eid: 'e1',
-              format: 'bluray',
+              format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
               notes: '',
               boxset: '',
               location: '',
@@ -272,10 +272,13 @@ async function initUniversesPage() {
         editions: [
           {
             eid: 'e1',
-            format: 'bluray',
+            format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
             notes: '',
             boxset: '',
-            steelbook: false,
+            // Alle vier de uitvoeringen meteen zetten; voorheen stond alleen
+            // steelbook hier en kwamen de andere drie pas bij de volgende
+            // normalisatieronde erbij.
+            ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
             wishlist: true,
             date_added: new Date().toISOString().slice(0, 10),
             custom_front_cover_id: '',

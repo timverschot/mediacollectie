@@ -228,9 +228,15 @@ async function addTitleBulkSubmit() {
 // Bouwt één exemplaar op basis van wat er in het formulier staat.
 function addTitleBuildEdition(eid, coverIds) {
   const boxsetEl = document.getElementById('form-boxset');
+  const locationEl = document.getElementById('form-location');
   const ownedSelect = document.getElementById('form-owned');
 
+  // Alle vier de uitvoeringen zetten, ook de niet-aangevinkte. Zo is een nieuw
+  // exemplaar meteen compleet en hoeft normalizeMovieEntry niets aan te vullen.
   const variants = {};
+  if (typeof EDITION_VARIANTS !== 'undefined') {
+    EDITION_VARIANTS.forEach((v) => { variants[v.key] = false; });
+  }
   document.querySelectorAll('#form-variants .form-variant').forEach((cb) => {
     variants[cb.dataset.variant] = cb.checked;
   });
@@ -240,6 +246,9 @@ function addTitleBuildEdition(eid, coverIds) {
     format: document.getElementById('form-format').value,
     notes: document.getElementById('form-notes').value.trim(),
     boxset: boxsetEl ? boxsetEl.value.trim() : '',
+    // Waar de schijf fysiek ligt. Werd wél gelezen door het filter, de chips en
+    // de exemplarenlijst, maar door geen enkel toevoegformulier ingevuld.
+    location: locationEl ? locationEl.value.trim() : '',
     ...variants,
     wishlist: ownedSelect ? ownedSelect.value === 'wishlist' : false,
     date_added: new Date().toISOString().slice(0, 10),
@@ -591,9 +600,11 @@ async function addTitleSubmit(e) {
       backCoverId = await driveUploadCoverFile(b64, coverKey, 'back');
     }
     // De blob-cache kan nog de vorige foto onder ditzelfde bestand-ID hebben.
-    if (typeof _coverUrlCache !== 'undefined') {
-      if (frontCoverId) delete _coverUrlCache[frontCoverId];
-      if (backCoverId) delete _coverUrlCache[backCoverId];
+    // Vrijgeven, niet enkel vergeten: anders blijft de oude afbeelding in het
+    // geheugen van het tabblad staan.
+    if (typeof driveReleaseCoverUrl === 'function') {
+      if (frontCoverId) driveReleaseCoverUrl(frontCoverId);
+      if (backCoverId) driveReleaseCoverUrl(backCoverId);
     }
 
     // Seizoensdata verzamelen (enkel relevant als de seizoenkiezer zichtbaar is).

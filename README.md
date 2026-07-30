@@ -1,149 +1,210 @@
 # Mijn Mediacollectie
 
-Een persoonlijk dashboard voor je fysieke filmcollectie (DVD, Blu-ray, 4K UHD), gehost op GitHub Pages.
+Een persoonlijk dashboard voor je fysieke filmcollectie (DVD, Blu-ray, 3D
+Blu-ray, 4K UHD, Laserdisc en VHS), gehost op GitHub Pages.
+
+De website is statisch: er draait geen server. Je gegevens staan in je **eigen
+Google Drive**, in een verborgen map die alleen deze app kan zien.
+
+---
 
 ## Hoe het werkt
 
-- **`index.html`** — de live website. Leest enkel `data/movies.json` uit, doet geen live API-calls.
-- **`data/movies.json`** — je "database": één JSON-bestand met alle titels.
-- **`scripts/add_movie.py`** — lokale tool om titels toe te voegen: zoekt op TMDb, haalt metadata op, en schrijft weg naar `movies.json`.
-- **`images/`** — hoesfoto's van je fysieke exemplaren, per titel in een submap.
+| | |
+|---|---|
+| `index.html` | de collectiepagina — zoeken, filteren, bewerken |
+| `beheer.html` | titels toevoegen, instellingen, backups, import/export |
+| `prijzen.html` | prijsopvolging via eBay |
+| `statistieken.html` | cijfers en grafieken over je collectie |
+| `universums.html` | universums (MCU, Star Wars, …) via TMDb-trefwoorden |
+| `assets/` | alle JavaScript; `drive.js` is de opslaglaag, `admin.js` doet TMDb |
+| `sw.js` | service worker: maakt de site installeerbaar en offline bruikbaar |
+| `data/` | **voorbeeldbestanden**, worden door de site niet gelezen |
 
-Omdat het invoerscript alle TMDb-data al ophaalt en **cachet** in `movies.json`, heeft de live website zelf geen TMDb API-key nodig — sneller, en je key staat nergens in de browser zichtbaar.
+### Waar je gegevens staan
+
+- **Je collectie** staat als `movies.json` in de *App Data*-map van je Google
+  Drive. Die map is onzichtbaar tussen je gewone bestanden en alleen deze app
+  kan erbij. De app vraagt dan ook maar één rechtenniveau: `drive.appdata`.
+- **Hoesfoto's** staan als losse bestanden in diezelfde map, met de naam
+  `cover-<titel-id>-<exemplaar-id>-<front|back>.jpg`. In `movies.json` staat
+  alleen het bestand-ID — zo blijft dat bestand klein, en dat telt: het wordt
+  bij elke wijziging volledig op- en neergehaald.
+- **Prijsgeschiedenis** staat er als `price_history.json`, **universums** als
+  `universes.json`, en je **TMDb-key** als `config.json` — zo hoef je die maar
+  één keer in te vullen en werkt het meteen op je andere toestellen.
+- **Backups**: de app maakt wekelijks een kopie van `movies.json` in dezelfde
+  map en bewaart de laatste vier. Via Beheer kan je ook exporteren naar je pc.
+  Doe dat af en toe: een backup in dezelfde Drive-map overleeft het niet als je
+  de app-toegang in je Google-account intrekt.
+
+> `data/movies.json` en `data/price_history.json` in deze repo zijn
+> voorbeeldbestanden uit de begintijd van het project. De site leest ze niet
+> meer. Ze blijven handig als voorbeeld voor de import-knop in Beheer.
+
+---
 
 ## 1. Eenmalige set-up
 
-1. Maak een gratis TMDb-account op [themoviedb.org](https://www.themoviedb.org/) en vraag een API-key aan via Instellingen → API.
-2. Installeer Python 3 als je dat nog niet hebt.
-3. Installeer de benodigde libraries:
-   ```
-   pip install requests pillow
-   ```
-4. Kopieer `scripts/config.example.json` naar `scripts/config.json` en plak je API-key erin:
-   ```json
-   { "tmdb_api_key": "jouw-eigen-key" }
-   ```
-   Dit bestand staat in `.gitignore` en wordt dus nooit meegepusht naar GitHub.
+### 1.1 TMDb API-key
 
-## 2. Titels toevoegen via de website (aanbevolen, geen Python nodig)
+Alle filmgegevens (posters, cast, genres, seizoenen) komen van
+[The Movie Database](https://www.themoviedb.org/). Maak een gratis account en
+vraag een API-key aan via **Instellingen → API**.
 
-Naast het Python-script (zie verderop, handig voor wie toch met de terminal wil werken) heb je **`beheer.html`** — een pagina die je gewoon in je browser opent en waarmee je titels toevoegt zonder ooit een terminal te openen. Ze zoekt op TMDb (met posters) en schrijft rechtstreeks een commit naar je GitHub-repo.
+Open daarna `beheer.html` → **⚙ Instellingen**, plak je key en klik **Opslaan**.
+De key wordt bewaard in je browser én in je Drive, zodat je hem op een tweede
+toestel niet opnieuw hoeft in te vullen.
 
-**Eenmalige set-up:**
+Zonder key werkt de site wel, maar dan kan je geen titels toevoegen en vallen de
+persoonspagina's, de reeks-compleetheid en de universums weg.
 
-1. Maak een gratis TMDb-account + API-key (zie hierboven bij stap 1, punt 1 — dit heb je sowieso nodig).
-2. Maak een **GitHub Personal Access Token**:
-   - Ga naar GitHub → je profielfoto rechtsboven → **Settings** → helemaal onderaan **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
-   - Geef het een naam (bv. "mediacollectie-beheer").
-   - Bij **Repository access**: kies "Only select repositories" en selecteer je mediacollectie-repo.
-   - Bij **Permissions** → **Repository permissions** → zet **Contents** op **Read and write**.
-   - Genereer de token en **kopieer hem meteen** (je kan hem nadien niet meer terugzien).
-3. Open `beheer.html` (dubbelklikken vanuit de Verkenner volstaat, of via je gepubliceerde site) en klik op **⚙ Instellingen**. Vul in:
-   - Je TMDb API-key
-   - De GitHub-token die je net aanmaakte
-   - Je GitHub-gebruikersnaam en de naam van je repo
-   - De branch (meestal `main`)
-   
-   Klik **Test verbinding** om te controleren of alles klopt, en dan **Opslaan**.
+### 1.2 Google Drive-koppeling
 
-> **Veiligheid:** deze gegevens worden enkel lokaal in je browser bewaard (localStorage), nooit ergens anders naartoe verstuurd. Gebruik dit niet op een gedeelde/publieke computer, en deel je token nooit met iemand anders.
+Dit heb je alleen nodig als je de site zelf publiceert onder je eigen adres.
+Draai je op een reeds werkende installatie, dan hoef je hier niets te doen.
 
-**Gebruik:**
-- **Eén titel**: zoek, klik op de juiste poster, vul formaat/opmerkingen in, koppel eventueel hoesfoto's, klik "Toevoegen aan collectie". Na ongeveer een minuut staat je site bijgewerkt.
-- **Meerdere tegelijk**: ga naar het tabblad "Bulk (lijst)", plak een lijst zoals:
-  ```
-  The Matrix | 1999 | 4k
-  Spirited Away | 2001 | bluray
-  Breaking Bad | 2008 | bluray | tv
-  ```
-  en klik "Bulk toevoegen". Hoesfoto's koppel je nadien nog los per titel via het "Eén titel"-tabblad.
+1. Ga naar de [Google Cloud Console](https://console.cloud.google.com/) en maak
+   een project aan.
+2. **API's en services → Bibliotheek** → zoek **Google Drive API** → inschakelen.
+3. **API's en services → OAuth-toestemmingsscherm** → type **Extern**, vul een
+   naam en je e-mailadres in. Voeg jezelf toe als **testgebruiker**.
+4. **API's en services → Inloggegevens → Inloggegevens maken → OAuth-client-ID**
+   → type **Webapplicatie**.
+5. Bij **Geautoriseerde JavaScript-oorsprongen** zet je het adres van je site,
+   bijvoorbeeld `https://<gebruikersnaam>.github.io`. Zonder deze regel weigert
+   Google het inloggen.
+6. Kopieer het client-ID en plak het bovenaan **elk van de vijf HTML-pagina's**,
+   in de regel `var GOOGLE_CLIENT_ID = '...'`.
 
-## 4. Alternatief: titels toevoegen via Python (optioneel)
+Het client-ID is geen geheim: de beveiliging zit in de oorsprongen die je bij
+stap 5 opgeeft.
 
-Als je toch liever met de terminal werkt: `python scripts/add_movie.py` doet hetzelfde als "Eén titel" in `beheer.html`, maar dan lokaal (zie stap 1 hierboven voor de config.json-setup).
+---
 
-## 5. Grote collecties in bulk toevoegen (1000+ titels, via Python)
+## 2. Titels toevoegen
 
-Maak een CSV-bestand, bijvoorbeeld `mijn-lijst.csv`:
+### Eén titel
 
-```csv
-title,year,format,content_type,notes
-The Matrix,1999,4k,movie,Steelbook editie
-Spirited Away,2001,bluray,animation,
-Breaking Bad,2008,bluray,tv,Volledige box set
-```
+Op `index.html` klik je op **+ Titel toevoegen**, of je gebruikt het formulier op
+`beheer.html`. Zoek de titel, klik de juiste poster aan, kies formaat,
+uitvoering (steelbook, limited, extended, director's cut), eventueel boxset en
+locatie, en koppel desgewenst foto's van je eigen doosje.
 
-En voer uit:
-```
-python scripts/add_movie.py --bulk mijn-lijst.csv
-```
+Heb je de titel al, dan biedt het formulier aan om er een **extra exemplaar** bij
+te zetten — je DVD blijft dan gewoon staan naast je nieuwe 4K, elk met hun eigen
+hoesfoto's.
 
-Dit haalt automatisch de beste TMDb-match op voor elke rij. Hoesfoto's koppel je nadien per titel via de gewone interactieve modus (herhaal met dezelfde titel/jaar — het script werkt bestaande titels bij in plaats van ze te dupliceren).
+Het laatst gekozen formaat wordt onthouden; de beginwaarde is DVD.
 
-Tip: het "Bulk (lijst)"-tabblad in `beheer.html` doet nu ook een bulk-import, rechtstreeks in de browser — dat is voor de meeste mensen makkelijker dan deze CSV-route.
+### Meerdere tegelijk
 
-## 6. Publiceren op GitHub Pages
+- **Zoekresultaten aanvinken.** Vink meerdere posters aan, kies één keer formaat
+  en status, en voeg ze in één keer toe.
+- **Hele reeks.** Hoort de titel bij een TMDb-reeks (Harry Potter, Alien, …), dan
+  verschijnt er een knop om alle ontbrekende delen ineens toe te voegen.
+- **📋 Lijst invoeren** (op `index.html`). Bedoeld voor een plank of stapel: maak
+  er een foto van, laat een AI de titels van de ruggen aflezen, en plak het
+  resultaat. De app zoekt elke regel op bij TMDb, jij bevestigt per titel, en
+  alles gaat in blokken van 25 je collectie in. Titels die je al hebt worden
+  overgeslagen, zodat bestaande gegevens niet overschreven worden.
 
-1. Maak een nieuwe **privé** GitHub-repository aan.
-2. Push dit hele project (behalve `scripts/config.json`, die blijft lokaal).
-3. Ga naar **Settings → Pages** en kies je hoofdbranch als bron.
-4. Je site staat na enkele minuten live op `https://jouwgebruikersnaam.github.io/reponaam/`.
+---
 
-> **Let op — privacy:** een privérepo verbergt je broncode, maar zodra Pages actief is, is de gepubliceerde site zelf via de URL voor iedereen bereikbaar die de link kent. Er bestaat geen ingebouwde "paywall" bij statische GitHub Pages-sites. Wil je dat later echt afschermen, dan is een aparte toegangslaag nodig (bv. Cloudflare Access of een kleine serverless-functie) — dat is een uitbreiding op deze architectuur, geen herbouw.
+## 3. Publiceren op GitHub Pages
 
-## 7. Prijsevolutie volgen
+1. Push deze map naar een GitHub-repository.
+2. **Settings → Pages** → Source: **Deploy from a branch**, branch `main`, map
+   `/ (root)`.
+3. Na een minuut staat je site op
+   `https://<gebruikersnaam>.github.io/<reponaam>/`.
 
-Naast je collectie kun je een aparte **Prijzen**-tab bijhouden die de prijsevolutie toont van titels die je zelf kiest om te volgen — je hele collectie, of losse titels die je nog niet bezit (een soort verlanglijst).
+Het bestand `.nojekyll` staat er niet voor niets: het voorkomt dat GitHub de map
+door Jekyll haalt.
 
-**Belangrijk om te weten:** dit toont de range van *actieve vraagprijzen* op eBay (wat mensen er nu voor vragen), niet bevestigde verkoopprijzen — die laatste data zit achter een sterk beperkte eBay-partner-API die niet toegankelijk is voor persoonlijke projecten. Het is wel een eerlijke, gratis en legale indicatie.
+**Na elke wijziging**: verhoog `VERSION` bovenaan `sw.js` en herlaad met
+**Ctrl+Shift+R**. Doe je dat niet, dan blijft de service worker de oude versie
+uit de cache serveren en lijkt je wijziging niet aan te komen. Zie
+`WERKWIJZE.md`.
 
-**Eenmalige set-up:**
-1. Maak een gratis account op [developer.ebay.com](https://developer.ebay.com/) en maak een "Application Keyset" aan (Production). Zet `ebay_client_id` en `ebay_client_secret` in `scripts/config.json`.
-2. *(Optioneel)* Als je bol.com-affiliate/partner bent, kun je `bol_client_id` en `bol_client_secret` invullen voor een extra nieuwprijs-referentie. Dit is niet vereist — zonder deze keys wordt bol.com gewoon overgeslagen.
+---
 
-**Gebruik:**
-```
-# Ververs de prijzen van je hele collectie + gevolgde extra titels
-python scripts/price_tracker.py --refresh
+## 4. Op je telefoon
 
-# Voeg een titel toe die je nog niet bezit, enkel om de prijs te volgen
-python scripts/price_tracker.py --track "Blade Runner" --year 1982 --format 4k
-```
+De site is een PWA: open hem in je browser en kies **Toevoegen aan
+beginscherm**. Hij opent dan als een app, en de laatst geladen collectie blijft
+zichtbaar zonder verbinding (wijzigen kan dan niet).
 
-Draai `--refresh` regelmatig (bv. maandelijks) — elke keer komt er een nieuw datapunt bij in `data/price_history.json`, waardoor de trendlijn op de Prijzen-pagina opbouwt.
+> **iPhone:** installeer hem vanuit **Safari**. Inloggen bij Google werkt niet
+> vanuit een schermvullend geïnstalleerde app die van vóór deze aanpassing
+> dateert; verwijder dat pictogram, open de site opnieuw in Safari en zet hem
+> daar opnieuw op je beginscherm.
 
-> Dit toont dus enkel prijzen voor titels die je zelf laat volgen, niet elke fysieke release die ooit bestaan heeft — zo'n allesomvattende prijsgids zou een compleet eigen database-project zijn, vergelijkbaar met het herbouwen van Blu-ray.com, en is geen realistische uitbreiding van dit dashboard.
+---
 
-## 8. Later uitbreiden: een tweede verzameling (bv. strips)
+## 5. Prijsopvolging
 
-`assets/app.js` is bewust generiek geschreven. Voor een tweede pagina (bv. `strips.html`) volstaat het om:
-1. Een `data/strips.json` aan te maken met hetzelfde soort schema.
-2. `strips.html` te kopiëren van `index.html` en de labels/filters aan te passen (bv. "Uitgeverij" in plaats van "Regisseur").
-3. Onderaan `initCollectionApp({ dataUrl: 'data/strips.json' })` te zetten.
+`prijzen.html` haalt richtprijzen op bij eBay via een eigen **Cloudflare
+Worker** — een klein doorgeefluik dat je eBay-sleutels buiten de browser houdt.
+De Worker-URL staat bovenaan `prijzen.html`.
 
-Geen herbouw van de motor nodig.
+Per gevolgd exemplaar wordt de mediaan bewaard, met eerste en derde kwartiel als
+bandbreedte, over meerdere markten (NL, DE, UK). Series worden per seizoen
+gevolgd zodra je seizoenen registreert. Op `statistieken.html` staat een
+verzekeringsoverzicht dat je kan exporteren als CSV of afdrukken.
+
+> Zet **rate limiting** op je Worker-route in Cloudflare. De URL staat in een
+> publieke pagina, dus wie hem kent kan hem aanroepen en je eBay-quota
+> opgebruiken.
+
+---
+
+## 6. De Python-scripts
+
+`scripts/add_movie.py` en `scripts/price_tracker.py` komen uit de begintijd, toen
+de collectie nog als `data/movies.json` in deze repo stond. **Ze zijn niet meer
+in gebruik**: ze schrijven naar een bestand dat de site niet leest, in een ouder
+gegevensformaat zonder exemplaren. Gebruik ze niet zonder ze eerst bij te werken.
+
+Ze staan er nog omdat de eBay-aanroepen erin een bruikbaar voorbeeld zijn. Maak
+je er tóch gebruik van, kopieer dan `scripts/config.example.json` naar
+`scripts/config.json` en vul je sleutels in — dat bestand staat in `.gitignore`
+en komt dus nooit in de repo terecht.
+
+---
+
+## 7. Documentatie in deze repo
+
+| Bestand | Inhoud |
+|---|---|
+| `WERKWIJZE.md` | vaste afspraken: versie ophogen, commit-berichten, waar wat staat |
+| `FASE-24-…`, `FASE-25-…`, `FASE-26-…` | per wijziging: wat er mis was, wat er veranderde, uploadlijst, testchecklist |
+| `ANALYSE-2026-07-29.md` | volledige doorlichting op gebruiksgemak, volledigheid, veiligheid en correctheid |
+
+---
 
 ## Mappenstructuur
 
 ```
-.
-├── index.html
-├── prijzen.html
-├── beheer.html
-├── assets/
-│   ├── app.js
-│   ├── price-app.js
-│   └── admin.js
-├── data/
-│   ├── movies.json
-│   └── price_history.json
-├── images/
-│   └── <titel-slug>/
-│       ├── front.jpg
-│       └── back.jpg
-├── scripts/
-│   ├── add_movie.py
-│   ├── price_tracker.py
-│   └── config.example.json   (kopieer naar config.json, niet naar Git pushen)
-└── .gitignore
+index.html              collectiepagina
+beheer.html             toevoegen, instellingen, backups
+prijzen.html            prijsopvolging
+statistieken.html       cijfers en grafieken
+universums.html         universums via TMDb-trefwoorden
+manifest.json           PWA-manifest
+sw.js                   service worker (versie ophogen bij elke wijziging!)
+.nojekyll               laat GitHub Pages de bestanden ongemoeid
+assets/
+  app.js                de collectiepagina
+  drive.js              Google Drive + het gedeelde gegevensmodel
+  admin.js              TMDb-aanroepen en configuratie
+  add-title.js          toevoegformulier
+  bulk-import.js        lijstinvoer in drie stappen
+  price-app.js          prijzenpagina
+  stats.js              statistiekenpagina
+  universes.js          universum-logica
+  universes-page.js     universumpagina
+  icons/                app-pictogrammen
+data/                   voorbeeldbestanden (niet gebruikt door de site)
+scripts/                oude Python-scripts (niet meer in gebruik)
 ```

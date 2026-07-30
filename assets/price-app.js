@@ -202,10 +202,38 @@ function initPriceTracker() {
               ${entry.owned ? '<span class="chip chip-active shrink-0 !text-[10px] !py-0.5">In collectie</span>' : '<span class="chip shrink-0 !text-[10px] !py-0.5">Verlanglijst</span>'}
             </div>
             ${priceBlock}
+            ${
+              // Wat je in je collectie hebt, wordt bij elke verversing sowieso
+              // opnieuw gevolgd; die stopzetten heeft geen zin. Losse
+              // verlanglijst-titels kan je hier wél uit de tracker halen.
+              entry.owned
+                ? ''
+                : `<button type="button" class="mt-2 text-[11px] text-muted hover:text-red-400 underline font-mono"
+                     data-untrack="${esc(entry.id)}" data-untrack-label="${esc(entry.label || entry.title)}">niet meer volgen</button>`
+            }
           </div>
         </div>
       `;
     }).join('');
+
+    els.grid.querySelectorAll('[data-untrack]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.untrack;
+        const label = btn.dataset.untrackLabel;
+        if (!confirm(`"${label}" niet meer volgen?\n\nDe prijsgeschiedenis van deze titel wordt verwijderd. Je collectie zelf verandert niet.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'bezig…';
+        try {
+          await priceUntrackTitle(id);
+          state.all = state.all.filter((e) => e.id !== id);
+          render();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'niet meer volgen';
+          alert('Stopzetten mislukt: ' + err.message);
+        }
+      });
+    });
   }
 }
 
@@ -757,22 +785,32 @@ ${
 async function priceTrackNewTitle(details, format) {
   // Sleutel bevat het formaat, zodat je dezelfde film op DVD en 4K apart
   // kunt volgen.
-  const slug = slugify(details.title, details.release_year) + '|' + (format || 'bluray');
-  const { prices } = await driveLoadPrices();
-  if (prices.some((p) => p.id === slug)) return { status: 'bestaat', id: slug, title: details.title };
+  const gekozenFormaat =
+    format || (typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd');
+  const slug = slugify(details.title, details.release_year) + '|' + gekozenFormaat;
 
-  prices.push({
-    id: slug,
-    movie_id: slugify(details.title, details.release_year),
-    title: details.title,
-    release_year: details.release_year,
-    poster_path: details.poster_path || '',
-    format: format || 'bluray',
-    owned: false,
-    history: [],
+  // Lezen én schrijven binnen dezelfde vergrendeling, zodat een verversing die
+  // op dit moment loopt geen metingen verliest.
+  let status = 'toegevoegd';
+  await withWriteLock(async () => {
+    const { prices } = await driveLoadPrices();
+    if (prices.some((p) => p.id === slug)) {
+      status = 'bestaat';
+      return;
+    }
+    prices.push({
+      id: slug,
+      movie_id: slugify(details.title, details.release_year),
+      title: details.title,
+      release_year: details.release_year,
+      poster_path: details.poster_path || '',
+      format: gekozenFormaat,
+      owned: false,
+      history: [],
+    });
+    await driveSaveNamedFile('price_history.json', prices);
   });
-  await withWriteLock(() => driveSaveNamedFile('price_history.json', prices));
-  return { status: 'toegevoegd', id: slug, title: details.title };
+  return { status, id: slug, title: details.title };
 }
 
 /**
@@ -781,7 +819,11 @@ async function priceTrackNewTitle(details, format) {
  * volgende verversing automatisch terug).
  */
 async function priceUntrackTitle(id) {
-  const { prices } = await driveLoadPrices();
-  const filtered = prices.filter((p) => p.id !== id);
-  await withWriteLock(() => driveSaveNamedFile('price_history.json', filtered));
+  // Herlezen bínnen de vergrendeling: tussen het lezen en het schrijven kan er
+  // op een ander toestel een meting bijgekomen zijn, en die mag niet sneuvelen
+  // omdat jij hier één regel weghaalt.
+  await withWriteLock(async () => {
+    const { prices } = await driveLoadPrices();
+    await driveSaveNamedFile('price_history.json', prices.filter((p) => p.id !== id));
+  });
 }

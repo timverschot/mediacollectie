@@ -175,6 +175,36 @@
 
       <div id="search-results" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6"></div>
 
+      <!-- Meerdere zoekresultaten tegelijk toevoegen. Deze balk ontbrak hier,
+           terwijl add-title.js wél bij elk resultaat een selectievakje toont:
+           je kon aanvinken, de kaart lichtte op, en er verscheen nooit een knop
+           om er iets mee te doen. -->
+      <div id="bulk-add-bar" class="hidden bg-surface rounded-lg p-4 mb-6 space-y-3">
+        <p class="text-sm"><span id="bulk-add-count" class="text-gold font-semibold"></span> geselecteerd — ze krijgen allemaal dezelfde instellingen:</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label>Formaat</label>
+            <select id="bulk-format"></select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="bulk-owned">
+              <option value="owned" selected>In bezit</option>
+              <option value="wishlist">Verlanglijst</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label>Uit welke boxset? (optioneel)</label>
+          <input type="text" id="bulk-boxset" placeholder="Bv. Ace Ventura Collection">
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button type="button" id="bulk-add-btn" class="btn btn-primary">Alle geselecteerde toevoegen</button>
+          <button type="button" id="bulk-clear-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Selectie wissen</button>
+        </div>
+        <p id="bulk-add-status" class="text-sm font-mono"></p>
+      </div>
+
       <form id="add-form" class="hidden bg-surface rounded-lg p-6 space-y-4">
         <div class="flex gap-4">
           <img id="form-poster" class="w-24 rounded shrink-0" alt="">
@@ -222,9 +252,30 @@
           <div id="seasons-list" class="bg-bg rounded-md p-3 space-y-0.5 max-h-64 overflow-y-auto"></div>
         </div>
 
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label>Opmerkingen</label>
+            <input type="text" id="form-notes" placeholder="Bv. met slipcover">
+          </div>
+          <div>
+            <label>Uit welke boxset?</label>
+            <input type="text" id="form-boxset" placeholder="Leeg laten als losse uitgave">
+          </div>
+          <div>
+            <label>Locatie (optioneel)</label>
+            <input type="text" id="form-location" placeholder="Bv. Kast woonkamer">
+          </div>
+        </div>
+
         <div>
-          <label>Opmerkingen</label>
-          <input type="text" id="form-notes" placeholder="Bv. Steelbook editie">
+          <label>Uitvoering</label>
+          <div id="form-variants" class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
+        </div>
+
+        <div id="saga-bulk" class="hidden bg-bg rounded-md p-3 text-sm">
+          <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>
+          <button type="button" id="saga-bulk-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Alle delen van deze reeks toevoegen</button>
+          <p id="saga-bulk-status" class="text-xs font-mono mt-2"></p>
         </div>
 
         <div class="grid sm:grid-cols-2 gap-4">

@@ -113,6 +113,7 @@ function initCollectionApp(config) {
     activeWatched: new Set(),  // 'watched' / 'unwatched'
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
+    activeVariants: new Set(), // uitvoeringen: steelbook, limited, extended, directors
     activeBoxsets: new Set(),  // namen van boxsets
     activeLocations: new Set(), // waar de schijf fysiek ligt
     activeUniverses: new Set(), // universum-id's (bv. MCU)
@@ -136,6 +137,8 @@ function initCollectionApp(config) {
     decadeChips: document.getElementById('decade-chips'),
     certChips: document.getElementById('cert-chips'),
     certRow: document.getElementById('cert-row'),
+    variantChips: document.getElementById('variant-chips'),
+    variantRow: document.getElementById('variant-row'),
     boxsetChips: document.getElementById('boxset-chips'),
     boxsetRow: document.getElementById('boxset-row'),
     locationChips: document.getElementById('location-chips'),
@@ -515,6 +518,51 @@ function initCollectionApp(config) {
     });
   }
 
+  /**
+   * Chips voor de uitvoeringen (steelbook, limited, extended, director's cut).
+   * Alleen de uitvoeringen die je écht bezit krijgen een chip — een lege rij
+   * met vier knoppen die allemaal nul resultaten geven helpt niemand.
+   */
+  function buildVariantChips(data) {
+    if (!els.variantChips || typeof EDITION_VARIANTS === 'undefined') return;
+    const counts = {};
+    data.forEach((item) => {
+      const keys = new Set();
+      (item.editions || []).forEach((e) => {
+        if (e.wishlist) return;
+        editionVariantKeys(e).forEach((k) => keys.add(k));
+      });
+      keys.forEach((k) => { counts[k] = (counts[k] || 0) + 1; });
+    });
+    // Vaste volgorde uit EDITION_VARIANTS, niet alfabetisch: zo staan
+    // verpakking en inhoud altijd op dezelfde plek.
+    const aanwezig = EDITION_VARIANTS.filter((v) => counts[v.key]);
+
+    if (els.variantRow) {
+      els.variantRow.classList.toggle('hidden', aanwezig.length === 0);
+      if (aanwezig.length) els.variantRow.classList.add('flex');
+    }
+
+    els.variantChips.innerHTML = '';
+    aanwezig.forEach((v) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (state.activeVariants.has(v.key) ? ' chip-active' : '');
+      chip.textContent = v.label;
+      chip.title = `${counts[v.key]} titel(s)`;
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeVariants, v.key);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+      els.variantChips.appendChild(chip);
+    });
+
+    [...state.activeVariants].forEach((k) => {
+      if (!counts[k]) state.activeVariants.delete(k);
+    });
+  }
+
   function buildBoxsetChips(data) {
     buildEditionFieldChips(data, 'boxset', state.activeBoxsets, els.boxsetChips, els.boxsetRow);
   }
@@ -567,6 +615,7 @@ function initCollectionApp(config) {
     buildGenreChips(data);
     buildDecadeChips(data);
     buildCertChips(data);
+    buildVariantChips(data);
     buildBoxsetChips(data);
     buildLocationChips(data);
     // Universumchips hangen af van live TMDb-data die apart geladen wordt.
@@ -620,6 +669,7 @@ function initCollectionApp(config) {
       s(state.activeWatched),
       s(state.activeDecades),
       s(state.activeCerts),
+      s(state.activeVariants),
       s(state.activeBoxsets),
       s(state.activeLocations),
       s(state.activeUniverses),
@@ -643,6 +693,15 @@ function initCollectionApp(config) {
         if (!inTitle && !inOriginal && !inCast && !inDirector && !inWriters && !inSaga) return false;
       }
       if (state.activeFormats.size && !allFormats(item).some((f) => state.activeFormats.has(f))) return false;
+      if (state.activeVariants.size) {
+        // Een titel telt mee zodra één van je exemplaren de gevraagde uitvoering
+        // heeft. Verlanglijst-exemplaren tellen niet mee: het filter gaat over
+        // wat er in je kast staat.
+        const heeft = (item.editions || []).some(
+          (e) => !e.wishlist && [...state.activeVariants].some((k) => e[k])
+        );
+        if (!heeft) return false;
+      }
       if (state.activeBoxsets.size) {
         const boxes = (item.editions || []).map((e) => (e.boxset || '').trim()).filter(Boolean);
         if (!boxes.some((b) => state.activeBoxsets.has(b))) return false;
@@ -1096,7 +1155,14 @@ function initCollectionApp(config) {
     if (!els.modal.classList.contains('hidden')) closeModal();
 
     backgroundSave(
-      () => deleteMovieInDrive(id),
+      // Hoesfoto's pas opruimen nádat movies.json is weggeschreven. Mislukt dat,
+      // dan draaien we de verwijdering terug en moeten de foto's er nog zijn.
+      () =>
+        deleteMovieInDrive(id).then(async () => {
+          if (removed && typeof driveDeleteCoversOfMovie === 'function') {
+            await driveDeleteCoversOfMovie(removed);
+          }
+        }),
       () => { if (removed) state.all.splice(Math.min(idx, state.all.length), 0, removed); }
     );
   }
@@ -2073,6 +2139,7 @@ function initCollectionApp(config) {
       state.activeWatched.size +
       state.activeDecades.size +
       state.activeCerts.size +
+      state.activeVariants.size +
       state.activeBoxsets.size +
       state.activeLocations.size +
       state.activeUniverses.size +
@@ -2108,6 +2175,7 @@ function initCollectionApp(config) {
     state.activeWatched.clear();
     state.activeDecades.clear();
     state.activeCerts.clear();
+    state.activeVariants.clear();
     state.activeBoxsets.clear();
     state.activeLocations.clear();
     state.activeUniverses.clear();
@@ -2931,13 +2999,23 @@ function initCollectionApp(config) {
 
   function handleAddEdition(item) {
     const used = new Set((item.editions || []).map((e) => e.format));
-    const next = MEDIA_FORMATS.map((f) => f.value).find((v) => !used.has(v)) || 'bluray';
+    // Eerst je onthouden voorkeursformaat proberen (standaard DVD); heb je dat
+    // al van deze titel, dan het eerste formaat dat je nog niet hebt. Voorheen
+    // begon dit altijd bovenaan de lijst, dus kreeg je 4K aangeboden terwijl je
+    // net een Blu-ray gekocht had.
+    const voorkeur = typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd';
+    const next = !used.has(voorkeur)
+      ? voorkeur
+      : MEDIA_FORMATS.map((f) => f.value).find((v) => !used.has(v)) || voorkeur;
     const edition = {
       eid: nextEditionId(item),
       format: next,
       notes: '',
       boxset: '',
-      steelbook: false,
+      // Alle vier de uitvoeringen meteen zetten; voorheen stond alleen
+      // steelbook hier en kwamen de andere drie pas bij de volgende
+      // normalisatieronde erbij.
+      ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
       wishlist: false,
       date_added: new Date().toISOString().slice(0, 10),
       custom_front_cover_id: '',
@@ -2984,7 +3062,14 @@ function initCollectionApp(config) {
     openModal(item.id);
 
     backgroundSave(
-      () => upsertMovieInDrive(item),
+      // Ook hier: de foto's van dit exemplaar pas weg als het wegschrijven
+      // gelukt is, anders blijven ze bestaan bij een terugdraaiing.
+      () =>
+        upsertMovieInDrive(item).then(async () => {
+          if (typeof driveDeleteCoversOfEdition === 'function') {
+            await driveDeleteCoversOfEdition(target);
+          }
+        }),
       () => {
         item.editions = snapshot;
         syncLegacyFieldsFromEditions(item);
@@ -3486,7 +3571,9 @@ function initCollectionApp(config) {
           editions: [
             {
               eid: 'e1',
-              format: 'bluray',
+              // Jouw onthouden voorkeursformaat (standaard DVD), niet
+              // hardgecodeerd Blu-ray.
+              format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
               notes: '',
               boxset: '',
               location: '',
@@ -3543,21 +3630,37 @@ function initCollectionApp(config) {
     btn.textContent = 'bezig…';
     try {
       const details = await tmdbDetails(part.tmdb_id, 'movie', c.tmdbKey);
+      const vandaag = new Date().toISOString().slice(0, 10);
+      // Mét editions[] en genormaliseerd, net als elke andere plek waar een
+      // titel ontstaat. Voorheen bouwde deze knop een titel op de oude manier
+      // (formaat en notities op titelniveau, geen exemplaren). Zolang je de
+      // pagina niet herlaadde, vond het formaatfilter die titel niet, bleef
+      // "Mijn exemplaren" leeg, en gaf activeEdition() null — waardoor de
+      // Opslaan-knop van het bewerkpaneel permanent grijs bleef.
       const entry = {
         id: slugify(details.title, details.release_year),
         content_type: 'movie',
-        format: 'bluray',
-        wishlist: true,
         watched: false,
-        notes: '',
-        date_added: new Date().toISOString().slice(0, 10),
-        custom_front_cover_id: '',
-        custom_back_cover_id: '',
-        custom_front_cover: '',
-        custom_back_cover: '',
+        date_added: vandaag,
+        editions: [
+          {
+            eid: 'e1',
+            format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+            notes: '',
+            boxset: '',
+            location: '',
+            wishlist: true,
+            date_added: vandaag,
+            custom_front_cover_id: '',
+            custom_back_cover_id: '',
+            custom_front_cover: '',
+            custom_back_cover: '',
+          },
+        ],
         ...details,
         seasons: [],
       };
+      normalizeMovieEntry(entry);
 
       if (state.all.some((m) => m.id === entry.id)) {
         btn.textContent = 'stond er al';
@@ -3983,10 +4086,20 @@ function initCollectionApp(config) {
     const m = els.modal;
     const saveBtn = m.querySelector('[data-edit-save]');
     const status = m.querySelector('[data-edit-status]');
-    saveBtn.disabled = true;
 
+    // Eerst controleren, dán pas de knop uitschakelen. Stond dit andersom, dan
+    // liet een vroegtijdige return de knop permanent grijs achter — de
+    // finally-tak verderop werd immers nooit bereikt. Enige uitweg was de
+    // pop-up sluiten en opnieuw openen, zonder één woord uitleg.
     const ed = activeEdition(item);
-    if (!ed) return;
+    if (!ed) {
+      if (status) {
+        status.textContent = 'Geen exemplaar gevonden om te bewerken. Herlaad de pagina en probeer opnieuw.';
+        status.className = 'text-sm font-mono text-red-400';
+      }
+      return;
+    }
+    saveBtn.disabled = true;
 
     const previous = {
       content_type: item.content_type,
@@ -4009,7 +4122,7 @@ function initCollectionApp(config) {
         status.className = 'text-sm font-mono text-muted';
         ed.custom_front_cover_id = await driveUploadCoverFile(await resizeImageFile(frontFile, 1200), coverKey, 'front');
         ed.custom_front_cover = '';
-        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[ed.custom_front_cover_id];
+        if (typeof driveReleaseCoverUrl === 'function') driveReleaseCoverUrl(ed.custom_front_cover_id);
       } else if (m.querySelector('[data-edit-remove-front]').checked) {
         await driveDeleteCoverFile(ed.custom_front_cover_id);
         ed.custom_front_cover_id = '';
@@ -4020,7 +4133,7 @@ function initCollectionApp(config) {
         status.className = 'text-sm font-mono text-muted';
         ed.custom_back_cover_id = await driveUploadCoverFile(await resizeImageFile(backFile, 1200), coverKey, 'back');
         ed.custom_back_cover = '';
-        if (typeof _coverUrlCache !== 'undefined') delete _coverUrlCache[ed.custom_back_cover_id];
+        if (typeof driveReleaseCoverUrl === 'function') driveReleaseCoverUrl(ed.custom_back_cover_id);
       } else if (m.querySelector('[data-edit-remove-back]').checked) {
         await driveDeleteCoverFile(ed.custom_back_cover_id);
         ed.custom_back_cover_id = '';
