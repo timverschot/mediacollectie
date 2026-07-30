@@ -1,1 +1,17 @@
+# Opruimmap: hier belanden bestanden die niet rechtstreeks verwijderd konden
+# worden (bv. een achtergebleven .git/index.lock). Hoort nooit in de repo.
 /_to_delete
+
+# Sleutels van de Python-scripts: TMDb, eBay en bol.com.
+# scripts/config.example.json blijft wél in de repo — dat is de lege versie
+# die je kopieert naar scripts/config.json en zelf invult.
+/scripts/config.json
+
+# Rommel van Windows, macOS en editors
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
