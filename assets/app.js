@@ -23,6 +23,48 @@ const SEASON_POSTER_BASE = 'https://image.tmdb.org/t/p/w185'; // seizoencover in
 const EPISODE_STILL_BASE = 'https://image.tmdb.org/t/p/w300'; // aflevering-still (grotere weergave)
 const PAGE_SIZE = 60;
 
+// FASE 29 — posters op maat.
+//
+// Tot nu toe kreeg elke poster de w500-versie, ongeacht hoe groot hij op het
+// scherm getekend werd. Op gsm is een posterhokje ongeveer 175 px breed; zelfs
+// op een scherm met dubbele pixeldichtheid is w342 dan ruim genoeg en w185
+// vaak al voldoende. Met een srcset kiest de browser zélf de kleinste versie
+// die scherp genoeg is — dat scheelt mobiele data en geheugen, want een
+// gedecodeerde afbeelding kost geheugen naar rato van zijn píxels, niet zijn
+// bestandsgrootte. 60 posters van w500 in plaats van w185 is ruim 7× zoveel
+// beeldgeheugen.
+const POSTER_WIDTHS = [185, 342, 500];
+
+/** srcset-regel voor een TMDb-posterpad, of '' als er geen pad is. */
+function posterSrcsetFor(path) {
+  if (!path) return '';
+  return POSTER_WIDTHS.map((w) => `https://image.tmdb.org/t/p/w${w}${path} ${w}w`).join(', ');
+}
+
+// Hoe breed een posterhokje ongeveer is per schermbreedte. Volgt de
+// kolomindeling van het raster (2 → 3 → 4 → 6 → 7 → 9 kolommen). Bij
+// benadering: de browser hoeft dit niet exact te weten, alleen goed genoeg om
+// niet onnodig groot te kiezen.
+//
+// De laatste waarde (voor schermen onder 640 px) is bewust kleiner dan de
+// werkelijke 45vw. De browser vermenigvuldigt `sizes` met de pixeldichtheid van
+// het scherm, en moderne telefoons zitten op 2 tot 3. Met de eerlijke 45vw komt
+// zo'n toestel altijd op de zwaarste variant uit — precies wat we hier willen
+// vermijden. Met 25vw plafonneert het op w342: op een posterhokje van ±175 px
+// is dat nog steeds bijna dubbele dichtheid, en dat zie je niet, maar de helft
+// minder data en beeldgeheugen merk je wel.
+const GRID_POSTER_SIZES =
+  '(min-width: 1536px) 11vw, (min-width: 1280px) 13vw, (min-width: 1024px) 15vw, ' +
+  '(min-width: 768px) 23vw, (min-width: 640px) 30vw, 25vw';
+
+// Aanraakscherm zonder muisaanwijzer. Bepaalt of we de snelblik-overlay
+// überhaupt in de HTML zetten (die is daar toch onzichtbaar) en hoe zwaar de
+// sfeerachtergrond mag zijn.
+const IS_TOUCH =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(hover: none)').matches;
+
 // Weergavekeuze onthouden tussen bezoeken.
 const VIEW_STORAGE_KEY = 'mediacollectie_view';
 const VALID_VIEWS = ['grid', 'shelf', 'compact', 'text'];
@@ -81,6 +123,23 @@ function checkAssetVersions() {
   }
   return missing;
 }
+
+// De container krijgt per weergave andere opmaak: een raster voor posters,
+// een verticale lijst voor de andere twee.
+// Meer kolommen naarmate het scherm breder wordt — op een breedbeeldscherm
+// stond er anders een smalle strook posters met veel lege ruimte ernaast.
+// De tekst- en compacte lijst krijgen kolommen in plaats van één lange rij,
+// want een titel van 30 tekens over 1800 pixels uitsmeren leest slecht.
+//
+// Staat bewust buiten initCollectionApp: de laadtoestand (showGridSkeleton)
+// wordt meteen bij het opstarten getekend, nog vóór dit punt in de functie
+// bereikt zou zijn. Als const daarbinnen gaf dat "Cannot access
+// VIEW_CONTAINER_CLASSES before initialization" — een lege pagina dus.
+const VIEW_CONTAINER_CLASSES = {
+  grid: 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-9 gap-x-5 gap-y-8',
+  compact: 'grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-x-8',
+  text: 'grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-x-8',
+};
 
 function initCollectionApp(config) {
   const outdated = checkAssetVersions();
@@ -245,6 +304,21 @@ function initCollectionApp(config) {
     return path ? POSTER_BASE + path : '';
   }
 
+  /** srcset voor de poster van een titel (leeg als er geen poster is). */
+  function posterSrcset(item) {
+    return posterSrcsetFor(item.custom_poster_path || item.poster_path);
+  }
+
+  /**
+   * Bouwt de srcset- en sizes-attributen als tekst, klaar om in een <img> te
+   * zetten. Zonder srcset (geen posterpad) geeft het een lege tekst terug,
+   * zodat de img gewoon op zijn src terugvalt.
+   */
+  function posterSizingAttrs(item, sizes) {
+    const set = posterSrcset(item);
+    return set ? ` srcset="${escapeAttr(set)}" sizes="${escapeAttr(sizes)}"` : '';
+  }
+
   function backdropUrl(item) {
     return item.backdrop_path ? BACKDROP_BASE + item.backdrop_path : '';
   }
@@ -352,6 +426,12 @@ function initCollectionApp(config) {
     });
   }
   window.__collectionReload = reload;
+
+  // Klik-, toets- en sfeerlichtafhandeling één keer op het raster zetten, vóór
+  // de eerste keer tekenen. Daarna hoeft geen enkele herteken-beurt nog
+  // handlers te koppelen.
+  wireGridInteractions();
+  showGridSkeleton();
 
   reload().catch((err) => {
     els.grid.innerHTML =
@@ -850,18 +930,6 @@ function initCollectionApp(config) {
     return units.map((u) => (u.type === 'group' && u.items.length === 1 ? { type: 'item', item: u.items[0] } : u));
   }
 
-  // De container krijgt per weergave andere opmaak: een raster voor posters,
-  // een verticale lijst voor de andere twee.
-  // Meer kolommen naarmate het scherm breder wordt — op een breedbeeldscherm
-  // stond er anders een smalle strook posters met veel lege ruimte ernaast.
-  // De tekst- en compacte lijst krijgen kolommen in plaats van één lange rij,
-  // want een titel van 30 tekens over 1800 pixels uitsmeren leest slecht.
-  const VIEW_CONTAINER_CLASSES = {
-    grid: 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-9 gap-x-5 gap-y-8',
-    compact: 'grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-x-8',
-    text: 'grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-x-8',
-  };
-
   function applyViewClasses() {
     els.grid.className = VIEW_CONTAINER_CLASSES[state.view] || VIEW_CONTAINER_CLASSES.grid;
     if (els.viewChips) {
@@ -871,9 +939,34 @@ function initCollectionApp(config) {
     }
   }
 
+  /**
+   * Laadtoestand (FASE 29).
+   *
+   * Tussen inloggen en het binnenkomen van je collectie stond er niets: een
+   * lege pagina die niet te onderscheiden is van "je hebt nog geen titels", of
+   * van een app die vastloopt. Nu staan er grijze posterhokjes in de vorm van
+   * het uiteindelijke raster, zodat je ziet dat er iets onderweg is. Ze worden
+   * bij de eerste echte render vanzelf overschreven.
+   */
+  function showGridSkeleton() {
+    if (!els.grid || state.all.length) return;
+    applyViewClasses();
+    const isRaster = state.view === 'grid' || state.view === 'shelf';
+    const n = isRaster ? 12 : 8;
+    const kaart = isRaster
+      ? '<div class="skel-card"><div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26]"><div class="poster-skel"></div></div><div class="skel-line mt-2"></div></div>'
+      : '<div class="skel-card flex items-center gap-3 py-2"><div class="skel-line !w-8 !h-12 shrink-0"></div><div class="skel-line flex-1"></div></div>';
+    els.grid.innerHTML = kaart.repeat(n);
+    if (els.count) els.count.textContent = 'Collectie laden…';
+    if (els.empty) els.empty.classList.add('hidden');
+    if (els.loadMore) els.loadMore.classList.add('hidden');
+  }
+
   // Kaarten getrapt laten verschijnen na het bouwen van het raster.
+  // Alleen kaarten die nog niet 'in' zijn: na "Toon meer" verschijnen zo enkel
+  // de nieuwe kaarten, in plaats van dat de hele lijst opnieuw invliegt.
   function runReveal() {
-    const cards = els.grid.querySelectorAll('.reveal');
+    const cards = els.grid.querySelectorAll('.reveal:not(.in)');
     cards.forEach((c, i) => {
       // Cap de vertraging zodat een grote lijst niet traag oogt.
       c.style.transitionDelay = Math.min(i, 24) * 28 + 'ms';
@@ -881,21 +974,167 @@ function initCollectionApp(config) {
     });
   }
 
-  // Sfeerlicht koppelen aan de kaarten van de huidige weergave: bij hover toont
-  // de achtergrond de vervaagde poster van die titel. Voor een reeks (groep)
-  // pakken we de poster van het eerste deel.
+  // ---------- Sfeerlicht koppelen (FASE 29) ----------
+  //
+  // Vroeger kreeg élke kaart een eigen mouseenter-handler, opnieuw bij elke
+  // herteken-beurt. In de tekstweergave zijn dat 400 handlers die telkens weer
+  // opgebouwd worden. Nu hangt er één handler op het raster; welke kaart het
+  // betreft leiden we af uit het doelelement. Dat scheelt geheugen én maakt
+  // "Toon meer" mogelijk zonder opnieuw te koppelen.
+
+  function ambientItemFor(el) {
+    const openId = el.dataset.openId;
+    const groupKey = el.dataset.openGroup;
+    if (openId) return state.all.find((m) => m.id === openId) || null;
+    if (groupKey) return state.all.find((m) => sagaOf(m) === groupKey) || null;
+    return null;
+  }
+
   function wireAmbient(container) {
-    container.querySelectorAll('[data-accent-id]').forEach((el) => {
-      el.addEventListener('mouseenter', () => {
-        const openId = el.dataset.openId;
-        const groupKey = el.dataset.openGroup;
-        let item = null;
-        if (openId) item = state.all.find((m) => m.id === openId);
-        else if (groupKey) item = state.all.find((m) => sagaOf(m) === groupKey) || null;
-        setAmbient(item, false, groupKey || el.dataset.accentId);
-      });
+    // mouseover bubbelt (mouseenter niet), dus één handler volstaat.
+    container.addEventListener('mouseover', (e) => {
+      const el = e.target.closest && e.target.closest('[data-accent-id]');
+      if (!el || !container.contains(el)) return;
+      setAmbient(ambientItemFor(el), false, el.dataset.openGroup || el.dataset.accentId);
     });
     container.addEventListener('mouseleave', clearAmbient);
+  }
+
+  // Op een aanraakscherm bestaat hover niet, dus bleef de achtergrond daar
+  // altijd zwart. Nu volgt hij wat je bekijkt: na het scrollen pakken we de
+  // kaart die bovenaan in beeld staat. Bewust ná het scrollen (en niet tijdens)
+  // en met één peiling in plaats van een waarnemer per kaart — scrollen op gsm
+  // moet vloeiend blijven.
+  let touchAmbientTimer = null;
+  function wireTouchAmbient() {
+    if (!IS_TOUCH || !els.ambient) return;
+    window.addEventListener(
+      'scroll',
+      () => {
+        clearTimeout(touchAmbientTimer);
+        touchAmbientTimer = setTimeout(updateTouchAmbient, 220);
+      },
+      { passive: true }
+    );
+  }
+
+  function updateTouchAmbient() {
+    if (state.view === 'shelf' || !els.grid || els.grid.classList.contains('hidden')) return;
+    const bar = document.querySelector('.sticky');
+    // Onderkant van de vaste balk, maar nooit negatief: als de balk (nog) niet
+    // plakt, zou de peiling anders buiten het scherm vallen en niets vinden.
+    const barBottom = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+    const y = Math.min(barBottom + 40, window.innerHeight - 10);
+    // Op drie plaatsen peilen in plaats van één: precies in het midden zit op
+    // een gsm (twee kolommen) de tussenruimte tússen de posters, en dan vind je
+    // niets. De eerste raak is goed genoeg.
+    let kaart = null;
+    for (const deel of [0.25, 0.5, 0.75]) {
+      const el = document.elementFromPoint(Math.round(window.innerWidth * deel), Math.round(y));
+      kaart = el && el.closest ? el.closest('[data-accent-id]') : null;
+      if (kaart) break;
+    }
+    if (!kaart) return;
+    setAmbient(ambientItemFor(kaart), false, kaart.dataset.openGroup || kaart.dataset.accentId);
+  }
+
+  // ---------- Raster tekenen ----------
+
+  // In selectiemodus is een klik op een kaart een vinkje, geen pop-up.
+  function toggleSelectCard(kaart) {
+    const ids = (kaart.dataset.selIds || '').split(',').filter(Boolean);
+    if (!ids.length) return;
+    const aanzetten = !isUnitSelected(ids);
+    ids.forEach((id) => (aanzetten ? state.selected.add(id) : state.selected.delete(id)));
+    // Alleen deze kaart bijwerken; de rest opnieuw tekenen zou je scrollpositie
+    // en de vlotte bediening kosten.
+    kaart.classList.toggle('is-selected', aanzetten);
+    const mark = kaart.querySelector('.select-mark');
+    if (mark) mark.textContent = aanzetten ? '✓' : '';
+    updateSelectBar();
+  }
+
+  /**
+   * Eén klik- en één toetsafhandeling voor het hele raster, één keer gekoppeld
+   * bij het opstarten. Voorheen kreeg elke kaart twee tot drie eigen handlers,
+   * en werden die bij élke herteken-beurt opnieuw aangemaakt: bij 400 rijen
+   * ruim duizend handlers per beurt. Met delegatie kan het raster ook groeien
+   * zonder opnieuw te koppelen — dat is wat "Toon meer" licht maakt.
+   */
+  function wireGridInteractions() {
+    if (!els.grid) return;
+
+    const activeer = (e, viaToets) => {
+      // Verwijderkruisje eerst: dat zit ín een kaart, dus anders opent de
+      // detailmodal er overheen.
+      const del = e.target.closest('[data-delete-id]');
+      if (del && !state.selectMode) {
+        e.stopPropagation();
+        if (viaToets) e.preventDefault();
+        handleDeleteTitle(del.dataset.deleteId, del.dataset.deleteTitle);
+        return;
+      }
+      if (state.selectMode) {
+        const kaart = e.target.closest('[data-sel-ids]');
+        if (!kaart) return;
+        if (viaToets) e.preventDefault();
+        toggleSelectCard(kaart);
+        return;
+      }
+      const opener = e.target.closest('[data-open-id],[data-open-group]');
+      if (!opener) return;
+      if (viaToets) e.preventDefault();
+      if (opener.dataset.openId) openModal(opener.dataset.openId);
+      else openGroupModal(opener.dataset.openGroup);
+    };
+
+    els.grid.addEventListener('click', (e) => activeer(e, false));
+    els.grid.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      activeer(e, true);
+    });
+
+    wireAmbient(els.grid);
+    wireTouchAmbient();
+  }
+
+  /** Sjabloonfunctie voor de huidige weergave. */
+  function renderUnitFn() {
+    return state.view === 'grid'
+      ? (u) => (u.type === 'group' ? groupCardTemplate(u) : cardTemplate(u.item))
+      : state.view === 'compact'
+      ? (u) => (u.type === 'group' ? groupRowTemplate(u, true) : rowTemplate(u.item, true))
+      : (u) => (u.type === 'group' ? groupRowTemplate(u, false) : rowTemplate(u.item, false));
+  }
+
+  /**
+   * "Toon meer" zonder de hele lijst opnieuw op te bouwen.
+   *
+   * Voorheen verhoogde de knop het aantal en riep gewoon render() aan: die gooit
+   * het raster leeg en bouwt álles opnieuw. Bij de derde klik in de
+   * tekstweergave betekende dat 1200 rijen weggooien en 1600 nieuwe maken, met
+   * een zichtbare hapering en een piek in geheugengebruik. Nu maken we enkel de
+   * nieuwe kaarten en hangen we die achteraan.
+   */
+  function appendMore() {
+    const units = buildRenderUnits();
+    const vanaf = state.visibleCount;
+    state.visibleCount += pageSizeForView(state.view);
+    const extra = units.slice(vanaf, state.visibleCount);
+    if (!extra.length) {
+      els.loadMore.classList.add('hidden');
+      return;
+    }
+    // Buiten het document opbouwen en in één keer invoegen: één layout-beurt
+    // in plaats van één per kaart.
+    const houder = document.createElement('div');
+    houder.innerHTML = extra.map(renderUnitFn()).join('');
+    const fragment = document.createDocumentFragment();
+    while (houder.firstChild) fragment.appendChild(houder.firstChild);
+    els.grid.appendChild(fragment);
+
+    els.loadMore.classList.toggle('hidden', state.visibleCount >= units.length);
+    runReveal();
   }
 
   function render() {
@@ -929,71 +1168,11 @@ function initCollectionApp(config) {
 
     applyViewClasses();
 
-    const renderUnit =
-      state.view === 'grid'
-        ? (u) => (u.type === 'group' ? groupCardTemplate(u) : cardTemplate(u.item))
-        : state.view === 'compact'
-        ? (u) => (u.type === 'group' ? groupRowTemplate(u, true) : rowTemplate(u.item, true))
-        : (u) => (u.type === 'group' ? groupRowTemplate(u, false) : rowTemplate(u.item, false));
+    els.grid.innerHTML = visible.map(renderUnitFn()).join('');
 
-    els.grid.innerHTML = visible.map(renderUnit).join('');
-
-    // In selectiemodus is een klik op een kaart een vinkje, geen pop-up. Eén
-    // handler op het raster in plaats van twee per kaart: bij 400 rijen in de
-    // tekstweergave scheelt dat merkbaar.
-    if (state.selectMode) {
-      const toggleKaart = (kaart) => {
-        const ids = (kaart.dataset.selIds || '').split(',').filter(Boolean);
-        if (!ids.length) return;
-        const aanzetten = !isUnitSelected(ids);
-        ids.forEach((id) => (aanzetten ? state.selected.add(id) : state.selected.delete(id)));
-        // Alleen deze kaart bijwerken; de rest opnieuw tekenen zou je
-        // scrollpositie en de vlotte bediening kosten.
-        kaart.classList.toggle('is-selected', aanzetten);
-        const mark = kaart.querySelector('.select-mark');
-        if (mark) mark.textContent = aanzetten ? '✓' : '';
-        updateSelectBar();
-      };
-      els.grid.querySelectorAll('[data-sel-ids]').forEach((kaart) => {
-        kaart.addEventListener('click', () => toggleKaart(kaart));
-        kaart.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            toggleKaart(kaart);
-          }
-        });
-      });
-    } else {
-      els.grid.querySelectorAll('[data-open-id]').forEach((card) => {
-        card.addEventListener('click', () => openModal(card.dataset.openId));
-        card.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openModal(card.dataset.openId);
-          }
-        });
-      });
-
-      els.grid.querySelectorAll('[data-open-group]').forEach((card) => {
-        card.addEventListener('click', () => openGroupModal(card.dataset.openGroup));
-        card.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openGroupModal(card.dataset.openGroup);
-          }
-        });
-      });
-    }
-
-    els.grid.querySelectorAll('[data-delete-id]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleDeleteTitle(btn.dataset.deleteId, btn.dataset.deleteTitle);
-      });
-    });
-
+    // Klikken, toetsen en sfeerlicht hangen aan het ráster, niet aan de kaarten
+    // (zie wireGridInteractions). Hier hoeft dus niets meer gekoppeld te worden.
     runReveal();
-    wireAmbient(els.grid);
 
     // Scroll naar de titel waar de plank stond en wis het anker. Uitgesteld tot
     // de volgende frame: het raster was tot zojuist verborgen, en meteen scrollen
@@ -1816,7 +1995,7 @@ function initCollectionApp(config) {
           ${cover ? '<div class="poster-skel"></div>' : ''}
           ${
             cover
-              ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(item.title)}" loading="lazy"
+              ? `<img src="${escapeAttr(cover)}"${posterSizingAttrs(item, GRID_POSTER_SIZES)} alt="${escapeAttr(item.title)}" loading="lazy" decoding="async"
                    class="w-full h-full object-cover relative z-[2]"
                    onload="this.previousElementSibling && this.previousElementSibling.remove()"
                    onerror="this.replaceWith(posterFallback(this.alt))">`
@@ -1831,7 +2010,7 @@ function initCollectionApp(config) {
               : ''
           }
           ${item.wishlist ? '<span class="wish-banner">Verlanglijst</span>' : ''}
-          ${peekHtml(item)}
+          ${IS_TOUCH ? '' : peekHtml(item)}
           <button type="button" class="delete-btn z-[4]" data-delete-id="${escapeAttr(item.id)}" data-delete-title="${escapeAttr(item.title)}" title="Verwijderen uit collectie" aria-label="Verwijderen uit collectie">&times;</button>
         </div>
         <p class="mt-2 font-display tracking-wide text-[15px] leading-tight text-[#F2F0EA] truncate">${escapeHtml(item.title)}</p>
@@ -1854,7 +2033,7 @@ function initCollectionApp(config) {
           ${selectMarkHtml(selIds)}
           ${
             cover
-              ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(unit.saga)}" loading="lazy" class="w-full h-full object-cover">`
+              ? `<img src="${escapeAttr(cover)}"${posterSizingAttrs(first, GRID_POSTER_SIZES)} alt="${escapeAttr(unit.saga)}" loading="lazy" decoding="async" class="w-full h-full object-cover">`
               : posterFallbackHtml(unit.saga)
           }
           ${groupValueBadgeHtml(unit)}
@@ -1978,7 +2157,7 @@ function initCollectionApp(config) {
       return `
         <div data-group-open="${escapeAttr(item.id)}" class="cursor-pointer group" role="button" tabindex="0">
           <div class="relative rounded-md overflow-hidden aspect-[2/3] bg-[#14141A] ring-1 ring-white/5 group-hover:ring-[#C9A227]/40 transition">
-            ${cover ? `<img src="${escapeAttr(cover)}" alt="${escapeAttr(item.title)}" loading="lazy" class="w-full h-full object-cover">` : posterFallbackHtml(item.title)}
+            ${cover ? `<img src="${escapeAttr(cover)}"${posterSizingAttrs(item, '(min-width: 768px) 15vw, 30vw')} alt="${escapeAttr(item.title)}" loading="lazy" decoding="async" class="w-full h-full object-cover">` : posterFallbackHtml(item.title)}
             <span class="ribbon ${ribbon.cls}">${ribbon.label}</span>
             ${cardValueBadgeHtml(item)}
             ${item.wishlist ? '<span class="wish-banner">Verlanglijst</span>' : ''}
@@ -4731,8 +4910,5 @@ function initCollectionApp(config) {
   if (els.selectDelete) els.selectDelete.addEventListener('click', handleBulkDelete);
 
 
-  els.loadMore.addEventListener('click', () => {
-    state.visibleCount += pageSizeForView(state.view);
-    render();
-  });
+  els.loadMore.addEventListener('click', appendMore);
 }

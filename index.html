@@ -97,6 +97,14 @@
   @media (max-width: 640px) {
     #ambient-glow.has-poster { filter: blur(44px) saturate(1.6); }
   }
+  /* FASE 29 — sfeerlicht op een aanraakscherm.
+     Daar laadt app.js bewust een piepklein posterbeeld (w92). Uitvergroot is
+     dat uit zichzelf al vaag, dus een zware blur is niet meer nodig: 18px in
+     plaats van 44px scheelt fors op de GPU van een telefoon, terwijl het
+     resultaat er hetzelfde uitziet. */
+  @media (hover: none) {
+    #ambient-glow.has-poster { filter: blur(18px) saturate(1.5); transform: scale(1.18); }
+  }
   @media (prefers-reduced-motion: reduce) {
     #ambient-glow { transition: none; }
   }
@@ -109,10 +117,47 @@
     .reveal, .reveal.in { opacity: 1 !important; transform: none !important; transition: none !important; }
   }
 
-  /* Poster licht op en vergroot licht bij hover. */
-  .case-card .poster-wrap { transition: transform .28s cubic-bezier(.2,.7,.2,1), box-shadow .28s ease; will-change: transform; }
+  /* Poster licht op en vergroot licht bij hover.
+     FASE 29: will-change stond hier voor álle apparaten. Dat geeft elke poster
+     een eigen GPU-laag — op een telefoon met 60 posters in beeld is dat tientallen
+     megabytes videogeheugen voor een effect dat daar niet eens bestaat, want
+     zonder muisaanwijzer is er geen hover. Nu alleen waar het gebruikt wordt. */
+  .case-card .poster-wrap { transition: transform .28s cubic-bezier(.2,.7,.2,1), box-shadow .28s ease; }
   @media (hover: hover) {
+    .case-card .poster-wrap { will-change: transform; }
     .case-card:hover .poster-wrap { transform: translateY(-7px) scale(1.035); box-shadow: 0 16px 32px rgba(0,0,0,.5); }
+  }
+
+  /* Laadtoestand: grijze hokjes in de vorm van het raster, zolang de collectie
+     onderweg is. Zonder dit is een ladende pagina niet te onderscheiden van
+     een lege collectie. */
+  /* Bedieningsrij in de vaste balk. Op ≥640px doet deze wikkel niets
+     (display: contents) en staat alles zoals vroeger in één wrappende rij.
+     Daaronder wordt het één rij die je opzij schuift. */
+  @media (min-width: 640px) {
+    #bar-extra { display: contents; }
+  }
+  @media (max-width: 639px) {
+    #bar-extra {
+      flex-wrap: nowrap; overflow-x: auto; width: 100%;
+      scrollbar-width: none; -ms-overflow-style: none;
+      -webkit-overflow-scrolling: touch;
+      /* Zodat het laatste knopje niet tegen de schermrand plakt. */
+      padding-right: 2px;
+    }
+    #bar-extra::-webkit-scrollbar { display: none; }
+    #bar-extra > * { flex-shrink: 0; }
+    #bar-extra #view-chips { gap: 2px; }
+  }
+
+  .skel-card { opacity: .55; }
+  .skel-line {
+    height: 12px; width: 70%; border-radius: 4px;
+    background: linear-gradient(100deg,#1c1c24 30%,#2a2a34 50%,#1c1c24 70%);
+    background-size: 200% 100%; animation: posterShimmer 1.15s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .poster-skel, .skel-line { animation: none; }
   }
 
   /* Skeleton-shimmer terwijl een poster laadt. */
@@ -618,14 +663,20 @@
 
   <!-- Controlepaneel: zoeken, filters, sortering -->
   <div class="sticky top-0 z-20 bg-bg/95 backdrop-blur border-b border-white/5">
-    <div class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-6 2xl:px-10 py-4 space-y-3">
-      <div class="flex flex-wrap gap-3 items-center">
+    <div class="max-w-7xl 2xl:max-w-[110rem] mx-auto px-4 sm:px-6 2xl:px-10 py-2.5 sm:py-4 space-y-2 sm:space-y-3">
+      <div class="flex flex-wrap gap-2 sm:gap-3 items-center">
         <input
           id="filter-search"
           type="search"
           placeholder="Zoek op titel, acteur, regisseur of reeks…"
           class="flex-1 min-w-[200px] bg-surface border border-white/10 rounded-md px-4 py-2 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-gold/50"
         >
+        <!-- FASE 29 — op een breed scherm gedraagt deze wikkel zich alsof hij er
+             niet is (display: contents), zodat de balk er onveranderd uitziet.
+             Op een smal scherm wordt hij één horizontaal schuifbare rij: de
+             bediening wikkelde daar over vier regels en at een kwart van het
+             scherm op, terwijl de balk blijft plakken tijdens het scrollen. -->
+        <div id="bar-extra" class="flex gap-2 items-center">
         <select id="sort-select" class="bg-surface border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-gold/50">
           <option value="date_added_desc">Onlangs toegevoegd</option>
           <option value="title_asc">Titel (A–Z)</option>
@@ -646,6 +697,7 @@
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
         <button id="select-toggle" type="button" class="chip" aria-pressed="false" title="Meerdere titels aanvinken om ze samen te verwijderen">Selecteren</button>
         <button id="filter-toggle" type="button" class="chip" aria-expanded="false" aria-controls="filter-panel">Filters ▾</button>
+        </div><!-- /#bar-extra -->
       </div>
 
       <div id="filter-panel" class="hidden space-y-3">
