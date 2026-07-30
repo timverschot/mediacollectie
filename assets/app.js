@@ -2784,6 +2784,36 @@ function initCollectionApp(config) {
     if (!els.filterPanel) return;
     els.filterPanel.classList.toggle('filter-open', open);
     updateFilterButton();
+    volgScrollVoorFilterPaneel(open);
+  }
+
+  // Scrollen sluit het filterpaneel (FASE 32).
+  //
+  // Het paneel zit ín de balk die blijft plakken, en mag tot 60% van de hoogte
+  // innemen. Liet je het openstaan en ging je scrollen, dan bleef het dus
+  // meereizen en keek je door een kier naar de collectie die je net aan het
+  // filteren was. Zodra je scrolt, klapt het dicht — je gekozen filters blijven
+  // gewoon aanstaan, alleen het menu gaat weg.
+  //
+  // De luisteraar hangt er alléén terwijl het paneel openstaat: een blijvende
+  // scroll-luisteraar is precies wat we in FASE 29 aan het weghalen waren.
+  let filterScrollStart = 0;
+  let filterScrollHandler = null;
+
+  function volgScrollVoorFilterPaneel(open) {
+    if (filterScrollHandler) {
+      window.removeEventListener('scroll', filterScrollHandler);
+      filterScrollHandler = null;
+    }
+    if (!open) return;
+    filterScrollStart = window.scrollY;
+    filterScrollHandler = () => {
+      // Een kleine drempel: het openklappen zelf verschuift de pagina soms een
+      // paar pixels, en dat mag het paneel niet meteen weer dichtdoen.
+      if (Math.abs(window.scrollY - filterScrollStart) < 8) return;
+      setFilterPanel(false);
+    };
+    window.addEventListener('scroll', filterScrollHandler, { passive: true });
   }
 
   // opts.stil = true: alleen de status en de chip-opmaak wissen, zonder meteen
