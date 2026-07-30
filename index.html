@@ -150,6 +150,46 @@
     #bar-extra #view-chips { gap: 2px; }
   }
 
+  /* Korte melding onderaan (opslaan, fouten, leesmodus). Bewust onderaan en
+     niet in de kop: dáár kijk je, en op een gsm is de kop meestal weggescrold.
+     Houdt rekening met de home-balk van een iPhone. */
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%) translateY(8px);
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    z-index: 90; max-width: min(92vw, 30rem);
+    display: flex; align-items: center; gap: .75rem;
+    padding: .6rem 1rem; border-radius: .6rem;
+    background: #1E1E26; color: #F2F0EA;
+    box-shadow: 0 12px 30px rgba(0,0,0,.55);
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.35;
+    opacity: 0; transition: opacity .22s ease, transform .22s ease;
+  }
+  #toast.toast-in { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.toast-ok { box-shadow: 0 12px 30px rgba(0,0,0,.55), inset 3px 0 0 #2FA4A9; }
+  #toast.toast-bezig { box-shadow: 0 12px 30px rgba(0,0,0,.55), inset 3px 0 0 #C9A227; }
+  #toast.toast-fout { box-shadow: 0 12px 30px rgba(0,0,0,.55), inset 3px 0 0 #C14B3A; }
+  #toast button {
+    flex-shrink: 0; border: 1px solid rgba(242,240,234,.25); border-radius: .35rem;
+    padding: .15rem .5rem; font-size: 11px; color: #F2F0EA; background: transparent; cursor: pointer;
+  }
+  #toast button:hover { background: rgba(242,240,234,.1); }
+  @media (prefers-reduced-motion: reduce) {
+    #toast { transition: none; }
+  }
+
+  /* Sluitknop van de lightbox: groot genoeg om met een duim te raken, en
+     buiten de veilige zone van de statusbalk gehouden. */
+  .lightbox-close {
+    position: fixed; z-index: 71;
+    top: calc(.5rem + env(safe-area-inset-top)); right: calc(.5rem + env(safe-area-inset-right));
+    width: 2.75rem; height: 2.75rem; border-radius: 9999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; line-height: 1; color: #F2F0EA;
+    background: rgba(20,20,26,.72); border: 1px solid rgba(242,240,234,.22);
+    cursor: pointer;
+  }
+  .lightbox-close:hover { background: rgba(20,20,26,.92); }
+
   .skel-card { opacity: .55; }
   .skel-line {
     height: 12px; width: 70%; border-radius: 4px;
@@ -780,9 +820,10 @@
       <div id="shelf-meta"></div>
     </div>
 
-    <p id="empty-state" class="hidden text-center text-muted py-20 font-body">
-      Geen titels gevonden met deze filters. Pas je zoekopdracht of filters aan.
-    </p>
+    <!-- FASE 30 — de tekst wordt door app.js gezet: "nog geen collectie" is
+         iets heel anders dan "niets gevonden met deze filters", en vroeger
+         kreeg je in beide gevallen dezelfde zin over filters aanpassen. -->
+    <div id="empty-state" class="hidden text-center text-muted py-20 font-body"></div>
 
     <div class="flex justify-center mt-10">
       <button id="load-more" class="hidden chip px-6 py-2 text-sm">Toon meer</button>
@@ -1039,6 +1080,15 @@
         <h2 class="font-display text-2xl tracking-wide">Titel toevoegen</h2>
         <button id="close-add-title-btn" aria-label="Sluiten"
           class="modal-close-fixed w-11 h-11 rounded-full bg-black/70 hover:bg-black/90 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
+      </div>
+
+      <!-- FASE 30 — zonder TMDb-sleutel doet zoeken hier niets. Vroeger merkte
+           je dat pas ná het typen, via een pop-up. Nu staat het er meteen, mét
+           de weg ernaartoe. -->
+      <div id="add-title-nokey" class="hidden mb-4 rounded-lg px-4 py-3 text-sm ring-1 ring-gold/40 bg-gold/5">
+        <p class="text-gold mb-1">Er is nog geen TMDb-sleutel ingesteld</p>
+        <p class="text-muted text-xs">Zoeken naar titels werkt pas met een gratis sleutel van themoviedb.org.
+          Vul hem in via <a href="beheer.html#instellingen" class="underline text-ink">Beheer → Instellingen</a>.</p>
       </div>
 
       <div class="flex gap-3 mb-4">
@@ -1385,7 +1435,20 @@
   <!-- Lightbox: poster/hoesfoto groot bekijken; klik op de foto om te zoomen -->
   <div id="lightbox" class="hidden fixed inset-0 z-[70] flex bg-black/95 overflow-auto p-4">
     <img src="" alt="">
+    <!-- FASE 30 — een zichtbare sluitknop. Je kon de lightbox alleen sluiten
+         door naast de foto te klikken of op Escape te drukken; op een gsm vult
+         de foto het hele scherm, dus was er in de praktijk geen weg terug. -->
+    <button id="lightbox-close" type="button" class="lightbox-close" aria-label="Foto sluiten" title="Sluiten">&times;</button>
   </div>
+
+  <!-- FASE 30 — korte meldingen onderaan. De opslag-indicator stond in de kop:
+       die scrollt weg en is op een gsm nooit in beeld op het moment dat er iets
+       misgaat. Deze melding verschijnt waar je kijkt. -->
+  <div id="toast" class="hidden" role="status" aria-live="polite"></div>
+
+  <!-- Vaste melding zolang je in leesmodus zit -->
+  <div id="readonly-banner" class="hidden fixed left-1/2 -translate-x-1/2 z-[80] bg-surface ring-1 ring-white/15 rounded-lg px-4 py-2 text-xs font-mono text-muted shadow-xl text-center max-w-[90vw]"
+       style="bottom: calc(1rem + env(safe-area-inset-bottom));"></div>
 
   <!-- Voortgang van de eenmalige foto-migratie -->
   <div id="migrate-banner" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[80] bg-surface ring-1 ring-gold/40 rounded-lg px-4 py-2 text-sm font-mono text-ink shadow-xl"></div>
@@ -1418,6 +1481,14 @@
       <button id="login-btn" class="btn-primary px-6 py-3 rounded-md font-semibold" style="background:#C9A227;color:#14141A;">
         Inloggen met Google
       </button>
+      <!-- FASE 30 — leesmodus. Staat er een eerder bewaarde kopie van je
+           collectie in dit toestel, dan hoef je niet in te loggen om te kíjken.
+           Handig in de winkel: even opzoeken of je iets al hebt, zonder te
+           wachten op een Google-scherm. Wijzigen kan pas na inloggen. -->
+      <div id="gate-readonly" class="hidden mt-6">
+        <button id="gate-readonly-btn" type="button" class="chip px-4 py-2 text-sm">Bekijken zonder inloggen</button>
+        <p id="gate-readonly-note" class="text-xs text-muted mt-2"></p>
+      </div>
     </div>
   </div>
 
@@ -1472,6 +1543,48 @@
       driveGateShow('Inloggen mislukt: ' + msg + '. Probeer opnieuw.');
     };
 
+    // ---------- Leesmodus (FASE 30) ----------
+    //
+    // Het inlogscherm blokkeerde alles. Sta je in de winkel met slecht bereik,
+    // dan wil je één ding weten: heb ik deze film al? Dat antwoord staat al in
+    // dit toestel — elke geslaagde ophaling wordt lokaal bewaard. Je kan die
+    // kopie nu bekijken zonder inloggen. Wijzigen niet: een verouderde kopie
+    // wegschrijven zou je echte collectie kunnen overschrijven.
+    let appGestart = false;
+
+    (function biedLeesmodusAan() {
+      const kopie = typeof driveCachedMovies === 'function' ? driveCachedMovies() : null;
+      const vak = document.getElementById('gate-readonly');
+      if (!vak || !kopie || !Array.isArray(kopie.movies) || !kopie.movies.length) return;
+
+      const wanneer = kopie.saved_at
+        ? new Date(kopie.saved_at).toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' })
+        : 'een eerder moment';
+      document.getElementById('gate-readonly-note').textContent =
+        `${kopie.movies.length} titels, bewaard op ${wanneer}. Wijzigen kan pas na inloggen.`;
+      vak.classList.remove('hidden');
+
+      document.getElementById('gate-readonly-btn').addEventListener('click', function () {
+        if (appGestart) return;
+        appGestart = true;
+        driveGateHide();
+        initCollectionApp({ readOnly: true, loadData: async () => kopie.movies });
+        koppelKopknoppen(true);
+
+        const banner = document.getElementById('readonly-banner');
+        banner.textContent = `Leesmodus — kopie van ${wanneer}. `;
+        const knop = document.createElement('button');
+        knop.type = 'button';
+        knop.className = 'chip !py-0.5 !px-2 text-[11px] ml-1';
+        knop.textContent = 'Inloggen';
+        knop.addEventListener('click', function () {
+          driveGateShow('Log in met Google om je collectie bij te werken.');
+        });
+        banner.appendChild(knop);
+        banner.classList.remove('hidden');
+      });
+    })();
+
     // Opnieuw ingelogd na een verlopen sessie: niet de hele pagina opnieuw
     // opbouwen, alleen de collectie opnieuw ophalen.
     window._driveReauthenticated = function () {
@@ -1479,6 +1592,15 @@
     };
 
     window._driveAuthenticated = function () {
+      // Zat je in leesmodus en log je alsnog in, dan begint de pagina opnieuw.
+      // De app een tweede keer opstarten zou dubbele handlers en dubbele modals
+      // opleveren, en de leesmodus-vergrendeling zou blijven hangen.
+      if (appGestart) {
+        location.reload();
+        return;
+      }
+      appGestart = true;
+
       // De poort wordt centraal verborgen in drive.js (niet meer verwijderd),
       // zodat ze bij een verlopen sessie terug kan komen met een werkende
       // inlogknop.
@@ -1524,7 +1646,19 @@
       // De filterbalk wordt volledig beheerd in app.js (open/dicht, teller,
       // buitenom klikken, wissen) — daar zit de filterstatus.
 
-      // 'Wat kijken?' en 'Dubbels'
+      koppelKopknoppen(false);
+    };
+
+    /**
+     * Knoppen in de kop koppelen (FASE 30).
+     *
+     * Dit stond volledig binnen _driveAuthenticated. In leesmodus draaide dat
+     * dus nooit: 'Wat kijken?', 'Dubbels' en '+ Titel toevoegen' waren daar
+     * knoppen die er wél stonden maar niets deden. Nu worden ze altijd
+     * gekoppeld — de knoppen die echt inloggen vereisen, zeggen dat.
+     */
+    function koppelKopknoppen(leesmodus) {
+      // 'Wat kijken?' en 'Dubbels' lezen alleen; die werken ook in leesmodus.
       document.getElementById('open-pick-btn').addEventListener('click', () => {
         if (window.__openPickModal) window.__openPickModal();
       });
@@ -1532,11 +1666,28 @@
         if (window.__openDupesModal) window.__openDupesModal();
       });
 
+      const meldInloggen = () => {
+        if (window.__toast) window.__toast('Leesmodus — log in met Google om titels toe te voegen', 'fout', { duur: 3500 });
+      };
+
+      if (leesmodus) {
+        document.getElementById('open-add-title-btn').addEventListener('click', meldInloggen);
+        document.getElementById('open-bulk-text-btn').addEventListener('click', meldInloggen);
+        return;
+      }
+
       // '+ Titel toevoegen'-modal
       const addModal = document.getElementById('add-title-modal');
       // Achtergrond-scroll vergrendelen zolang de modal open is (anders scrollt
       // op gsm de collectie mee achter de schermvullende modal — dubbele scroll).
       const openAddModal = () => {
+        // Zonder TMDb-sleutel werkt het zoekveld niet. Dat zeggen we nu meteen
+        // bij het openen, in plaats van pas na een mislukte zoekopdracht.
+        const nokey = document.getElementById('add-title-nokey');
+        if (nokey) {
+          const cfg = typeof getConfig === 'function' ? getConfig() : {};
+          nokey.classList.toggle('hidden', !!cfg.tmdbKey);
+        }
         addModal.classList.remove('hidden');
         document.body.classList.add('overflow-hidden');
       };
@@ -1565,7 +1716,7 @@
       document.getElementById('open-bulk-text-btn').addEventListener('click', () => {
         if (window.__openBulkTextModal) window.__openBulkTextModal();
       });
-    };
+    }
   </script>
 </body>
 </html>

@@ -353,10 +353,61 @@ function initCollectionApp(config) {
     return '';
   }
 
+  // ---------- Meldingen (FASE 30) ----------
+  //
+  // De opslagstatus stond als klein bolletje in de kop. Die kop scrollt weg, en
+  // op een gsm is hij vrijwel nooit in beeld op het moment dat er iets misgaat —
+  // je zag dus niet dat een wijziging níet bewaard was. Meldingen verschijnen nu
+  // onderaan, waar je kijkt. Een fout blijft staan tot je hem wegklikt.
+
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+
+  /**
+   * @param tekst  wat er gebeurd is
+   * @param soort  'ok' | 'bezig' | 'fout'
+   * @param opts   { blijft: true } om hem te laten staan tot de gebruiker sluit
+   */
+  function showToast(tekst, soort, opts) {
+    if (!toastEl) return;
+    const o = opts || {};
+    clearTimeout(toastTimer);
+    toastEl.textContent = '';
+    const p = document.createElement('span');
+    p.textContent = tekst;
+    toastEl.appendChild(p);
+    if (o.blijft) {
+      const sluit = document.createElement('button');
+      sluit.type = 'button';
+      sluit.textContent = 'Sluiten';
+      sluit.addEventListener('click', hideToast);
+      toastEl.appendChild(sluit);
+    }
+    toastEl.className = 'toast-' + (soort || 'ok');
+    // Eerst zichtbaar maken, dán pas laten invliegen (anders geen overgang).
+    requestAnimationFrame(() => toastEl.classList.add('toast-in'));
+    if (!o.blijft) toastTimer = setTimeout(hideToast, o.duur || 2600);
+  }
+
+  function hideToast() {
+    if (!toastEl) return;
+    clearTimeout(toastTimer);
+    toastEl.classList.remove('toast-in');
+    // Pas echt verbergen als de overgang klaar is, anders springt hij weg.
+    toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 260);
+  }
+  window.__toast = showToast;
+
   // ---------- Opslag-indicator + achtergrond-opslag (optimistic UI) ----------
 
   let indicatorTimer = null;
   function setIndicator(mode) {
+    // De kop houdt zijn indicator (handig op een breed scherm), maar de melding
+    // onderaan is wat je op een telefoon werkelijk ziet.
+    if (mode === 'saving') showToast('Opslaan…', 'bezig', { duur: 8000 });
+    else if (mode === 'saved') showToast('✓ Opgeslagen', 'ok');
+    else if (mode === 'error') showToast('✗ Niet opgeslagen — je wijziging is teruggedraaid', 'fout', { blijft: true });
+
     if (!els.saveIndicator) return;
     clearTimeout(indicatorTimer);
     if (mode === 'saving') {
@@ -374,10 +425,31 @@ function initCollectionApp(config) {
     }
   }
 
+  // ---------- Leesmodus (FASE 30) ----------
+  //
+  // Zonder inloggen kan je de laatst bewaarde kopie bekíjken. Wijzigen niet:
+  // die kopie kan verouderd zijn, en wegschrijven zou je echte collectie
+  // kunnen overschrijven. Alle schrijfwegen lopen langs requireWrite().
+  const readOnly = !!config.readOnly;
+
+  function requireWrite() {
+    if (!readOnly) return true;
+    showToast('Leesmodus — log in met Google om wijzigingen te maken', 'fout', { duur: 3500 });
+    return false;
+  }
+
   // Achtergrond-opslag in volgorde (één tegelijk). De interface is dan al
   // bijgewerkt; bij een fout wordt de wijziging teruggedraaid.
   let saveChain = Promise.resolve();
   function backgroundSave(taskFn, revertFn) {
+    // Enige plek waar de collectie weggeschreven wordt vanuit de
+    // collectiepagina. In leesmodus draaien we de wijziging meteen terug.
+    if (!requireWrite()) {
+      if (revertFn) revertFn();
+      buildFacetChips(state.all);
+      applyFilters();
+      return Promise.resolve();
+    }
     setIndicator('saving');
     saveChain = saveChain.then(async () => {
       try {
@@ -388,8 +460,10 @@ function initCollectionApp(config) {
         if (revertFn) revertFn();
         buildFacetChips(state.all);
         applyFilters();
-        setIndicator('error');
-        alert('Opslaan mislukt: ' + err.message + '\nJe wijziging is teruggedraaid.');
+        // Geen alert meer: die onderbreekt alles, moet weggeklikt worden vóór
+        // je iets kan zien, en verdwijnt daarna spoorloos. De melding onderaan
+        // blijft staan tot je hem zelf sluit, mét de reden erbij.
+        showToast('✗ Niet opgeslagen: ' + err.message + ' — je wijziging is teruggedraaid', 'fout', { blijft: true });
       }
     });
     return saveChain;
@@ -962,6 +1036,45 @@ function initCollectionApp(config) {
     if (els.loadMore) els.loadMore.classList.add('hidden');
   }
 
+  /**
+   * Lege toestand (FASE 30).
+   *
+   * Er stond één zin: "Geen titels gevonden met deze filters." Ook wanneer je
+   * collectie gewoon nog leeg was — dan stuurt die zin je op zoek naar filters
+   * die je nooit hebt aangezet. Het zijn twee verschillende situaties, met twee
+   * verschillende volgende stappen.
+   */
+  function updateEmptyState() {
+    if (!els.empty) return;
+    const leeg = state.filtered.length === 0;
+    els.empty.classList.toggle('hidden', !leeg);
+    if (!leeg) return;
+
+    if (state.all.length === 0) {
+      els.empty.innerHTML =
+        '<p class="text-[#F2F0EA] text-lg mb-2">Je collectie is nog leeg</p>' +
+        '<p class="mb-5">Voeg je eerste schijf toe — zoek de titel op en kies het formaat.</p>' +
+        (readOnly
+          ? '<p class="text-xs">Je kijkt naar een bewaarde kopie. Log in met Google om titels toe te voegen.</p>'
+          : '<button type="button" data-empty-add class="btn btn-primary">+ Eerste titel toevoegen</button>');
+    } else {
+      els.empty.innerHTML =
+        '<p class="text-[#F2F0EA] text-lg mb-2">Niets gevonden</p>' +
+        '<p class="mb-5">Geen van je ' + state.all.length + ' titels past bij deze zoekopdracht en filters.</p>' +
+        '<button type="button" data-empty-clear class="chip">Alle filters wissen</button>';
+    }
+
+    const add = els.empty.querySelector('[data-empty-add]');
+    if (add) {
+      add.addEventListener('click', () => {
+        const knop = document.getElementById('open-add-title-btn');
+        if (knop) knop.click();
+      });
+    }
+    const wis = els.empty.querySelector('[data-empty-clear]');
+    if (wis) wis.addEventListener('click', () => clearAllFilters());
+  }
+
   // Kaarten getrapt laten verschijnen na het bouwen van het raster.
   // Alleen kaarten die nog niet 'in' zijn: na "Toon meer" verschijnen zo enkel
   // de nieuwe kaarten, in plaats van dat de hele lijst opnieuw invliegt.
@@ -1163,7 +1276,7 @@ function initCollectionApp(config) {
     els.count.textContent =
       state.filtered.length + ' titel' + (state.filtered.length === 1 ? '' : 's') +
       (wishCount ? ` · ${wishCount} verlanglijst` : '');
-    els.empty.classList.toggle('hidden', state.filtered.length !== 0);
+    updateEmptyState();
     els.loadMore.classList.toggle('hidden', state.visibleCount >= units.length);
 
     applyViewClasses();
@@ -1243,7 +1356,7 @@ function initCollectionApp(config) {
     els.count.textContent =
       state.filtered.length + ' titel' + (state.filtered.length === 1 ? '' : 's') +
       (wishCount ? ` · ${wishCount} verlanglijst` : '');
-    els.empty.classList.toggle('hidden', state.filtered.length !== 0);
+    updateEmptyState();
 
     shelfUnits = units;
     // Kom je vanuit het raster, open de plank dan op de titel die je daar zag.
@@ -1368,6 +1481,7 @@ function initCollectionApp(config) {
   // ---------- Acties (optimistic) ----------
 
   function handleDeleteTitle(id, title) {
+    if (!requireWrite()) return;
     if (!confirm(`Weet je zeker dat je "${title}" volledig wilt verwijderen uit je collectie? Dit kan niet ongedaan gemaakt worden.`)) {
       return;
     }
@@ -1532,6 +1646,7 @@ function initCollectionApp(config) {
    *    weg, dan weet je precies waar het gebleven is en is de rest nog intact.
    */
   async function handleBulkDelete() {
+    if (!requireWrite()) return;
     const ids = [...state.selected];
     if (!ids.length) return;
 
@@ -2252,6 +2367,15 @@ function initCollectionApp(config) {
       e.stopPropagation();
       img.classList.toggle('zoomed');
     });
+    // Zichtbare sluitknop (FASE 30): op een gsm vult de foto het hele scherm,
+    // dus "klik naast de foto" bestond daar in de praktijk niet.
+    const sluitKnop = document.getElementById('lightbox-close');
+    if (sluitKnop) {
+      sluitKnop.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeLightbox();
+      });
+    }
     els.lightbox.addEventListener('click', closeLightbox);
   }
 
@@ -4745,24 +4869,44 @@ function initCollectionApp(config) {
   els.modal.addEventListener('click', (e) => {
     if (e.target === els.modal) closeModal();
   });
+  /**
+   * Escape sluit één laag: de bovenste die openstaat (FASE 30).
+   *
+   * De lijst staat in dezelfde volgorde als de lagen boven elkaar liggen. Twee
+   * dingen die eerder misgingen:
+   *  - de modal "+ Titel toevoegen" (die in index.html zit, niet hier) stond
+   *    níet in de keten. Escape deed daar niets, terwijl hij op een gsm het
+   *    hele scherm vult;
+   *  - de laatste stap was altijd closeModal(), ook als er niets openstond.
+   *    Nu geeft de keten door dat er niets te sluiten viel, zodat Escape in een
+   *    open zoekveld gewoon doet wat de browser normaal doet.
+   */
+  function overlayLagen() {
+    const zichtbaar = (el) => el && !el.classList.contains('hidden');
+    const anderePagina = (id) => {
+      const el = document.getElementById(id);
+      return zichtbaar(el) ? el : null;
+    };
+    return [
+      { open: () => zichtbaar(els.lightbox), sluit: closeLightbox },
+      { open: () => zichtbaar(els.episodeModal), sluit: closeEpisodeModal },
+      { open: () => !!anderePagina('add-title-modal'), sluit: () => window.__closeAddTitleModal && window.__closeAddTitleModal() },
+      { open: () => zichtbaar(els.pickModal), sluit: closePickModal },
+      { open: () => zichtbaar(els.dupesModal), sluit: closeDupesModal },
+      { open: () => zichtbaar(els.personModal), sluit: closePersonModal },
+      { open: () => zichtbaar(els.groupModal), sluit: closeGroupModal },
+      { open: () => zichtbaar(els.modal), sluit: closeModal },
+      { open: () => els.filterPanel && els.filterPanel.classList.contains('filter-open'), sluit: () => setFilterPanel(false) },
+      { open: () => state.selectMode, sluit: () => setSelectMode(false) },
+    ];
+  }
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (els.filterPanel && els.filterPanel.classList.contains('filter-open')) {
-        setFilterPanel(false);
-        return;
-      }
-      if (state.selectMode) {
-        setSelectMode(false);
-        return;
-      }
-      if (els.lightbox && !els.lightbox.classList.contains('hidden')) closeLightbox();
-      else if (els.episodeModal && !els.episodeModal.classList.contains('hidden')) closeEpisodeModal();
-      else if (els.pickModal && !els.pickModal.classList.contains('hidden')) closePickModal();
-      else if (els.dupesModal && !els.dupesModal.classList.contains('hidden')) closeDupesModal();
-      else if (els.personModal && !els.personModal.classList.contains('hidden')) closePersonModal();
-      else if (els.groupModal && !els.groupModal.classList.contains('hidden')) closeGroupModal();
-      else closeModal();
-    }
+    if (e.key !== 'Escape') return;
+    const laag = overlayLagen().find((l) => l.open());
+    if (!laag) return;
+    e.preventDefault();
+    laag.sluit();
   });
 
   // Debounce: op een grote collectie is een volledige her-render per toetsaanslag
