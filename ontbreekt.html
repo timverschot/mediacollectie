@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; manifest-src 'self'; worker-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://image.tmdb.org; frame-src https://accounts.google.com; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://api.themoviedb.org">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Universums — Mijn Mediacollectie</title>
-<meta name="description" content="Overkoepelende filmfranchises en hoeveel je ervan bezit.">
+<title>Ontbreekt — Mijn Mediacollectie</title>
+<meta name="description" content="Welke delen en seizoenen ontbreken er nog in je collectie.">
 
 <link rel="manifest" href="manifest.json" id="app-manifest">
 <meta name="theme-color" content="#14141A">
@@ -97,12 +97,12 @@
     <div class="max-w-6xl 2xl:max-w-[100rem] mx-auto px-4 sm:px-6 2xl:px-10 py-5 sm:py-8 flex items-end justify-between flex-wrap gap-3">
       <div>
         <p class="font-mono text-xs tracking-[0.2em] text-gold uppercase mb-1">Privécollectie</p>
-        <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Universums</h1>
+        <h1 class="font-display text-3xl sm:text-5xl tracking-wide text-ink">Ontbreekt</h1>
       </div>
       <nav class="flex gap-4 sm:gap-6 overflow-x-auto w-full sm:w-auto">
         <a href="index.html" class="nav-link">Collectie</a>
-        <a href="ontbreekt.html" class="nav-link">Ontbreekt</a>
-          <a href="universums.html" class="nav-link active">Universums</a>
+        <a href="ontbreekt.html" class="nav-link active">Ontbreekt</a>
+        <a href="universums.html" class="nav-link">Universums</a>
         <a href="statistieken.html" class="nav-link">Statistieken</a>
         <a href="prijzen.html" class="nav-link">Prijzen</a>
         <a href="beheer.html" class="nav-link">Beheer</a>
@@ -113,46 +113,41 @@
   <main class="max-w-6xl 2xl:max-w-[100rem] mx-auto px-4 sm:px-6 2xl:px-10 py-6 sm:py-8 space-y-6">
 
     <p class="text-sm text-muted max-w-2xl">
-      Een universum is een overkoepelende franchise die verder gaat dan één filmreeks — het Marvel Cinematic
-      Universe bevat tientallen films én series. TMDb kent zoiets alleen als trefwoord, dus dat zoek je
-      hieronder één keer op. Daarna vult de lijst zichzelf aan bij nieuwe releases.
+      Alles wat nog ontbreekt, op één plek: seizoenen van series die je maar half hebt,
+      en delen van filmreeksen die je mist. Bedoeld om mee te nemen naar de winkel.
     </p>
 
-    <!-- Nieuw universum toevoegen -->
-    <section class="panel">
-      <p class="font-display text-2xl tracking-wide mb-3">Universum toevoegen</p>
-      <div class="flex flex-wrap gap-3 items-center mb-3">
-        <input type="search" id="kw-query" placeholder="Bv. marvel cinematic universe" class="flex-1 min-w-[220px]">
-        <label class="text-sm flex items-center gap-2 text-ink">
-          <input type="checkbox" id="kw-include-tv" class="w-4 h-4" checked> Series meetellen
-        </label>
-        <button id="kw-search-btn" class="btn btn-primary shrink-0">Zoeken</button>
+    <div class="flex flex-wrap gap-2 items-center">
+      <div id="missing-tabs" class="flex flex-wrap gap-2">
+        <button type="button" class="chip chip-active" data-tab="alles">Alles</button>
+        <button type="button" class="chip" data-tab="series">Series</button>
+        <button type="button" class="chip" data-tab="reeksen">Filmreeksen</button>
       </div>
-      <div id="kw-results" class="space-y-1"></div>
-      <p id="kw-status" class="text-sm font-mono mt-2"></p>
+      <label class="text-sm flex items-center gap-2 text-ink ml-auto">
+        <input type="checkbox" id="missing-hide-wish" class="w-4 h-4"> Verberg wat al op mijn verlanglijst staat
+      </label>
+    </div>
+
+    <p id="missing-summary" class="font-mono text-sm text-muted"></p>
+
+    <section id="missing-series" class="space-y-4"></section>
+
+    <section class="space-y-4">
+      <div id="missing-sagas" class="space-y-4"></div>
+      <div id="saga-load-box" class="panel hidden">
+        <p class="text-sm text-muted mb-3" id="saga-load-text"></p>
+        <button id="saga-load-btn" class="btn btn-secondary">Filmreeksen nakijken</button>
+        <p id="saga-load-status" class="text-sm font-mono mt-2"></p>
+      </div>
     </section>
 
-    <!-- Overzicht van je universums -->
-    <div id="universe-list" class="space-y-6"></div>
-
-    <p id="universe-empty" class="hidden text-center text-muted py-16">
-      Nog geen universums. Zoek hierboven bijvoorbeeld op "marvel cinematic universe" of "wizarding world".
+    <p id="missing-empty" class="hidden text-center text-muted py-16">
+      Niets ontbrekend gevonden. Je reeksen en series zijn compleet — of er is nog niets om te vergelijken.
     </p>
 
-    <p id="page-error" class="hidden text-center text-red-400 font-mono text-sm py-6"></p>
-  </main>
+    <p id="page-error" class="hidden text-center text-red-400 py-8 font-mono text-sm"></p>
 
-  <footer class="max-w-6xl 2xl:max-w-[100rem] mx-auto px-4 sm:px-6 2xl:px-10 py-10 text-center text-xs text-muted font-mono space-y-3">
-    <p>Ledenlijsten komen live van TMDb en worden niet opgeslagen</p>
-    <div class="flex flex-col items-center gap-2 pt-4 border-t border-white/5">
-      <a href="https://www.themoviedb.org" target="_blank" rel="noopener">
-        <img src="assets/tmdb-logo.svg" alt="The Movie Database (TMDB)" class="h-4 opacity-70 hover:opacity-100 transition">
-      </a>
-      <p class="max-w-md leading-relaxed">
-        This product uses the TMDB API but is not endorsed or certified by TMDB.
-      </p>
-    </div>
-  </footer>
+  </main>
 
   <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
     <div class="text-center max-w-sm px-6">
@@ -166,8 +161,7 @@
 
   <script src="assets/drive.js"></script>
   <script src="assets/admin.js"></script>
-  <script src="assets/universes.js"></script>
-  <script src="assets/universes-page.js"></script>
+  <script src="assets/missing.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
@@ -189,7 +183,7 @@
     window._driveAuthenticated = function () {
       // De inlogpoort wordt centraal verborgen in drive.js (niet verwijderd),
       // zodat ze bij een verlopen sessie terug kan komen.
-      initUniversesPage().catch(function (err) {
+      initMissingPage().catch(function (err) {
         console.error(err);
         var box = document.getElementById('page-error');
         box.textContent = 'Er ging iets mis: ' + err.message;

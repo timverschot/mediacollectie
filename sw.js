@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v35';
+const VERSION = 'v36';
 // De postercache heeft een EIGEN versie, los van de schil. Zo wist een gewone
 // JS/HTML-update (VERSION ophogen) niet telkens alle gedownloade posters —
 // scheelt fors dataverbruik op gsm. Verhoog IMAGE_VERSION enkel als je de
@@ -34,6 +34,7 @@ const SHELL_ASSETS = [
   './',
   './index.html',
   './universums.html',
+  './ontbreekt.html',
   './statistieken.html',
   './beheer.html',
   './prijzen.html',
@@ -47,6 +48,7 @@ const SHELL_ASSETS = [
   './assets/price-app.js',
   './assets/universes.js',
   './assets/universes-page.js',
+  './assets/missing.js',
   './assets/bulk-import.js',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',

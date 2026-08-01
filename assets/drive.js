@@ -160,10 +160,106 @@ function normalizeMovieEntry(m) {
     });
   }
 
+  // Seizoenen krijgen dezelfde exemplaren-structuur als films (FASE 35).
+  normalizeSeasonEditions(m);
+
   // De oude velden blijven meelopen als spiegel van het 'beste' exemplaar,
   // zodat oudere code en bestaande prijsgegevens blijven kloppen.
   syncLegacyFieldsFromEditions(m);
   return m;
+}
+
+/* ==========================================================================
+ * Seizoenen met meerdere exemplaren (FASE 35)
+ * ==========================================================================
+ * Een seizoen had één `owned` (ja/nee) en één `format`. Er was dus letterlijk
+ * plaats voor één schijf: had je seizoen 1 op DVD én op Blu-ray, of een gewone
+ * uitgave naast een steelbook, dan kon je dat niet vastleggen. Films konden dat
+ * al sinds ze `editions` kregen; seizoenen waren daarin achtergebleven.
+ *
+ * De structuur is bewust identiek aan die van films, zodat prijsopvolging,
+ * dubbels-detectie en de formaatfilters er zonder omwegen op werken.
+ *
+ * `owned` en `format` blijven bestaan als spiegel van het beste exemplaar —
+ * alle bestaande code (badges, statistieken, filters, prijssleutels) blijft
+ * daardoor werken zonder aanpassing.
+ * ========================================================================== */
+
+/** Leeg exemplaar voor een seizoen, met alle velden die een film ook heeft. */
+function nieuwSeizoenExemplaar(eid, format) {
+  return {
+    eid: eid || 'e1',
+    format: format || '',
+    notes: '',
+    boxset: '',
+    location: '',
+    wishlist: false,
+    ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
+    date_added: '',
+    custom_front_cover_id: '',
+    custom_back_cover_id: '',
+  };
+}
+
+function normalizeSeasonEditions(m) {
+  if (!m || !Array.isArray(m.seasons)) return m;
+  m.seasons.forEach((s) => {
+    if (!Array.isArray(s.editions)) s.editions = [];
+
+    // Migratie: bezat je dit seizoen al, dan wordt dat het eerste exemplaar.
+    if (!s.editions.length && s.owned) {
+      s.editions.push({ ...nieuwSeizoenExemplaar('e1', s.format || ''), date_added: s.date_added || '' });
+    }
+
+    s.editions.forEach((ed, i) => {
+      if (!ed.eid) ed.eid = 'e' + (i + 1);
+      if (typeof ed.wishlist !== 'boolean') ed.wishlist = false;
+      EDITION_VARIANTS.forEach((v) => {
+        if (typeof ed[v.key] !== 'boolean') ed[v.key] = false;
+      });
+      ['notes', 'boxset', 'location', 'custom_front_cover_id', 'custom_back_cover_id'].forEach((veld) => {
+        if (ed[veld] == null) ed[veld] = '';
+      });
+    });
+
+    syncLegacySeasonFields(s);
+  });
+  return m;
+}
+
+/**
+ * Houdt `owned` en `format` gelijk aan de exemplaren. Zo blijft alles wat die
+ * twee velden leest — de seizoenenteller op de kaart, de formaatfilters, de
+ * statistieken, de prijssleutels — kloppen zonder dat het van exemplaren hoeft
+ * te weten.
+ */
+function syncLegacySeasonFields(s) {
+  const inBezit = (s.editions || []).filter((e) => !e.wishlist);
+  s.owned = inBezit.length > 0;
+  if (!inBezit.length) {
+    s.format = '';
+    return;
+  }
+  // Het beste formaat dat je van dit seizoen hebt, net als bij films.
+  const beste = inBezit.reduce(
+    (best, e) => (formatRank(e.format) > formatRank(best.format) ? e : best),
+    inBezit[0]
+  );
+  s.format = beste.format || '';
+}
+
+/** Volgend vrij exemplaar-id binnen één seizoen. */
+function nextSeasonEditionId(s) {
+  const gebruikt = new Set(((s && s.editions) || []).map((e) => e.eid));
+  let n = 1;
+  while (gebruikt.has('e' + n)) n++;
+  return 'e' + n;
+}
+
+/** Alle formaten die je van dit seizoen bezit, beste eerst. */
+function seasonOwnedFormats(s) {
+  const set = new Set((s.editions || []).filter((e) => !e.wishlist && e.format).map((e) => e.format));
+  return [...set].sort((a, b) => formatRank(b) - formatRank(a));
 }
 
 // Het representatieve exemplaar: het beste formaat dat je écht bezit,

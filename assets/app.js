@@ -99,7 +99,9 @@ function checkAssetVersions() {
     typeof MEDIA_FORMATS === 'undefined' ||
     typeof normalizeMovieEntry === 'undefined' ||
     typeof deleteMoviesInDrive === 'undefined' ||
-    typeof driveBackupNow === 'undefined'
+    typeof driveBackupNow === 'undefined' ||
+    // FASE 35 — seizoenen met meerdere exemplaren
+    typeof normalizeSeasonEditions === 'undefined'
   ) {
     missing.push('assets/drive.js');
   }
@@ -1631,13 +1633,206 @@ function initCollectionApp(config) {
     );
   }
 
+  /* ---------- Exemplaren per seizoen (FASE 35) ----------
+   *
+   * Een seizoen kon maar één schijf bevatten: één formaat, en verder niets.
+   * Had je seizoen 1 op DVD én op Blu-ray, of een gewone uitgave naast een
+   * steelbook, dan was daar geen plaats voor. Nu heeft een seizoen dezelfde
+   * exemplaren als een film, met uitvoering, opmerking, locatie en boxset.
+   */
+
+  function seasonEditionsHtml(s) {
+    const eds = (s.editions || []).filter((e) => !e.wishlist);
+    if (!eds.length) return '';
+    const regels = eds
+      .map((ed) => {
+        const uitvoeringen =
+          typeof editionVariantKeys === 'function'
+            ? editionVariantKeys(ed)
+                .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).label || k)
+                .join(' · ')
+            : '';
+        const extra = [uitvoeringen, ed.boxset, ed.location, ed.notes].filter(Boolean).join(' · ');
+        return `
+          <div class="flex items-center gap-2 py-1">
+            <span class="font-mono text-[11px] px-1.5 py-0.5 rounded" style="background:rgba(255,255,255,.06);color:${formatColor(
+              ed.format
+            )}">${escapeHtml(formatShort(ed.format) || '—')}</span>
+            <span class="text-[11px] text-muted truncate flex-1 min-w-0">${escapeHtml(extra)}</span>
+            <button type="button" class="text-gold hover:text-white text-[11px] underline shrink-0"
+              data-edit-season-ed="${s.season_number}" data-eid="${escapeAttr(ed.eid)}">bewerken</button>
+            <button type="button" class="text-muted hover:text-red-400 text-[11px] underline shrink-0"
+              data-del-season-ed="${s.season_number}" data-eid="${escapeAttr(ed.eid)}">weg</button>
+          </div>`;
+      })
+      .join('');
+    return `
+      <div class="mt-2 rounded-md bg-bg/60 px-2 py-1">
+        <p class="text-[10px] font-mono text-muted uppercase mb-0.5">${eds.length === 1 ? 'exemplaar' : eds.length + ' exemplaren'}</p>
+        ${regels}
+        <button type="button" class="text-teal hover:text-white text-[11px] underline mt-1"
+          data-add-season-ed="${s.season_number}">+ nog een exemplaar</button>
+      </div>`;
+  }
+
+  /** Klein scherm om één seizoen-exemplaar in te vullen. */
+  function seizoenExemplaarScherm(bestaand) {
+    return new Promise((resolve) => {
+      const ed = bestaand || {};
+      const laag = document.createElement('div');
+      laag.className = 'fixed inset-0 z-[97] flex items-center justify-center p-4 overflow-y-auto';
+      laag.style.background = 'rgba(0,0,0,.8)';
+      const paneel = document.createElement('div');
+      paneel.className = 'bg-surface rounded-xl w-full max-w-md shadow-2xl ring-1 ring-white/10 p-5 my-auto';
+      paneel.style.paddingBottom = 'calc(1.25rem + env(safe-area-inset-bottom))';
+
+      const formaatOpties = MEDIA_FORMATS.map(
+        (f) => `<option value="${escapeAttr(f.value)}"${ed.format === f.value ? ' selected' : ''}>${escapeHtml(f.label)}</option>`
+      ).join('');
+      const uitvoeringen = EDITION_VARIANTS.map(
+        (v) => `
+          <label class="flex items-center gap-1.5 text-xs">
+            <input type="checkbox" data-v="${escapeAttr(v.key)}" class="w-4 h-4"${ed[v.key] ? ' checked' : ''}>
+            ${escapeHtml(v.label)}
+          </label>`
+      ).join('');
+
+      paneel.innerHTML = `
+        <h2 class="font-display text-xl tracking-wide mb-4">${bestaand ? 'Exemplaar bewerken' : 'Exemplaar toevoegen'}</h2>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-mono text-muted uppercase mb-1">Formaat</label>
+            <select data-f="format" class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink">${formaatOpties}</select>
+          </div>
+          <div>
+            <label class="block text-xs font-mono text-muted uppercase mb-1">Uitvoering</label>
+            <div class="flex flex-wrap gap-3">${uitvoeringen}</div>
+          </div>
+          <div>
+            <label class="block text-xs font-mono text-muted uppercase mb-1">Opmerking</label>
+            <input type="text" data-f="notes" value="${escapeAttr(ed.notes || '')}" placeholder="Bv. met slipcover"
+              class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted">
+          </div>
+          <div>
+            <label class="block text-xs font-mono text-muted uppercase mb-1">Boxset</label>
+            <input type="text" data-f="boxset" value="${escapeAttr(ed.boxset || '')}" placeholder="Leeg laten bij een losse uitgave"
+              class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted">
+          </div>
+          <div>
+            <label class="block text-xs font-mono text-muted uppercase mb-1">Locatie</label>
+            <input type="text" data-f="location" value="${escapeAttr(ed.location || '')}" placeholder="Bv. Kast woonkamer"
+              class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted">
+          </div>
+        </div>
+        <div class="flex gap-2 justify-end mt-5">
+          <button type="button" data-annuleer class="chip">Annuleren</button>
+          <button type="button" data-bewaar class="btn btn-primary">Bewaren</button>
+        </div>`;
+
+      laag.appendChild(paneel);
+
+      const klaar = (waarde) => {
+        document.removeEventListener('keydown', opToets);
+        laag.remove();
+        resolve(waarde);
+      };
+      const opToets = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); klaar(null); }
+      };
+      paneel.querySelector('[data-annuleer]').addEventListener('click', () => klaar(null));
+      paneel.querySelector('[data-bewaar]').addEventListener('click', () => {
+        const uit = {
+          format: paneel.querySelector('[data-f="format"]').value,
+          notes: paneel.querySelector('[data-f="notes"]').value.trim(),
+          boxset: paneel.querySelector('[data-f="boxset"]').value.trim(),
+          location: paneel.querySelector('[data-f="location"]').value.trim(),
+        };
+        paneel.querySelectorAll('[data-v]').forEach((cb) => {
+          uit[cb.dataset.v] = cb.checked;
+        });
+        klaar(uit);
+      });
+      laag.addEventListener('click', (e) => { if (e.target === laag) klaar(null); });
+      document.addEventListener('keydown', opToets);
+      document.body.appendChild(laag);
+    });
+  }
+
+  /** Wijziging aan de seizoenen wegschrijven, met terugdraaien bij een fout. */
+  function bewaarSeizoenen(item, vorigeSeizoenen) {
+    normalizeSeasonEditions(item);
+    buildFacetChips(state.all);
+    applyFilters();
+    openModal(item.id);
+    backgroundSave(
+      () => upsertMovieInDrive(item),
+      () => {
+        item.seasons = vorigeSeizoenen;
+        buildFacetChips(state.all);
+        applyFilters();
+        if (!els.modal.classList.contains('hidden')) openModal(item.id);
+      }
+    );
+  }
+
+  async function handleAddSeasonEdition(item, seasonNumber) {
+    if (!requireWrite()) return;
+    const season = (item.seasons || []).find((s) => s.season_number === seasonNumber);
+    if (!season) return;
+    const gegevens = await seizoenExemplaarScherm(null);
+    if (!gegevens) return;
+    const vorige = JSON.parse(JSON.stringify(item.seasons));
+    if (!Array.isArray(season.editions)) season.editions = [];
+    season.editions.push({
+      ...nieuwSeizoenExemplaar(nextSeasonEditionId(season), gegevens.format),
+      ...gegevens,
+      date_added: new Date().toISOString().slice(0, 10),
+    });
+    bewaarSeizoenen(item, vorige);
+  }
+
+  async function handleEditSeasonEdition(item, seasonNumber, eid) {
+    if (!requireWrite()) return;
+    const season = (item.seasons || []).find((s) => s.season_number === seasonNumber);
+    const ed = season && (season.editions || []).find((e) => e.eid === eid);
+    if (!ed) return;
+    const gegevens = await seizoenExemplaarScherm(ed);
+    if (!gegevens) return;
+    const vorige = JSON.parse(JSON.stringify(item.seasons));
+    Object.assign(ed, gegevens);
+    bewaarSeizoenen(item, vorige);
+  }
+
+  function handleDeleteSeasonEdition(item, seasonNumber, eid) {
+    if (!requireWrite()) return;
+    const season = (item.seasons || []).find((s) => s.season_number === seasonNumber);
+    if (!season) return;
+    const ed = (season.editions || []).find((e) => e.eid === eid);
+    if (!ed) return;
+    const overblijft = (season.editions || []).filter((e) => !e.wishlist).length - 1;
+    const vraag =
+      overblijft > 0
+        ? `Dit exemplaar (${formatLabel(ed.format)}) van seizoen ${seasonNumber} weghalen?\n\nJe houdt er nog ${overblijft} over.`
+        : `Dit is je laatste exemplaar van seizoen ${seasonNumber}. Weghalen betekent dat je dit seizoen niet meer bezit.`;
+    if (!confirm(vraag)) return;
+    const vorige = JSON.parse(JSON.stringify(item.seasons));
+    season.editions = (season.editions || []).filter((e) => e.eid !== eid);
+    bewaarSeizoenen(item, vorige);
+  }
+
   function handleRemoveSeason(item, seasonNumber) {
-    if (!confirm(`Seizoen ${seasonNumber} niet langer als 'in bezit' markeren?`)) return;
     const season = item.seasons.find((s) => s.season_number === seasonNumber);
     if (!season) return;
-    const prev = { owned: season.owned, format: season.format };
+    const aantal = (season.editions || []).filter((e) => !e.wishlist).length;
+    const vraag =
+      aantal > 1
+        ? `Seizoen ${seasonNumber} helemaal weghalen? Je hebt er ${aantal} exemplaren van.`
+        : `Seizoen ${seasonNumber} niet langer als 'in bezit' markeren?`;
+    if (!confirm(vraag)) return;
+    const prev = { owned: season.owned, format: season.format, editions: JSON.parse(JSON.stringify(season.editions || [])) };
     season.owned = false;
     season.format = '';
+    season.editions = [];
     // Seizoensbezit bepaalt mee welke formaten je hebt, dus de filterchips
     // moeten opnieuw opgebouwd worden — anders bleef er een chip staan die geen
     // enkel resultaat meer geeft (of verscheen er geen nieuwe).
@@ -1649,6 +1844,7 @@ function initCollectionApp(config) {
       () => {
         season.owned = prev.owned;
         season.format = prev.format;
+        season.editions = prev.editions;
         buildFacetChips(state.all);
         applyFilters();
         // Alleen heropenen als de modal nog openstond; anders springt hij
@@ -1661,9 +1857,16 @@ function initCollectionApp(config) {
   function handleAddSeason(item, seasonNumber, format) {
     const season = item.seasons.find((s) => s.season_number === seasonNumber);
     if (!season) return;
-    const prev = { owned: season.owned, format: season.format };
+    const prev = { owned: season.owned, format: season.format, editions: JSON.parse(JSON.stringify(season.editions || [])) };
     season.owned = true;
     season.format = format;
+    // Ook meteen als exemplaar vastleggen, zodat je er later een tweede naast
+    // kan zetten (FASE 35).
+    if (!Array.isArray(season.editions)) season.editions = [];
+    season.editions.push({
+      ...nieuwSeizoenExemplaar(nextSeasonEditionId(season), format),
+      date_added: new Date().toISOString().slice(0, 10),
+    });
     buildFacetChips(state.all);
     applyFilters();
     openModal(item.id);
@@ -1672,6 +1875,7 @@ function initCollectionApp(config) {
       () => {
         season.owned = prev.owned;
         season.format = prev.format;
+        season.editions = prev.editions;
         buildFacetChips(state.all);
         applyFilters();
         if (!els.modal.classList.contains('hidden')) openModal(item.id);
@@ -2109,7 +2313,13 @@ function initCollectionApp(config) {
       if (!e.wishlist) set.add(e.format);
     });
     (item.seasons || []).forEach((s) => {
-      if (s.owned && s.format) set.add(s.format);
+      // Sinds FASE 35 kan één seizoen meerdere exemplaren hebben. Zonder deze
+      // lus zag het formaatfilter alleen het béste formaat per seizoen, en vond
+      // je je DVD-seizoen niet meer zodra je er ook een Blu-ray van had.
+      (s.editions || []).forEach((e) => {
+        if (!e.wishlist && e.format) set.add(e.format);
+      });
+      if (!(s.editions || []).length && s.owned && s.format) set.add(s.format);
     });
     return [...set].sort((a, b) => formatRank(b) - formatRank(a));
   }
@@ -2118,7 +2328,10 @@ function initCollectionApp(config) {
   function allFormats(item) {
     const set = new Set((item.editions || []).map((e) => e.format));
     (item.seasons || []).forEach((s) => {
-      if (s.owned && s.format) set.add(s.format);
+      (s.editions || []).forEach((e) => {
+        if (e.format) set.add(e.format);
+      });
+      if (!(s.editions || []).length && s.owned && s.format) set.add(s.format);
     });
     return [...set];
   }
@@ -4847,13 +5060,16 @@ function initCollectionApp(config) {
                     <div class="flex items-start justify-between gap-2">
                       <button type="button" data-episodes="${s.season_number}" class="text-left min-w-0 group/season">
                         <p class="font-display tracking-wide text-lg text-ink leading-tight truncate group-hover/season:text-gold">${escapeHtml(s.name)}</p>
-                        <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · <span class="text-gold">${fmtLabel[s.format] || s.format}</span>${
+                        <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · <span class="text-gold">${escapeHtml(
+              seasonOwnedFormats(s).map((f) => fmtLabel[f] || f).join(' + ') || fmtLabel[s.format] || s.format
+            )}</span>${
               pi ? ` · <span class="text-teal/90">${escapeHtml(priceRangeText(pi))}</span>` : ''
             }</p>
                       </button>
-                      <button type="button" class="text-muted hover:text-red-400 text-xs underline shrink-0" data-remove-season="${s.season_number}">verwijderen</button>
+                      <button type="button" class="text-muted hover:text-red-400 text-xs underline shrink-0" data-remove-season="${s.season_number}" title="Alle exemplaren van dit seizoen weghalen">verwijderen</button>
                     </div>
                     ${s.overview ? `<p class="text-xs text-muted mt-1.5 clamp-2 leading-snug">${escapeHtml(s.overview)}</p>` : ''}
+                    ${seasonEditionsHtml(s)}
                     <div class="flex items-center gap-2 mt-2">
                       <div class="flex-1 h-1.5 bg-bg rounded-full overflow-hidden">
                         <div class="h-full rounded-full ${p.pct === 100 ? 'bg-teal' : 'bg-gold'}" style="width:${p.pct}%"></div>
@@ -4927,6 +5143,21 @@ function initCollectionApp(config) {
           const sel = seasonsList.querySelector(`.add-season-format[data-season="${num}"]`);
           handleAddSeason(item, num, sel ? sel.value : 'bluray');
         });
+      });
+
+      // Exemplaren per seizoen (FASE 35)
+      seasonsList.querySelectorAll('[data-add-season-ed]').forEach((btn) => {
+        btn.addEventListener('click', () => handleAddSeasonEdition(item, Number(btn.dataset.addSeasonEd)));
+      });
+      seasonsList.querySelectorAll('[data-edit-season-ed]').forEach((btn) => {
+        btn.addEventListener('click', () =>
+          handleEditSeasonEdition(item, Number(btn.dataset.editSeasonEd), btn.dataset.eid)
+        );
+      });
+      seasonsList.querySelectorAll('[data-del-season-ed]').forEach((btn) => {
+        btn.addEventListener('click', () =>
+          handleDeleteSeasonEdition(item, Number(btn.dataset.delSeasonEd), btn.dataset.eid)
+        );
       });
     } else {
       seasonsSection.classList.add('hidden');
