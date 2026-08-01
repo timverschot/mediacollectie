@@ -132,12 +132,182 @@ function tmdbMediaTypeOf(item) {
   return item.content_type === 'tv' ? 'tv' : 'movie';
 }
 
+/**
+ * Herkent een IMDb-ID: 'tt0087363', maar ook een hele IMDb-link die je uit je
+ * browser plakt (FASE 33).
+ */
+function imdbIdUit(tekst) {
+  const m = String(tekst || '').match(/\btt\d{6,10}\b/i);
+  return m ? m[0].toLowerCase() : '';
+}
+
+/**
+ * Zoekt een titel op via zijn IMDb-ID.
+ *
+ * Waarom dit bestaat: sommige films zijn op TMDb niet te vinden door te zoeken
+ * op de naam die jij kent — een andere landstitel, een vertaling, een
+ * spellingsvariant. Meestal staat de film er wél gewoon in. TMDb heeft een
+ * gratis opzoekfunctie op externe ID's, dus met de tt-code uit de IMDb-link
+ * kom je er alsnog. (Een echte IMDb-API bestaat niet gratis: IMDb verkoopt zijn
+ * gegevens via AWS Data Exchange aan bedrijfstarieven.)
+ */
+async function tmdbFindByImdb(imdbId, apiKey) {
+  const url =
+    `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}` +
+    `?api_key=${encodeURIComponent(apiKey)}&language=nl-NL&external_source=imdb_id`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('TMDb-fout: ' + resp.status);
+  const data = await resp.json();
+  const films = (data.movie_results || []).map((r) => ({ ...r, media_type: 'movie' }));
+  const series = (data.tv_results || []).map((r) => ({ ...r, media_type: 'tv' }));
+  // Een aflevering of seizoen leveren we bewust niet op: die horen niet als
+  // losse titel in een schijvencollectie.
+  return [...films, ...series];
+}
+
 async function tmdbSearch(query, apiKey) {
+  // Plak je een IMDb-ID of een IMDb-link, dan zoeken we daarop in plaats van op
+  // tekst. Levert dat niets op, dan proberen we het alsnog als gewone zoekterm.
+  const imdb = imdbIdUit(query);
+  if (imdb) {
+    const treffers = await tmdbFindByImdb(imdb, apiKey);
+    if (treffers.length) return treffers;
+  }
   const url = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(apiKey)}&language=nl-NL&query=${encodeURIComponent(query)}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error('TMDb-fout: ' + resp.status);
   const data = await resp.json();
   return (data.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv');
+}
+
+/* ==========================================================================
+ * Voorbeeldscherm bij een zoekresultaat (FASE 33)
+ * ==========================================================================
+ * De zoekresultaten waren posterzegels van een centimeter of twee. Bij een
+ * remake, een gelijknamige serie of een film die je maar half herkent, moest je
+ * maar gokken — en dat merk je pas als de verkeerde titel in je collectie staat.
+ *
+ * Dit scherm toont de poster groot, met jaar, soort, score en samenvatting, en
+ * laat je bij meerdere kandidaten wisselen vóór je kiest. Alle gegevens komen
+ * uit de zoekopdracht die toch al gedaan is: geen extra TMDb-verkeer.
+ *
+ * Wordt ter plekke opgebouwd en weer opgeruimd, zodat het werkt op elke pagina
+ * die dit bestand laadt.
+ *
+ * @param kandidaten  [{ title, release_year, media_type, poster_path, overview, rating }]
+ * @param start       index van de kandidaat die nu gekozen is
+ * @returns Promise<number|null>  gekozen index, of null bij annuleren
+ */
+function tmdbPreviewOverlay(kandidaten, start) {
+  return new Promise((resolve) => {
+    let actief = Math.max(0, Math.min(start || 0, kandidaten.length - 1));
+
+    const laag = document.createElement('div');
+    laag.className = 'fixed inset-0 z-[96] flex items-center justify-center p-4 overflow-y-auto';
+    laag.style.background = 'rgba(0,0,0,.8)';
+
+    const paneel = document.createElement('div');
+    paneel.className = 'bg-surface rounded-xl w-full max-w-2xl shadow-2xl ring-1 ring-white/10 p-5 sm:p-6 my-auto';
+    paneel.style.paddingBottom = 'calc(1.25rem + env(safe-area-inset-bottom))';
+
+    const inhoud = document.createElement('div');
+    const strook = document.createElement('div');
+    const knoppen = document.createElement('div');
+    knoppen.className = 'flex flex-wrap gap-2 justify-end mt-5';
+
+    function esc(t) {
+      return String(t == null ? '' : t).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+      );
+    }
+
+    function teken() {
+      const k = kandidaten[actief] || {};
+      const poster = k.poster_path
+        ? `<img src="https://image.tmdb.org/t/p/w342${esc(k.poster_path)}" alt=""
+             class="w-40 sm:w-48 rounded-md shrink-0 ring-1 ring-white/10">`
+        : '<div class="w-40 sm:w-48 aspect-[2/3] rounded-md bg-bg shrink-0"></div>';
+      const score = k.rating ? `★ ${Number(k.rating).toFixed(1)}` : '';
+      inhoud.innerHTML = `
+        <div class="flex gap-4 sm:gap-5">
+          ${poster}
+          <div class="min-w-0 flex-1">
+            <h2 class="font-display text-2xl tracking-wide leading-tight">${esc(k.title)}</h2>
+            <p class="font-mono text-xs text-muted mt-1">
+              ${k.release_year || '—'}
+              · ${k.media_type === 'tv' ? 'TV-reeks' : 'Film'}
+              ${score ? ' · <span class="text-gold">' + esc(score) + '</span>' : ''}
+            </p>
+            <p class="text-sm text-muted mt-3 leading-relaxed max-h-48 overflow-y-auto">${
+              esc(k.overview) || 'Voor deze titel staat er nog geen samenvatting op TMDb.'
+            }</p>
+          </div>
+        </div>`;
+
+      // Meerdere kandidaten: als posterstrook, zodat je ze naast elkaar ziet in
+      // plaats van er blind doorheen te klikken.
+      if (kandidaten.length > 1) {
+        strook.className = 'mt-5 pt-4 border-t border-white/10';
+        strook.innerHTML =
+          `<p class="text-xs font-mono text-muted uppercase mb-2">${kandidaten.length} mogelijke treffers</p>` +
+          '<div class="flex gap-2 overflow-x-auto pb-1">' +
+          kandidaten
+            .map((c, i) => {
+              const mini = c.poster_path
+                ? `<img src="https://image.tmdb.org/t/p/w92${esc(c.poster_path)}" alt="" class="w-full rounded">`
+                : '<div class="w-full aspect-[2/3] rounded bg-bg"></div>';
+              return `
+                <button type="button" data-kies="${i}"
+                  class="w-16 shrink-0 text-left rounded p-1 ${
+                    i === actief ? 'ring-2 ring-gold bg-white/5' : 'ring-1 ring-white/10 hover:bg-white/5'
+                  }">
+                  ${mini}
+                  <span class="block text-[10px] text-muted font-mono mt-1 truncate">${c.release_year || '—'}</span>
+                </button>`;
+            })
+            .join('') +
+          '</div>';
+        strook.querySelectorAll('[data-kies]').forEach((b) => {
+          b.addEventListener('click', () => {
+            actief = Number(b.dataset.kies);
+            teken();
+          });
+        });
+      }
+    }
+
+    const maakKnop = (tekst, klasse, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = klasse;
+      b.textContent = tekst;
+      b.addEventListener('click', fn);
+      return b;
+    };
+    knoppen.appendChild(maakKnop('Sluiten', 'chip', () => klaar(null)));
+    knoppen.appendChild(maakKnop('Deze gebruiken', 'btn btn-primary', () => klaar(actief)));
+
+    paneel.append(inhoud, strook, knoppen);
+    laag.appendChild(paneel);
+    teken();
+
+    function klaar(waarde) {
+      document.removeEventListener('keydown', opToets);
+      laag.remove();
+      resolve(waarde);
+    }
+    function opToets(ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        klaar(null);
+      }
+    }
+    laag.addEventListener('click', (ev) => {
+      if (ev.target === laag) klaar(null);
+    });
+    document.addEventListener('keydown', opToets);
+    document.body.appendChild(laag);
+  });
 }
 
 async function tmdbGet(path, params, apiKey) {

@@ -300,7 +300,12 @@ async function addTitleDoSearch() {
           title="Selecteer om samen toe te voegen">
           <input type="checkbox" class="w-4 h-4 bulk-pick" >
         </label>
-        ${r.poster_path ? `<img src="${addTitleEscapeHtml(TMDB_IMG_BASE + r.poster_path)}" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
+        <!-- FASE 33 — vergrootglas opent het voorbeeld zónder de titel te kiezen.
+             Bij een remake of een gelijknamige serie zag je aan een posterzegel
+             van twee centimeter niet welke je voor je had. -->
+        <button type="button" class="absolute top-1 right-1 z-10 flex items-center justify-center w-7 h-7 rounded bg-black/70 hover:bg-black/90 text-ink text-sm"
+          data-preview title="Bekijk de gegevens van deze titel">&#128269;</button>
+        ${r.poster_path ? `<img src="${addTitleEscapeHtml('https://image.tmdb.org/t/p/w342' + r.poster_path)}" loading="lazy" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
         <p class="text-xs leading-tight" title="${addTitleEscapeHtml(title)}">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
       `;
@@ -308,9 +313,32 @@ async function addTitleDoSearch() {
       // Klik op de kaart = één titel openen met alle keuzes.
       // Vinkje = toevoegen aan de meervoudige selectie.
       div.addEventListener('click', (ev) => {
-        if (ev.target.closest('label')) return;
+        if (ev.target.closest('label') || ev.target.closest('[data-preview]')) return;
         addTitleSelectResult(r);
       });
+
+      // Voorbeeld bekijken; "Deze gebruiken" kiest hem alsnog.
+      const kijk = div.querySelector('[data-preview]');
+      if (kijk) {
+        kijk.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          if (typeof tmdbPreviewOverlay !== 'function') return;
+          const keuze = await tmdbPreviewOverlay(
+            [
+              {
+                title: r.title || r.name || '',
+                release_year: date.slice(0, 4),
+                media_type: r.media_type === 'tv' ? 'tv' : 'movie',
+                poster_path: r.poster_path || '',
+                overview: r.overview || '',
+                rating: r.vote_average || 0,
+              },
+            ],
+            0
+          );
+          if (keuze !== null) addTitleSelectResult(r);
+        });
+      }
 
       const cb = div.querySelector('.bulk-pick');
       cb.addEventListener('change', () => {

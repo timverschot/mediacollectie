@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v33';
+const VERSION = 'v34';
 // De postercache heeft een EIGEN versie, los van de schil. Zo wist een gewone
 // JS/HTML-update (VERSION ophogen) niet telkens alle gedownloade posters —
 // scheelt fors dataverbruik op gsm. Verhoog IMAGE_VERSION enkel als je de

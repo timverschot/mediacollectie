@@ -308,6 +308,83 @@ function initCollectionApp(config) {
     return path ? POSTER_BASE + path : '';
   }
 
+  /* ------------------------------------------------------------------
+   * Je eigen hoesfoto als poster (FASE 33)
+   * ------------------------------------------------------------------
+   * TMDb-posters zijn gewone webadressen; een hoesfoto van jou staat in je
+   * Drive en moet eerst opgehaald worden. Dat mag het raster niet vertragen,
+   * dus laden we zo'n foto pas wanneer de kaart in beeld komt — en daarna
+   * onthouden we hem voor de rest van het bezoek.
+   *
+   * De kosten schalen met je eigen keuzes: alleen titels waarbij jij dit
+   * instelt halen een bestand op. Bij de rest verandert er niets.
+   */
+  const coverPosterCache = new Map(); // Drive-bestand-id -> blob-URL
+  let coverPosterWaarnemer = null;
+
+  function coverPosterObserver() {
+    if (coverPosterWaarnemer || typeof IntersectionObserver === 'undefined') return coverPosterWaarnemer;
+    coverPosterWaarnemer = new IntersectionObserver(
+      (rijen) => {
+        rijen.forEach((rij) => {
+          if (!rij.isIntersecting) return;
+          const el = rij.target;
+          coverPosterWaarnemer.unobserve(el);
+          laadCoverPoster(el);
+        });
+      },
+      // Ruim vóór de kaart in beeld komt beginnen, zodat je hem zelden ziet
+      // opbouwen tijdens het scrollen.
+      { rootMargin: '400px 0px' }
+    );
+    return coverPosterWaarnemer;
+  }
+
+  async function laadCoverPoster(el) {
+    const fileId = el.dataset.coverPoster;
+    if (!fileId) return;
+    try {
+      let url = coverPosterCache.get(fileId);
+      if (!url) {
+        if (typeof driveCoverBlobUrl !== 'function') return;
+        url = await driveCoverBlobUrl(fileId);
+        coverPosterCache.set(fileId, url);
+      }
+      el.src = url;
+      el.classList.remove('opacity-0');
+      const skel = el.previousElementSibling;
+      if (skel && skel.classList.contains('poster-skel')) skel.remove();
+    } catch (err) {
+      // Foto niet op te halen — offline, of het bestand is intussen verwijderd.
+      // Dan tonen we alsnog de TMDb-poster in plaats van een kaart die eeuwig
+      // blijft laden.
+      console.warn('Hoesfoto-poster niet geladen, terugval op TMDb:', err);
+      const terugval = el.dataset.coverFallback;
+      const skel = el.previousElementSibling;
+      if (terugval) {
+        el.src = terugval;
+        el.classList.remove('opacity-0');
+        if (skel && skel.classList.contains('poster-skel')) skel.remove();
+      } else if (skel && skel.classList.contains('poster-skel')) {
+        skel.remove();
+      }
+    }
+  }
+
+  /** Koppelt de waarnemer aan alle nog niet geladen hoesfoto-posters. */
+  function volgCoverPosters(container) {
+    const waarnemer = coverPosterObserver();
+    if (!waarnemer) return;
+    (container || els.grid).querySelectorAll('img[data-cover-poster]:not([src])').forEach((el) => {
+      waarnemer.observe(el);
+    });
+  }
+
+  /** Gebruikt deze titel een eigen hoesfoto als poster? */
+  function coverPosterId(item) {
+    return item && item.custom_poster_cover_id ? item.custom_poster_cover_id : '';
+  }
+
   /** srcset voor de poster van een titel (leeg als er geen poster is). */
   function posterSrcset(item) {
     return posterSrcsetFor(item.custom_poster_path || item.poster_path);
@@ -1290,6 +1367,7 @@ function initCollectionApp(config) {
     els.grid.appendChild(fragment);
 
     els.loadMore.classList.toggle('hidden', state.visibleCount >= units.length);
+    volgCoverPosters();
     runReveal();
   }
 
@@ -1328,6 +1406,7 @@ function initCollectionApp(config) {
 
     // Klikken, toetsen en sfeerlicht hangen aan het ráster, niet aan de kaarten
     // (zie wireGridInteractions). Hier hoeft dus niets meer gekoppeld te worden.
+    volgCoverPosters();
     runReveal();
 
     // Scroll naar de titel waar de plank stond en wis het anker. Uitgesteld tot
@@ -2394,9 +2473,13 @@ function initCollectionApp(config) {
       <div data-open-id="${escapeHtml(item.id)}" data-accent-id="${escapeAttr(item.id)}"${selectAttrs(selIds)} class="case-card reveal group text-left cursor-pointer${selectRootClass(selIds)}" role="button" tabindex="0">
         <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] shadow-lg ring-1 ring-white/5 group-hover:ring-[#C9A227]/40">
           ${selectMarkHtml(selIds)}
-          ${cover ? '<div class="poster-skel"></div>' : ''}
+          ${cover || coverPosterId(item) ? '<div class="poster-skel"></div>' : ''}
           ${
-            cover
+            coverPosterId(item)
+              ? `<img data-cover-poster="${escapeAttr(coverPosterId(item))}" data-cover-fallback="${escapeAttr(cover)}"
+                   alt="${escapeAttr(item.title)}" decoding="async"
+                   class="w-full h-full object-cover relative z-[2] opacity-0 transition-opacity duration-200">`
+              : cover
               ? `<img src="${escapeAttr(cover)}"${posterSizingAttrs(item, GRID_POSTER_SIZES)} alt="${escapeAttr(item.title)}" loading="lazy" decoding="async"
                    class="w-full h-full object-cover relative z-[2]"
                    onload="this.previousElementSibling && this.previousElementSibling.remove()"
@@ -4966,6 +5049,9 @@ function initCollectionApp(config) {
   // Je kan een andere TMDb-poster kiezen dan de standaard, bv. de artwork die
   // op jouw editie staat. De keuze wordt pas bewaard bij 'Opslaan'.
   let pendingPosterPath = null; // null = onveranderd, '' = terug naar standaard
+  // FASE 33 — je eigen hoesfoto als poster. null = onveranderd, '' = niet meer
+  // gebruiken, anders het Drive-bestand-id van de voorkantfoto.
+  let pendingPosterCoverId = null;
 
   function setupPosterPicker(item) {
     const m = els.modal;
@@ -4976,13 +5062,45 @@ function initCollectionApp(config) {
     if (!loadBtn || !grid) return;
 
     pendingPosterPath = null;
+    pendingPosterCoverId = null;
     grid.innerHTML = '';
     grid.classList.add('hidden');
-    statusEl.textContent = item.custom_poster_path ? 'eigen poster gekozen' : '';
-    resetBtn.classList.toggle('hidden', !item.custom_poster_path);
+    statusEl.textContent = item.custom_poster_cover_id
+      ? 'je eigen hoesfoto wordt als poster gebruikt'
+      : item.custom_poster_path
+      ? 'eigen poster gekozen'
+      : '';
+    resetBtn.classList.toggle('hidden', !item.custom_poster_path && !item.custom_poster_cover_id);
+
+    // Knop 'Mijn hoesfoto als poster' alleen tonen als er ook echt een
+    // voorkantfoto is; anders is het een dode knop.
+    const coverBtn = m.querySelector('[data-edit-poster-cover]');
+    const eigenCovers = (item.editions || [])
+      .map((ed) => ed.custom_front_cover_id)
+      .filter(Boolean);
+    if (coverBtn) {
+      const bruikbaar = eigenCovers.length > 0;
+      coverBtn.classList.toggle('hidden', !bruikbaar);
+      coverBtn.textContent =
+        item.custom_poster_cover_id ? 'Toch de TMDb-poster gebruiken' : 'Mijn hoesfoto als poster';
+      coverBtn.onclick = () => {
+        if (item.custom_poster_cover_id && pendingPosterCoverId === null) {
+          pendingPosterCoverId = '';
+          statusEl.textContent = 'terug naar de TMDb-poster bij opslaan';
+          return;
+        }
+        // De voorkantfoto van het exemplaar dat je nu bekijkt, anders de eerste.
+        const ed = typeof activeEdition === 'function' ? activeEdition(item) : null;
+        pendingPosterCoverId = (ed && ed.custom_front_cover_id) || eigenCovers[0];
+        pendingPosterPath = ''; // eigen hoesfoto en TMDb-poster sluiten elkaar uit
+        statusEl.textContent = 'je hoesfoto wordt de poster — klik Opslaan';
+        grid.querySelectorAll('[data-poster-option]').forEach((el) => el.classList.remove('ring-2', 'ring-gold'));
+      };
+    }
 
     resetBtn.onclick = () => {
       pendingPosterPath = '';
+      pendingPosterCoverId = '';
       statusEl.textContent = 'terug naar standaard bij opslaan';
       grid.querySelectorAll('[data-poster-option]').forEach((el) => el.classList.remove('ring-2', 'ring-gold'));
     };
@@ -5026,6 +5144,7 @@ function initCollectionApp(config) {
         grid.querySelectorAll('[data-poster-option]').forEach((btn) => {
           btn.addEventListener('click', () => {
             pendingPosterPath = btn.dataset.posterOption;
+            pendingPosterCoverId = ''; // een TMDb-poster vervangt de hoesfotokeuze
             grid.querySelectorAll('[data-poster-option]').forEach((el) => el.classList.remove('ring-2', 'ring-gold'));
             btn.classList.add('ring-2', 'ring-gold');
             statusEl.textContent = 'gekozen — klik Opslaan om te bewaren';
@@ -5063,6 +5182,7 @@ function initCollectionApp(config) {
       watched: item.watched,
       saga: item.saga,
       custom_poster_path: item.custom_poster_path,
+      custom_poster_cover_id: item.custom_poster_cover_id,
       editions: JSON.parse(JSON.stringify(item.editions || [])),
     };
 
@@ -5126,6 +5246,7 @@ function initCollectionApp(config) {
       syncLegacyFieldsFromEditions(item);
       // Posterkeuze: null = niets veranderd, '' = terug naar de standaardposter.
       if (pendingPosterPath !== null) item.custom_poster_path = pendingPosterPath;
+      if (pendingPosterCoverId !== null) item.custom_poster_cover_id = pendingPosterCoverId;
 
       buildFacetChips(state.all);
       applyFilters();

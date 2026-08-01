@@ -99,6 +99,10 @@ async function bulkFindCandidates(entry, apiKey) {
       title: r.title || r.name || '',
       release_year: y,
       poster_path: r.poster_path || '',
+      // FASE 33 — samenvatting en score meenemen uit deze zoekopdracht, zodat
+      // het voorbeeldscherm ze kan tonen zonder TMDb nóg eens te bevragen.
+      overview: r.overview || '',
+      rating: r.vote_average || 0,
       score,
     };
   });
@@ -252,7 +256,7 @@ function initBulkImportUI(onSaved) {
           return `
             <div class="flex items-center gap-3 py-2 px-2 rounded bg-bg/50">
               <span class="w-4 shrink-0"></span>
-              <span class="w-10 h-14 shrink-0 rounded bg-bg"></span>
+              <span class="w-16 h-24 shrink-0 rounded bg-bg"></span>
               <span class="flex-1 min-w-0">
                 <span class="block text-sm text-muted truncate">${bulkEsc(row.source.title)}</span>
                 <span class="block text-xs text-muted/70">niets gevonden — voeg hem handmatig toe</span>
@@ -262,11 +266,14 @@ function initBulkImportUI(onSaved) {
         return `
           <div class="flex items-center gap-3 py-2 px-2 rounded hover:bg-white/5 ${row.already ? 'opacity-60' : ''}">
             <input type="checkbox" class="w-4 h-4 shrink-0" data-bulk-row="${i}" ${row.selected ? 'checked' : ''}>
-            ${
-              cand.poster_path
-                ? `<img src="https://image.tmdb.org/t/p/w92${bulkEsc(cand.poster_path)}" class="w-10 h-14 object-cover rounded shrink-0" loading="lazy" alt="">`
-                : '<span class="w-10 h-14 shrink-0 rounded bg-bg"></span>'
-            }
+            <button type="button" data-bulk-preview="${i}" title="Bekijk de gegevens van deze treffer"
+              class="shrink-0 rounded overflow-hidden ring-1 ring-white/10 hover:ring-gold cursor-zoom-in">
+              ${
+                cand.poster_path
+                  ? `<img src="https://image.tmdb.org/t/p/w154${bulkEsc(cand.poster_path)}" class="w-16 h-24 object-cover" loading="lazy" alt="">`
+                  : '<span class="block w-16 h-24 bg-bg"></span>'
+              }
+            </button>
             <span class="flex-1 min-w-0">
               <span class="block text-sm text-ink truncate">${bulkEsc(cand.title)}
                 <span class="text-muted font-mono text-xs">${cand.release_year || '—'}</span>
@@ -278,8 +285,8 @@ function initBulkImportUI(onSaved) {
             </span>
             ${
               row.candidates.length > 1
-                ? `<button type="button" class="chip !py-1 !px-2 text-[10px] shrink-0" data-bulk-next="${i}">andere (${row.chosen + 1}/${row.candidates.length})</button>`
-                : ''
+                ? `<button type="button" class="chip !py-1 !px-2 text-[10px] shrink-0" data-bulk-preview="${i}">kies (${row.chosen + 1}/${row.candidates.length})</button>`
+                : `<button type="button" class="chip !py-1 !px-2 text-[10px] shrink-0" data-bulk-preview="${i}">bekijk</button>`
             }
           </div>`;
       })
@@ -290,10 +297,16 @@ function initBulkImportUI(onSaved) {
         bulkRows[Number(cb.dataset.bulkRow)].selected = cb.checked;
       });
     });
-    listEl.querySelectorAll('[data-bulk-next]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const row = bulkRows[Number(btn.dataset.bulkNext)];
-        row.chosen = (row.chosen + 1) % row.candidates.length;
+    // FASE 33 — voorbeeld openen in plaats van blind door de treffers klikken.
+    listEl.querySelectorAll('[data-bulk-preview]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const i = Number(btn.dataset.bulkPreview);
+        const row = bulkRows[i];
+        if (!row || !row.candidates.length) return;
+        if (typeof tmdbPreviewOverlay !== 'function') return;
+        const keuze = await tmdbPreviewOverlay(row.candidates, row.chosen);
+        if (keuze === null) return;
+        row.chosen = keuze;
         renderReview();
       });
     });
