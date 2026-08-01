@@ -338,6 +338,8 @@ async function addTitleDoSearch() {
              van twee centimeter niet welke je voor je had. -->
         <button type="button" class="absolute top-1 right-1 z-10 flex items-center justify-center w-7 h-7 rounded bg-black/70 hover:bg-black/90 text-ink text-sm"
           data-preview title="Bekijk de gegevens van deze titel">&#128269;</button>
+        <button type="button" class="absolute bottom-9 right-1 z-10 chip !py-0.5 !px-2 text-[10px] !bg-black/70 !border-gold/50 !text-gold"
+          data-wish title="Meteen op je verlanglijst zetten">+ wens</button>
         ${r.poster_path ? `<img src="${addTitleEscapeHtml('https://image.tmdb.org/t/p/w342' + r.poster_path)}" loading="lazy" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
         <p class="text-xs leading-tight" title="${addTitleEscapeHtml(title)}">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
@@ -349,6 +351,17 @@ async function addTitleDoSearch() {
         if (ev.target.closest('label') || ev.target.closest('[data-preview]')) return;
         addTitleSelectResult(r);
       });
+
+      // FASE 37 — rechtstreeks naar de verlanglijst, zonder het formulier.
+      // Kon alleen via het volledige formulier met het statusveld, en dat
+      // vond je niet als je gewoon een lijstje wil opbouwen van wat je nog zoekt.
+      const wensKnop = div.querySelector('[data-wish]');
+      if (wensKnop) {
+        wensKnop.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await addTitleQuickWishlist(r, wensKnop);
+        });
+      }
 
       // Voorbeeld bekijken; "Deze gebruiken" kiest hem alsnog.
       const kijk = div.querySelector('[data-preview]');
@@ -404,6 +417,75 @@ async function addTitleOpenForTmdb(tmdbId, mediaType) {
   if (sagaBulk) sagaBulk.classList.add('hidden');
 
   await addTitleSelectResult({ id: tmdbId, media_type: mediaType === 'tv' ? 'tv' : 'movie' });
+}
+
+/**
+ * Zet een zoekresultaat meteen op de verlanglijst (FASE 37).
+ *
+ * Zonder het formulier te openen: je bent een lijstje aan het opbouwen van wat
+ * je nog zoekt, niet iets aan het registreren dat in je kast staat. Formaat
+ * wordt je onthouden voorkeur; dat pas je later aan als je hem koopt.
+ */
+async function addTitleQuickWishlist(r, knop) {
+  const c = getConfig();
+  const statusEl = document.getElementById('form-status');
+  const zeg = (tekst, kleur) => {
+    if (statusEl) {
+      statusEl.textContent = tekst;
+      statusEl.className = 'text-sm font-mono ' + (kleur || 'text-muted');
+    }
+  };
+  if (!c.tmdbKey) {
+    zeg('Vul eerst je TMDb-sleutel in via Beheer → Instellingen.', 'text-gold');
+    return;
+  }
+  if (knop) knop.disabled = true;
+  try {
+    const details = await tmdbDetails(r.id, r.media_type === 'tv' ? 'tv' : 'movie', c.tmdbKey);
+    const slug = slugify(details.title, details.release_year);
+    const { movies } = await driveLoadMovies();
+    if (movies.some((m) => m.id === slug)) {
+      zeg(`"${details.title}" staat al in je collectie.`, 'text-gold');
+      return;
+    }
+    const nu = new Date();
+    const entry = {
+      id: slug,
+      content_type: r.media_type === 'tv' ? 'tv' : 'movie',
+      date_added: nu.toISOString().slice(0, 10),
+      added_at: nu.toISOString(),
+      watched: false,
+      editions: [
+        {
+          eid: 'e1',
+          format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+          notes: '',
+          boxset: '',
+          location: '',
+          wishlist: true,
+          date_added: nu.toISOString().slice(0, 10),
+          custom_front_cover_id: '',
+          custom_back_cover_id: '',
+          custom_front_cover: '',
+          custom_back_cover: '',
+        },
+      ],
+      ...details,
+      seasons: [],
+    };
+    normalizeMovieEntry(entry);
+    await upsertMovieInDrive(entry);
+    zeg(`✓ "${details.title}" op je verlanglijst gezet.`, 'text-teal');
+    if (knop) {
+      knop.textContent = '✓ wens';
+      knop.classList.add('chip-active');
+    }
+    if (addTitleOnSaved) addTitleOnSaved(entry);
+  } catch (err) {
+    zeg('✗ ' + err.message, 'text-red-400');
+  } finally {
+    if (knop) knop.disabled = false;
+  }
 }
 
 async function addTitleSelectResult(r) {

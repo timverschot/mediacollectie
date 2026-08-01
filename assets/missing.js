@@ -77,6 +77,37 @@ function sagasFrom(movies) {
   return [...perSaga.values()].sort((a, b) => a.naam.localeCompare(b.naam));
 }
 
+/**
+ * Je eigen reeksen (FASE 37).
+ *
+ * TMDb kent alleen filmcollecties. Twee series die elkaars vervolg zijn — The
+ * Young Pope en The New Pope — staan daar volledig los van elkaar, en dus ook
+ * hier. Zet je ze zelf in dezelfde reeks, dan hoort dat verband bij jou thuis
+ * en niet bij TMDb.
+ *
+ * Wat er ontbreekt kan de app dan niet zélf weten: er is geen bron die zegt
+ * hoeveel delen zo'n reeks heeft. Wél weet ze wat jíj erover hebt vastgelegd —
+ * alles wat je op je verlanglijst zette. Dat zijn de gaten die je zelf hebt
+ * benoemd, en precies die horen op deze pagina.
+ */
+function eigenReeksenFrom(movies) {
+  const perSaga = new Map();
+  movies.forEach((m) => {
+    const naam = (m.saga || '').trim();
+    if (!naam) return;
+    if (!perSaga.has(naam)) perSaga.set(naam, { naam, metTmdb: false, inBezit: [], wensen: [] });
+    const groep = perSaga.get(naam);
+    if (m.saga_id) groep.metTmdb = true;
+    if (m.wishlist) groep.wensen.push(m);
+    else groep.inBezit.push(m);
+  });
+  return [...perSaga.values()]
+    // Reeksen die TMDb kent worden hieronder al volledig nagekeken; die hoeven
+    // hier niet nog eens. En zonder openstaande wensen valt er niets te melden.
+    .filter((g) => !g.metTmdb && g.wensen.length)
+    .sort((a, b) => a.naam.localeCompare(b.naam));
+}
+
 async function initMissingPage() {
   const seriesEl = document.getElementById('missing-series');
   const sagasEl = document.getElementById('missing-sagas');
@@ -93,6 +124,7 @@ async function initMissingPage() {
 
   const series = missingSeriesFrom(movies);
   const sagas = sagasFrom(movies);
+  const eigenReeksen = eigenReeksenFrom(movies);
   let sagaResultaten = null; // pas gevuld na het nakijken
   let tab = 'alles';
 
@@ -198,11 +230,57 @@ async function initMissingPage() {
         .join('');
   }
 
+  function toonEigenReeksen() {
+    const el = document.getElementById('missing-eigen');
+    if (!el) return;
+    if (tab === 'series' || !eigenReeksen.length) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML =
+      '<p class="font-display text-2xl tracking-wide">Je eigen reeksen</p>' +
+      '<p class="text-sm text-muted -mt-2">Reeksen die je zelf hebt gemaakt, bijvoorbeeld voor twee series die TMDb niet aan elkaar koppelt. Wat hier als ontbrekend staat, is wat jij op je verlanglijst zette.</p>' +
+      eigenReeksen
+        .map((g) => {
+          const kaartje = (m, wens) => {
+            const poster = m.poster_path
+              ? `<img src="${missEsc(MISSING_POSTER + m.poster_path)}" alt="" loading="lazy" class="w-full rounded">`
+              : '<div class="w-full aspect-[2/3] rounded bg-bg"></div>';
+            return `
+              <div class="w-24 shrink-0">
+                <div class="ring-1 ${wens ? 'ring-gold/60' : 'ring-white/10'} rounded overflow-hidden">${poster}</div>
+                <p class="text-[11px] leading-tight mt-1 truncate" title="${missEsc(m.title)}">${missEsc(m.title)}</p>
+                <p class="text-[10px] font-mono ${wens ? 'text-gold' : 'text-muted'}">${
+                  m.release_year || '—'
+                }${wens ? ' · wens' : ''}</p>
+              </div>`;
+          };
+          return `
+            <div class="panel">
+              <div class="flex items-baseline justify-between gap-3 flex-wrap">
+                <p class="font-display text-xl tracking-wide">${missEsc(g.naam)}</p>
+                <p class="font-mono text-xs text-muted">
+                  ${g.inBezit.length} in bezit · <span class="text-gold">${g.wensen.length} nog te halen</span>
+                </p>
+              </div>
+              <div class="flex gap-3 overflow-x-auto mt-3 pb-1">
+                ${g.wensen.map((m) => kaartje(m, true)).join('')}
+                ${g.inBezit.map((m) => kaartje(m, false)).join('')}
+              </div>
+            </div>`;
+        })
+        .join('');
+  }
+
   function toonSamenvatting() {
     const seizoenGaten = series.reduce((n, r) => n + r.ontbreekt.length, 0);
     const stukken = [];
     if (series.length) {
       stukken.push(`${seizoenGaten} seizoen${seizoenGaten === 1 ? '' : 'en'} in ${series.length} serie${series.length === 1 ? '' : 's'}`);
+    }
+    const eigenGaten = eigenReeksen.reduce((n, g) => n + g.wensen.length, 0);
+    if (eigenGaten) {
+      stukken.push(`${eigenGaten} titel${eigenGaten === 1 ? '' : 's'} in ${eigenReeksen.length} eigen reeks${eigenReeksen.length === 1 ? '' : 'en'}`);
     }
     if (sagaResultaten) {
       const deelGaten = sagaResultaten.reduce((n, r) => n + r.ontbreekt.length, 0);
@@ -210,12 +288,13 @@ async function initMissingPage() {
       if (deelGaten) stukken.push(`${deelGaten} deel${deelGaten === 1 ? '' : 'en'} in ${reeksen} reeks${reeksen === 1 ? '' : 'en'}`);
     }
     summaryEl.textContent = stukken.length ? 'Ontbreekt: ' + stukken.join(' · ') : '';
-    const leeg = !series.length && (!sagaResultaten || !sagaResultaten.some((r) => r.ontbreekt.length)) && !sagas.length;
+    const leeg = !series.length && !eigenReeksen.length && (!sagaResultaten || !sagaResultaten.some((r) => r.ontbreekt.length)) && !sagas.length;
     emptyEl.classList.toggle('hidden', !leeg);
   }
 
   function tekenAlles() {
     toonSeries();
+    toonEigenReeksen();
     toonSagas();
     toonSamenvatting();
   }

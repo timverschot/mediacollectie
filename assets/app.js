@@ -1854,6 +1854,25 @@ function initCollectionApp(config) {
     );
   }
 
+  /**
+   * Seizoen op de verlanglijst (FASE 37). Een exemplaar met `wishlist: true`,
+   * dus het seizoen telt níet als in bezit — maar het staat wel vast dat je het
+   * nog wil, en het verschijnt zo op de pagina Ontbreekt.
+   */
+  function handleWishSeason(item, seasonNumber, format) {
+    if (!requireWrite()) return;
+    const season = (item.seasons || []).find((s) => s.season_number === seasonNumber);
+    if (!season) return;
+    const vorige = JSON.parse(JSON.stringify(item.seasons));
+    if (!Array.isArray(season.editions)) season.editions = [];
+    season.editions.push({
+      ...nieuwSeizoenExemplaar(nextSeasonEditionId(season), format),
+      wishlist: true,
+      date_added: new Date().toISOString().slice(0, 10),
+    });
+    bewaarSeizoenen(item, vorige);
+  }
+
   function handleAddSeason(item, seasonNumber, format) {
     const season = item.seasons.find((s) => s.season_number === seasonNumber);
     if (!season) return;
@@ -5096,7 +5115,10 @@ function initCollectionApp(config) {
                   <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-1 text-xs font-mono" data-season="${s.season_number}">
                     ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
                   </select>
-                  <button type="button" class="text-gold hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
+                  <button type="button" class="text-teal hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
+                  <!-- FASE 37 — een seizoen dat je nog moet kopen kon je nergens
+                       vastleggen; alleen 'in bezit' bestond. -->
+                  <button type="button" class="text-gold hover:text-white text-xs underline" data-wish-season="${s.season_number}">op verlanglijst</button>
                 </div>
               </div>
             </div>
@@ -5142,6 +5164,14 @@ function initCollectionApp(config) {
           const num = Number(btn.dataset.addSeason);
           const sel = seasonsList.querySelector(`.add-season-format[data-season="${num}"]`);
           handleAddSeason(item, num, sel ? sel.value : 'bluray');
+        });
+      });
+
+      seasonsList.querySelectorAll('[data-wish-season]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const num = Number(btn.dataset.wishSeason);
+          const sel = seasonsList.querySelector(`.add-season-format[data-season="${num}"]`);
+          handleWishSeason(item, num, sel ? sel.value : 'bluray');
         });
       });
 
@@ -5258,6 +5288,17 @@ function initCollectionApp(config) {
     if (locationInput) locationInput.value = ed.location || '';
     const sagaInput = m.querySelector('[data-edit-saga]');
     if (sagaInput) sagaInput.value = item.saga || '';
+
+    // Suggestielijst vullen met de reeksen die je al gebruikt (FASE 37). Zonder
+    // dit typ je "The Young Pope" de tweede keer nét anders en blijven de twee
+    // series alsnog los van elkaar staan.
+    const sagaLijst = document.getElementById('saga-suggesties');
+    if (sagaLijst) {
+      const namen = [...new Set(state.all.map((x) => (x.saga || '').trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b)
+      );
+      sagaLijst.innerHTML = namen.map((n) => `<option value="${escapeAttr(n)}"></option>`).join('');
+    }
 
     // Eigen titel (FASE 34). Het interne id van een titel blijft ongewijzigd —
     // daar hangen je hoesfoto's, prijsmetingen en backups aan vast. We wijzigen

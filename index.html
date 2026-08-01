@@ -1021,7 +1021,15 @@
             </div>
             <div>
               <label>Reeks (houdt samenhorende titels bij elkaar)</label>
-              <input type="text" data-edit-saga placeholder="Bv. Harry Potter Collection, of je eigen groepsnaam">
+              <!-- FASE 37 — suggestielijst met je bestaande reeksen. Twee series aan
+                   elkaar koppelen (The Young Pope / The New Pope) gebeurt via dit veld,
+                   en één typfout betekende dat ze alsnog los bleven staan. -->
+              <input type="text" data-edit-saga list="saga-suggesties" autocomplete="off"
+                     placeholder="Bv. Harry Potter Collection, of je eigen groepsnaam">
+              <datalist id="saga-suggesties"></datalist>
+              <p class="!normal-case text-xs text-muted font-mono mt-1">
+                Zelfde naam bij twee titels = ze horen bij elkaar. Ook voor series die TMDb niet aan elkaar koppelt.
+              </p>
             </div>
             <div>
               <div class="flex items-center justify-between gap-2 mb-1">
