@@ -753,6 +753,8 @@
           <button type="button" class="chip" data-type="movie">Films</button>
           <button type="button" class="chip" data-type="tv">TV-reeksen</button>
           <button type="button" class="chip" data-type="animation">Animatie</button>
+          <!-- FASE 36 — handmatig toegevoegde specials en losse afleveringen. -->
+          <button type="button" class="chip" data-type="special">Specials</button>
         </div>
         <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Status</span>
         <div id="status-chips" class="flex flex-wrap gap-2">
@@ -1118,6 +1120,8 @@
       <div class="flex gap-3 mb-4">
         <input type="search" id="search-input" placeholder="Zoek op titel, of plak een IMDb-link/tt-code…">
         <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
+        <!-- FASE 36 — voor schijven die in geen enkele databank staan. -->
+        <button id="manual-btn" class="btn btn-secondary shrink-0" title="Voor uitgaves die niet in TMDb of IMDb staan">Handmatig</button>
       </div>
 
       <div id="search-results" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6 gap-3 mb-3"></div>
@@ -1580,6 +1584,7 @@
   <script src="assets/drive.js"></script>
   <script src="assets/admin.js"></script>
   <script src="assets/universes.js"></script>
+  <script src="assets/manual-entry.js"></script>
   <script src="assets/add-title.js"></script>
   <script src="assets/bulk-import.js"></script>
   <script src="assets/app.js"></script>

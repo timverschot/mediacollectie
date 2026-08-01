@@ -38,6 +38,39 @@ let addTitleOnSaved = null;
 function initAddTitleUI(onSaved) {
   addTitleOnSaved = onSaved || null;
   document.getElementById('search-btn').addEventListener('click', addTitleDoSearch);
+
+  // FASE 36 — handmatig toevoegen, voor schijven die nergens geregistreerd zijn.
+  const manualBtn = document.getElementById('manual-btn');
+  if (manualBtn && typeof manualEntryDialog === 'function') {
+    manualBtn.addEventListener('click', async () => {
+      const statusEl = document.getElementById('form-status') || document.getElementById('search-results');
+      try {
+        const { movies } = await driveLoadMovies();
+        movies.forEach((m) => normalizeMovieEntry(m));
+        const gegevens = await manualEntryDialog(movies);
+        if (!gegevens) return;
+
+        const { entry, ouder } = manualBuildEntry(gegevens, movies);
+        // De ouder mee wegschrijven als die een reeksnaam gekregen heeft;
+        // anders staat de special in een reeks die aan de andere kant niet
+        // bestaat en komt hij bij het groeperen alleen te staan.
+        const teBewaren = ouder ? [entry, ouder] : [entry];
+        await upsertMoviesBatchInDrive(teBewaren);
+
+        const waar = entry.saga ? ` bij "${entry.saga}"` : '';
+        if (statusEl) {
+          statusEl.textContent = `✓ "${entry.title}" handmatig toegevoegd${waar}.`;
+          statusEl.className = 'text-sm font-mono text-teal';
+        }
+        if (addTitleOnSaved) addTitleOnSaved(entry);
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = '✗ ' + err.message;
+          statusEl.className = 'text-sm font-mono text-red-400';
+        }
+      }
+    });
+  }
   document.getElementById('search-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addTitleDoSearch();
   });
