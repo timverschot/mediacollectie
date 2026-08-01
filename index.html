@@ -758,6 +758,13 @@
           <button type="button" class="chip" data-status="owned">In bezit</button>
           <button type="button" class="chip" data-status="wishlist">Verlanglijst</button>
         </div>
+        <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Reeks</span>
+        <!-- FASE 32 — er was wel een filter op TV-reeksen, maar niets om alleen
+             films te zien die bij een filmreeks horen. -->
+        <div id="saga-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-saga-filter="in" title="Alleen titels die bij een reeks horen">In een reeks</button>
+          <button type="button" class="chip" data-saga-filter="los" title="Alleen titels zonder reeks">Losstaand</button>
+        </div>
         <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Bekeken</span>
         <div id="watched-chips" class="flex flex-wrap gap-2">
           <button type="button" class="chip" data-watched="watched">Bekeken</button>
@@ -1053,6 +1060,9 @@
             <div data-field="saga-bulk-bar" class="hidden mt-2 pt-2 border-t border-white/5 flex flex-wrap gap-2 items-center">
               <span data-field="saga-bulk-count" class="text-xs text-gold font-mono"></span>
               <button type="button" data-saga-bulk-wish class="chip !py-1 !px-2.5 text-[11px]">→ Naar verlanglijst</button>
+              <!-- FASE 32 — delen die je wél hebt kon je alleen één voor één
+                   toevoegen via het volledige formulier. -->
+              <button type="button" data-saga-bulk-own class="chip !py-1 !px-2.5 text-[11px] !border-teal/50 !text-teal">→ In bezit</button>
               <button type="button" data-saga-bulk-clear class="chip !py-1 !px-2.5 text-[11px]">Selectie wissen</button>
               <span data-field="saga-bulk-status" class="text-[11px] font-mono"></span>
             </div>
@@ -1460,6 +1470,66 @@
   <!-- Selectiebalk: verschijnt onderaan zodra de selectiemodus aanstaat.
        Staat boven de offline-banner in z-volgorde en houdt rekening met de
        home-balk van een iPhone. -->
+  <!-- FASE 32 — massabewerking. De selectiemodus kon tot nu toe alleen
+       verwijderen. Zet je per ongeluk een hele batch op het verkeerde formaat,
+       dan was elke titel apart openen de enige weg terug. -->
+  <div id="bulk-edit-modal" class="hidden fixed inset-0 z-[88] flex items-center justify-center p-4 bg-black/70">
+    <div class="bg-surface rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl ring-1 ring-white/10 p-5 sm:p-6"
+         style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="font-display text-2xl tracking-wide">Selectie bewerken</h2>
+        <button type="button" id="bulk-edit-close" aria-label="Sluiten"
+          class="w-11 h-11 rounded-full bg-black/40 hover:bg-black/70 text-ink text-2xl leading-none flex items-center justify-center shrink-0">&times;</button>
+      </div>
+      <p id="bulk-edit-scope" class="text-xs font-mono text-muted mb-5"></p>
+
+      <div class="space-y-5">
+        <div>
+          <label class="block text-xs font-mono text-muted uppercase mb-2">Formaat omzetten</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm text-muted">van</span>
+            <select id="bulk-format-from" class="bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink"></select>
+            <span class="text-sm text-muted">naar</span>
+            <select id="bulk-format-to" class="bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink"></select>
+          </div>
+          <p id="bulk-format-hint" class="text-xs font-mono text-muted mt-2"></p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono text-muted uppercase mb-2">Status</label>
+          <select id="bulk-status" class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink">
+            <option value="">— niet wijzigen —</option>
+            <option value="owned">In bezit</option>
+            <option value="wishlist">Op verlanglijst</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono text-muted uppercase mb-2">Bekeken</label>
+          <select id="bulk-watched" class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink">
+            <option value="">— niet wijzigen —</option>
+            <option value="yes">Bekeken</option>
+            <option value="no">Niet bekeken</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono text-muted uppercase mb-2">Locatie</label>
+          <input type="text" id="bulk-location" placeholder="— niet wijzigen —"
+                 class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted">
+          <p class="text-xs font-mono text-muted mt-2">Leeg laten verandert niets. Typ een spatie om de locatie te wissen.</p>
+        </div>
+      </div>
+
+      <p id="bulk-edit-status" class="text-sm font-mono mt-5"></p>
+
+      <div class="flex flex-wrap gap-2 justify-end mt-5">
+        <button type="button" id="bulk-edit-cancel" class="chip">Annuleren</button>
+        <button type="button" id="bulk-edit-apply" class="btn btn-primary">Toepassen</button>
+      </div>
+    </div>
+  </div>
+
   <div id="select-bar"
        class="hidden fixed left-1/2 -translate-x-1/2 z-[85] bg-surface ring-1 ring-gold/50 rounded-lg shadow-xl px-4 py-3 max-w-[95vw] w-[min(46rem,95vw)]"
        style="bottom: calc(1rem + env(safe-area-inset-bottom));">
@@ -1467,6 +1537,7 @@
       <span id="select-count" class="font-mono text-sm text-gold mr-auto">0 geselecteerd</span>
       <button type="button" id="select-all" class="chip !py-1.5">Alles in beeld</button>
       <button type="button" id="select-none" class="chip !py-1.5">Wissen</button>
+      <button type="button" id="select-edit" class="chip !py-1.5 !border-gold/50 !text-gold" disabled>Bewerken</button>
       <button type="button" id="select-delete" class="chip !py-1.5 !border-red-500/50 !text-red-400" disabled>Verwijderen</button>
       <button type="button" id="select-close" class="chip !py-1.5" aria-label="Selectiemodus sluiten">Klaar</button>
     </div>

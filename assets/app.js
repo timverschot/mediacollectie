@@ -174,6 +174,7 @@ function initCollectionApp(config) {
     activeTypes: new Set(),
     activeGenres: new Set(),
     activeStatus: new Set(),   // 'owned' / 'wishlist'
+    activeSaga: new Set(),     // 'in' = hoort bij een filmreeks, 'los' = losstaand
     activeWatched: new Set(),  // 'watched' / 'unwatched'
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
@@ -219,6 +220,7 @@ function initCollectionApp(config) {
     shelfTrack: document.getElementById('shelf-track'),
     shelfMeta: document.getElementById('shelf-meta'),
     statusChips: document.getElementById('status-chips'),
+    sagaChips: document.getElementById('saga-chips'),
     watchedChips: document.getElementById('watched-chips'),
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
@@ -230,6 +232,8 @@ function initCollectionApp(config) {
     selectDelete: document.getElementById('select-delete'),
     selectClose: document.getElementById('select-close'),
     selectStatus: document.getElementById('select-status'),
+    selectEdit: document.getElementById('select-edit'),
+    bulkEditModal: document.getElementById('bulk-edit-modal'),
     viewChips: document.getElementById('view-chips'),
     filterToggle: document.getElementById('filter-toggle'),
     filterPanel: document.getElementById('filter-panel'),
@@ -838,6 +842,7 @@ function initCollectionApp(config) {
       s(state.activeTypes),
       s(state.activeGenres),
       s(state.activeStatus),
+      s(state.activeSaga),
       s(state.activeWatched),
       s(state.activeDecades),
       s(state.activeCerts),
@@ -902,6 +907,14 @@ function initCollectionApp(config) {
       if (state.activeWatched.size) {
         const w = item.watched ? 'watched' : 'unwatched';
         if (!state.activeWatched.has(w)) return false;
+      }
+      // FASE 32 — filter op filmreeksen. Er was wel een filter op TV-reeksen,
+      // maar niets om alleen films te zien die bij een reeks horen (Bond, Star
+      // Wars, Alien). 'Reeksen groeperen' is een wéérgave, geen filter: dat
+      // toont nog steeds al je losse titels ernaast.
+      if (state.activeSaga.size) {
+        const hoortBijReeks = sagaOf(item) ? 'in' : 'los';
+        if (!state.activeSaga.has(hoortBijReeks)) return false;
       }
       if (state.activeDecades.size) {
         const d = decadeOf(item);
@@ -972,9 +985,39 @@ function initCollectionApp(config) {
           return va - vb;
         });
       case 'date_added_desc':
-      default:
-        return copy.sort((a, b) => new Date(b.date_added) - new Date(a.date_added));
+      default: {
+        // FASE 32 — nieuwe uploads kwamen niet bovenaan te staan.
+        //
+        // `date_added` bewaart alleen een dátum. Alles wat je op één dag
+        // toevoegt is dus gelijk, en een stabiele sortering laat gelijke
+        // waarden staan in de volgorde van movies.json — waar nieuwe titels
+        // achteraan bijkomen. Een batch van vanmiddag belandde daardoor ónder
+        // alles wat je die ochtend al had toegevoegd.
+        //
+        // Twee dingen lossen dat op: nieuwe titels krijgen sinds deze fase een
+        // volledig tijdstip (`added_at`), en bij gelijke tijden valt de
+        // sortering terug op de plek in het bestand — later toegevoegd staat
+        // verderop, dus die hoort bovenaan. Zo staan ook je oudere titels,
+        // die alleen een datum hebben, per dag in de juiste volgorde.
+        const plek = new Map(state.all.map((m, i) => [m.id, i]));
+        return copy.sort((a, b) => {
+          const verschil = addedTime(b) - addedTime(a);
+          if (verschil) return verschil;
+          return (plek.get(b.id) ?? 0) - (plek.get(a.id) ?? 0);
+        });
+      }
     }
+  }
+
+  /**
+   * Moment waarop een titel is toegevoegd, als getal.
+   * `added_at` is een volledig tijdstip (nieuw sinds FASE 32), `date_added`
+   * alleen een datum. Ontbreken beide, dan telt de titel als 'heel oud' zodat
+   * hij niet per ongeluk bovenaan springt.
+   */
+  function addedTime(m) {
+    const t = Date.parse(m.added_at || m.date_added || '');
+    return isNaN(t) ? 0 : t;
   }
 
   // ---------- Weergave ----------
@@ -1608,6 +1651,10 @@ function initCollectionApp(config) {
       els.selectDelete.disabled = n === 0;
       els.selectDelete.textContent = n ? `Verwijderen (${n})` : 'Verwijderen';
     }
+    if (els.selectEdit) {
+      els.selectEdit.disabled = n === 0;
+      els.selectEdit.textContent = n ? `Bewerken (${n})` : 'Bewerken';
+    }
   }
 
   function setSelectStatus(tekst, kleur) {
@@ -1645,6 +1692,243 @@ function initCollectionApp(config) {
    * 4. Wegschrijven per blok van 25, met voortgang. Valt je sessie halverwege
    *    weg, dan weet je precies waar het gebleven is en is de rest nog intact.
    */
+  // ---------- Massabewerking (FASE 32) ----------
+  //
+  // De selectiemodus kon alleen verwijderen. Zet je een hele batch per ongeluk
+  // op het verkeerde formaat, dan was elke titel apart openen de enige weg
+  // terug — bij honderd titels een avond werk.
+  //
+  // Bewust "van formaat X naar Y" en niet "zet alles op Y": een titel kan
+  // meerdere exemplaren hebben (een DVD én een 4K van dezelfde film). Alles
+  // botweg op één formaat zetten zou die samenvoegen tot twee identieke
+  // exemplaren — onherstelbaar zonder backup.
+
+  function bulkGeselecteerdeTitels() {
+    const perId = new Map(state.all.map((m) => [m.id, m]));
+    return [...state.selected].map((id) => perId.get(id)).filter(Boolean);
+  }
+
+  /** Hoe vaak elk formaat voorkomt binnen de selectie. */
+  function bulkFormaatTelling(titels) {
+    const telling = new Map();
+    titels.forEach((m) => {
+      (m.editions || []).forEach((ed) => {
+        telling.set(ed.format, (telling.get(ed.format) || 0) + 1);
+      });
+    });
+    return telling;
+  }
+
+  function vulFormaatKeuzes(telling) {
+    const van = document.getElementById('bulk-format-from');
+    const naar = document.getElementById('bulk-format-to');
+    if (!van || !naar) return;
+
+    // 'Van' toont alleen formaten die in de selectie voorkomen — kiezen uit
+    // iets wat er niet is, levert alleen verwarring op.
+    const aanwezig = MEDIA_FORMATS.filter((f) => telling.get(f.value));
+    van.innerHTML =
+      '<option value="">— niet wijzigen —</option>' +
+      (aanwezig.length ? '<option value="*">alle formaten</option>' : '') +
+      aanwezig
+        .map((f) => `<option value="${escapeAttr(f.value)}">${escapeHtml(f.label)} (${telling.get(f.value)})</option>`)
+        .join('');
+    naar.innerHTML = MEDIA_FORMATS.map(
+      (f) => `<option value="${escapeAttr(f.value)}">${escapeHtml(f.label)}</option>`
+    ).join('');
+    van.value = '';
+    naar.value = 'dvd';
+  }
+
+  function bulkFormaatHint() {
+    const van = document.getElementById('bulk-format-from');
+    const naar = document.getElementById('bulk-format-to');
+    const hint = document.getElementById('bulk-format-hint');
+    if (!van || !naar || !hint) return;
+    if (!van.value) {
+      hint.textContent = 'Kies een formaat om om te zetten, of laat dit staan.';
+      return;
+    }
+    const titels = bulkGeselecteerdeTitels();
+    let raak = 0;
+    titels.forEach((m) => {
+      (m.editions || []).forEach((ed) => {
+        if ((van.value === '*' || ed.format === van.value) && ed.format !== naar.value) raak++;
+      });
+    });
+    hint.textContent =
+      raak === 0
+        ? 'Dit wijzigt niets — die exemplaren staan al op dat formaat.'
+        : `Dit wijzigt ${raak} ${raak === 1 ? 'exemplaar' : 'exemplaren'}.`;
+  }
+
+  function openBulkEdit() {
+    if (!requireWrite()) return;
+    const titels = bulkGeselecteerdeTitels();
+    if (!titels.length || !els.bulkEditModal) return;
+
+    const exemplaren = titels.reduce((n, m) => n + ((m.editions || []).length || 0), 0);
+    const scope = document.getElementById('bulk-edit-scope');
+    if (scope) {
+      scope.textContent =
+        `${titels.length} ${titels.length === 1 ? 'titel' : 'titels'} · ` +
+        `${exemplaren} ${exemplaren === 1 ? 'exemplaar' : 'exemplaren'}`;
+    }
+    vulFormaatKeuzes(bulkFormaatTelling(titels));
+    bulkFormaatHint();
+    ['bulk-status', 'bulk-watched'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const loc = document.getElementById('bulk-location');
+    if (loc) loc.value = '';
+    setBulkEditStatus('');
+    els.bulkEditModal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  }
+
+  function closeBulkEdit() {
+    if (!els.bulkEditModal) return;
+    els.bulkEditModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  }
+
+  function setBulkEditStatus(tekst, kleur) {
+    const el = document.getElementById('bulk-edit-status');
+    if (!el) return;
+    el.textContent = tekst || '';
+    el.className = 'text-sm font-mono mt-5 ' + (kleur || 'text-muted');
+  }
+
+  /**
+   * Past de gekozen wijzigingen toe op één titel. Geeft terug of er
+   * daadwerkelijk iets veranderd is, zodat we alleen gewijzigde titels
+   * wegschrijven.
+   */
+  function bulkPasToe(m, keuze) {
+    let gewijzigd = false;
+
+    (m.editions || []).forEach((ed) => {
+      if (keuze.formaatVan && (keuze.formaatVan === '*' || ed.format === keuze.formaatVan)) {
+        if (ed.format !== keuze.formaatNaar) {
+          ed.format = keuze.formaatNaar;
+          gewijzigd = true;
+        }
+      }
+      if (keuze.status) {
+        const wens = keuze.status === 'wishlist';
+        if (ed.wishlist !== wens) {
+          ed.wishlist = wens;
+          gewijzigd = true;
+        }
+      }
+      if (keuze.locatie !== null) {
+        const nieuweLoc = keuze.locatie;
+        if ((ed.location || '') !== nieuweLoc) {
+          ed.location = nieuweLoc;
+          gewijzigd = true;
+        }
+      }
+    });
+
+    if (keuze.bekeken !== null) {
+      if (!!m.watched !== keuze.bekeken) {
+        m.watched = keuze.bekeken;
+        gewijzigd = true;
+      }
+    }
+
+    if (gewijzigd && typeof syncLegacyFieldsFromEditions === 'function') {
+      syncLegacyFieldsFromEditions(m);
+    }
+    return gewijzigd;
+  }
+
+  async function pasBulkEditToe() {
+    if (!requireWrite()) return;
+    const titels = bulkGeselecteerdeTitels();
+    if (!titels.length) return;
+
+    const van = document.getElementById('bulk-format-from');
+    const naar = document.getElementById('bulk-format-to');
+    const statusKeuze = document.getElementById('bulk-status');
+    const bekekenKeuze = document.getElementById('bulk-watched');
+    const locInvoer = document.getElementById('bulk-location');
+
+    const ruweLocatie = locInvoer ? locInvoer.value : '';
+    const keuze = {
+      formaatVan: van && van.value ? van.value : '',
+      formaatNaar: naar ? naar.value : '',
+      status: statusKeuze ? statusKeuze.value : '',
+      bekeken: bekekenKeuze && bekekenKeuze.value ? bekekenKeuze.value === 'yes' : null,
+      // Leeg = niet wijzigen. Alleen spaties = bewust leegmaken.
+      locatie: ruweLocatie === '' ? null : ruweLocatie.trim(),
+    };
+
+    if (!keuze.formaatVan && !keuze.status && keuze.bekeken === null && keuze.locatie === null) {
+      setBulkEditStatus('Er is niets gekozen om te wijzigen.', 'text-gold');
+      return;
+    }
+
+    // Op een kopie proberen: pas als we weten wat er verandert, vragen we
+    // bevestiging. Zo staat het aantal in de vraag en niet een schatting.
+    const kopie = JSON.parse(JSON.stringify(titels));
+    const teWijzigen = kopie.filter((m) => bulkPasToe(m, keuze));
+    if (!teWijzigen.length) {
+      setBulkEditStatus('Alles stond al zo — er is niets gewijzigd.', 'text-gold');
+      return;
+    }
+
+    const regels = [`${teWijzigen.length} ${teWijzigen.length === 1 ? 'titel wordt' : 'titels worden'} gewijzigd:`, ''];
+    if (keuze.formaatVan) {
+      regels.push(
+        `• formaat ${keuze.formaatVan === '*' ? 'alles' : formatLabel(keuze.formaatVan)} → ${formatLabel(keuze.formaatNaar)}`
+      );
+    }
+    if (keuze.status) regels.push(`• status → ${keuze.status === 'wishlist' ? 'verlanglijst' : 'in bezit'}`);
+    if (keuze.bekeken !== null) regels.push(`• bekeken → ${keuze.bekeken ? 'ja' : 'nee'}`);
+    if (keuze.locatie !== null) regels.push(`• locatie → ${keuze.locatie || '(leeg)'}`);
+    regels.push('', 'Er wordt eerst een backup naar Drive geschreven.', '', 'Doorgaan?');
+    if (!confirm(regels.join('\n'))) return;
+
+    const knop = document.getElementById('bulk-edit-apply');
+    if (knop) knop.disabled = true;
+
+    try {
+      setBulkEditStatus('Backup maken naar Drive…');
+      try {
+        await driveBackupNow('voor-bewerken');
+      } catch (err) {
+        setBulkEditStatus('Backup mislukt, er is niets gewijzigd: ' + err.message, 'text-red-400');
+        return;
+      }
+
+      // Nu pas op de échte objecten toepassen.
+      const gewijzigd = titels.filter((m) => bulkPasToe(m, keuze));
+
+      const BLOK = 25;
+      for (let start = 0; start < gewijzigd.length; start += BLOK) {
+        const blok = gewijzigd.slice(start, start + BLOK);
+        setBulkEditStatus(`Opslaan… (${Math.min(start + blok.length, gewijzigd.length)}/${gewijzigd.length})`);
+        await upsertMoviesBatchInDrive(blok);
+      }
+
+      buildFacetChips(state.all);
+      applyFilters();
+      setBulkEditStatus(`✓ ${gewijzigd.length} ${gewijzigd.length === 1 ? 'titel' : 'titels'} gewijzigd.`, 'text-teal');
+      showToast(`✓ ${gewijzigd.length} ${gewijzigd.length === 1 ? 'titel' : 'titels'} gewijzigd`, 'ok');
+      setTimeout(closeBulkEdit, 900);
+    } catch (err) {
+      console.error('Massabewerking mislukt:', err);
+      setBulkEditStatus('✗ ' + err.message + ' — zet zo nodig de backup terug via Beheer → Herstellen.', 'text-red-400');
+      // Wat er lokaal al gewijzigd is, opnieuw ophalen zodat het scherm klopt
+      // met wat er écht in Drive staat.
+      if (window.__collectionReload) window.__collectionReload();
+    } finally {
+      if (knop) knop.disabled = false;
+    }
+  }
+
   async function handleBulkDelete() {
     if (!requireWrite()) return;
     const ids = [...state.selected];
@@ -2330,7 +2614,9 @@ function initCollectionApp(config) {
   // Knoppen van de reeks-verlanglijstbalk: eenmalig koppelen (de balk zelf
   // wordt bij elke openModal opnieuw gevuld, maar de knoppen blijven bestaan).
   const sagaWishBtn = els.modal.querySelector('[data-saga-bulk-wish]');
-  if (sagaWishBtn) sagaWishBtn.addEventListener('click', sagaBulkToWishlist);
+  if (sagaWishBtn) sagaWishBtn.addEventListener('click', () => sagaBulkToevoegen(true));
+  const sagaOwnBtn = els.modal.querySelector('[data-saga-bulk-own]');
+  if (sagaOwnBtn) sagaOwnBtn.addEventListener('click', () => sagaBulkToevoegen(false));
   const sagaClearBtn = els.modal.querySelector('[data-saga-bulk-clear]');
   if (sagaClearBtn) {
     sagaClearBtn.addEventListener('click', () => {
@@ -2699,6 +2985,7 @@ function initCollectionApp(config) {
       state.activeTypes.size +
       state.activeGenres.size +
       state.activeStatus.size +
+      state.activeSaga.size +
       state.activeWatched.size +
       state.activeDecades.size +
       state.activeCerts.size +
@@ -2725,6 +3012,7 @@ function initCollectionApp(config) {
       { key: 'formats', set: state.activeFormats, chips: els.formatChips },
       { key: 'types', set: state.activeTypes, chips: els.typeChips },
       { key: 'status', set: state.activeStatus, chips: els.statusChips },
+      { key: 'saga', set: state.activeSaga, chips: els.sagaChips },
       { key: 'watched', set: state.activeWatched, chips: els.watchedChips },
       { key: 'genres', set: state.activeGenres, chips: els.genreChips },
       { key: 'decades', set: state.activeDecades, chips: els.decadeChips },
@@ -2824,6 +3112,7 @@ function initCollectionApp(config) {
     state.activeTypes.clear();
     state.activeGenres.clear();
     state.activeStatus.clear();
+    state.activeSaga.clear();
     state.activeWatched.clear();
     state.activeDecades.clear();
     state.activeCerts.clear();
@@ -2840,6 +3129,7 @@ function initCollectionApp(config) {
     }
     els.typeChips.querySelectorAll('[data-type]').forEach((c) => c.classList.remove('chip-active'));
     if (els.statusChips) els.statusChips.querySelectorAll('[data-status]').forEach((c) => c.classList.remove('chip-active'));
+    if (els.sagaChips) els.sagaChips.querySelectorAll('[data-saga-filter]').forEach((c) => c.classList.remove('chip-active'));
     if (els.watchedChips) els.watchedChips.querySelectorAll('[data-watched]').forEach((c) => c.classList.remove('chip-active'));
     if (!(opts && opts.stil)) applyFilters();
   }
@@ -3670,6 +3960,7 @@ function initCollectionApp(config) {
       ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
       wishlist: false,
       date_added: new Date().toISOString().slice(0, 10),
+      added_at: new Date().toISOString(),
       custom_front_cover_id: '',
       custom_back_cover_id: '',
       custom_front_cover: '',
@@ -4085,11 +4376,12 @@ function initCollectionApp(config) {
         } else if (onWishlist) {
           right = '<span class="font-mono text-xs text-gold">verlanglijst</span>';
         } else {
-          // Ontbrekend deel: aanvinken om samen op de verlanglijst te zetten,
-          // of los toevoegen via de twee knoppen.
+          // Ontbrekend deel: aanvinken om er samen iets mee te doen (naar de
+          // verlanglijst of meteen als in bezit), of los toevoegen via de twee
+          // knoppen rechts.
           checkbox = `<input type="checkbox" class="w-4 h-4 shrink-0 cursor-pointer" data-saga-pick="${escapeAttr(
             p.tmdb_id
-          )}" title="Aanvinken om samen op de verlanglijst te zetten">`;
+          )}" title="Aanvinken om samen toe te voegen — op de verlanglijst of meteen als in bezit">`;
           right = `
             <span class="flex gap-2 shrink-0">
               <button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ wens</button>
@@ -4189,10 +4481,19 @@ function initCollectionApp(config) {
     count.textContent = `${n} aangevinkt`;
   }
 
-  async function sagaBulkToWishlist() {
+  /**
+   * Voegt de aangevinkte ontbrekende reeksdelen in één keer toe (FASE 32).
+   *
+   * `alsWens = false` zet ze meteen als in bezit. Dat kon eerder niet: er was
+   * alleen een knop voor de verlanglijst, en wilde je delen die je wél hebt
+   * toevoegen, dan moest je ze één voor één via het volledige formulier doen.
+   */
+  async function sagaBulkToevoegen(alsWens) {
     const bar = els.modal.querySelector('[data-field="saga-bulk-bar"]');
     const status = els.modal.querySelector('[data-field="saga-bulk-status"]');
     const wishBtn = els.modal.querySelector('[data-saga-bulk-wish]');
+    const ownBtn = els.modal.querySelector('[data-saga-bulk-own]');
+    const knoppen = [wishBtn, ownBtn].filter(Boolean);
     if (!sagaBulkSelection.length) return;
 
     const c = typeof getConfig === 'function' ? getConfig() : {};
@@ -4203,7 +4504,7 @@ function initCollectionApp(config) {
     }
 
     const selection = [...sagaBulkSelection];
-    if (wishBtn) wishBtn.disabled = true;
+    knoppen.forEach((b) => (b.disabled = true));
 
     const entries = [];
     for (let i = 0; i < selection.length; i++) {
@@ -4219,6 +4520,7 @@ function initCollectionApp(config) {
           id,
           content_type: 'movie',
           date_added: today,
+          added_at: new Date().toISOString(),
           watched: false,
           editions: [
             {
@@ -4229,8 +4531,9 @@ function initCollectionApp(config) {
               notes: '',
               boxset: '',
               location: '',
-              wishlist: true,
+              wishlist: !!alsWens,
               date_added: today,
+              added_at: new Date().toISOString(),
               custom_front_cover_id: '',
               custom_back_cover_id: '',
               custom_front_cover: '',
@@ -4251,7 +4554,7 @@ function initCollectionApp(config) {
     if (!entries.length) {
       status.textContent = 'Niets toegevoegd (stonden er al in).';
       status.className = 'text-[11px] font-mono text-gold';
-      if (wishBtn) wishBtn.disabled = false;
+      knoppen.forEach((b) => (b.disabled = false));
       return;
     }
 
@@ -4269,7 +4572,7 @@ function initCollectionApp(config) {
     );
 
     sagaBulkSelection = [];
-    if (wishBtn) wishBtn.disabled = false;
+    knoppen.forEach((b) => (b.disabled = false));
     // Reekslijst opnieuw opbouwen zodat de nieuwe verlanglijst-status klopt.
     openModal(currentModalId);
   }
@@ -4294,6 +4597,7 @@ function initCollectionApp(config) {
         content_type: 'movie',
         watched: false,
         date_added: vandaag,
+        added_at: new Date().toISOString(),
         editions: [
           {
             eid: 'e1',
@@ -4303,6 +4607,7 @@ function initCollectionApp(config) {
             location: '',
             wishlist: true,
             date_added: vandaag,
+            added_at: new Date().toISOString(),
             custom_front_cover_id: '',
             custom_back_cover_id: '',
             custom_front_cover: '',
@@ -4922,6 +5227,7 @@ function initCollectionApp(config) {
     };
     return [
       { open: () => zichtbaar(els.lightbox), sluit: closeLightbox },
+      { open: () => zichtbaar(els.bulkEditModal), sluit: closeBulkEdit },
       { open: () => zichtbaar(els.episodeModal), sluit: closeEpisodeModal },
       { open: () => !!anderePagina('add-title-modal'), sluit: () => window.__closeAddTitleModal && window.__closeAddTitleModal() },
       { open: () => zichtbaar(els.pickModal), sluit: closePickModal },
@@ -4970,6 +5276,16 @@ function initCollectionApp(config) {
     els.statusChips.querySelectorAll('[data-status]').forEach((chip) => {
       chip.addEventListener('click', () => {
         toggleSetValue(state.activeStatus, chip.dataset.status);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+    });
+  }
+
+  if (els.sagaChips) {
+    els.sagaChips.querySelectorAll('[data-saga-filter]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeSaga, chip.dataset.sagaFilter);
         chip.classList.toggle('chip-active');
         applyFilters();
       });
@@ -5085,6 +5401,25 @@ function initCollectionApp(config) {
     });
   }
   if (els.selectDelete) els.selectDelete.addEventListener('click', handleBulkDelete);
+
+  // Massabewerking (FASE 32)
+  if (els.selectEdit) els.selectEdit.addEventListener('click', openBulkEdit);
+  if (els.bulkEditModal) {
+    const sluit = ['bulk-edit-close', 'bulk-edit-cancel'];
+    sluit.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', closeBulkEdit);
+    });
+    els.bulkEditModal.addEventListener('click', (e) => {
+      if (e.target === els.bulkEditModal) closeBulkEdit();
+    });
+    const toepassen = document.getElementById('bulk-edit-apply');
+    if (toepassen) toepassen.addEventListener('click', pasBulkEditToe);
+    ['bulk-format-from', 'bulk-format-to'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', bulkFormaatHint);
+    });
+  }
 
 
   els.loadMore.addEventListener('click', appendMore);

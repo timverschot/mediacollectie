@@ -436,6 +436,7 @@ async function bulkBuildEntry(candidate, opts, apiKey) {
     id: slugify(details.title, details.release_year),
     content_type: candidate.media_type === 'tv' ? 'tv' : 'movie',
     date_added: today,
+    added_at: new Date().toISOString(),
     watched: false,
     editions: [
       {
@@ -446,6 +447,7 @@ async function bulkBuildEntry(candidate, opts, apiKey) {
         location: opts.location || '',
         wishlist: !!opts.wishlist,
         date_added: today,
+        added_at: new Date().toISOString(),
         custom_front_cover_id: '',
         custom_back_cover_id: '',
         custom_front_cover: '',
