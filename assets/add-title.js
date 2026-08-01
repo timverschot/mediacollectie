@@ -349,6 +349,7 @@ async function addTitleSelectResult(r) {
   const c = getConfig();
   addTitleSelectedDetails = await tmdbDetails(r.id, r.media_type, c.tmdbKey);
   addTitleExistingEntry = null;
+  addTitleDuplicateChoice = null;
 
   document.getElementById('form-poster').src = addTitleSelectedDetails.poster_path ? TMDB_IMG_BASE + addTitleSelectedDetails.poster_path : '';
   document.getElementById('form-title').textContent = addTitleSelectedDetails.title;
@@ -380,8 +381,9 @@ async function addTitleSelectResult(r) {
       normalizeMovieEntry(existing);
       const have = existing.editions.map((e) => formatLabel(e.format)).join(', ');
       statusEl.textContent =
-        `⚠ Deze titel heb je al op ${have}. Kies hieronder een ánder formaat om een tweede exemplaar toe te voegen ` +
-        `— of hetzelfde formaat om dat exemplaar bij te werken.`;
+        `⚠ Deze titel heb je al op ${have}. Kies een ánder formaat voor een tweede exemplaar — ` +
+        `of hetzelfde formaat: dan vraagt hij of je dat exemplaar wil bijwerken of er tóch een tweede bij wil zetten ` +
+        `(andere uitgave, remaster, uit een boxset).`;
       statusEl.className = 'text-sm font-mono text-gold';
 
       // Een formaat voorstellen dat je nog niet hebt.
@@ -547,25 +549,119 @@ async function addTitleAddWholeSaga() {
   }
 }
 
+/* ==========================================================================
+ * Dubbele titel: drie keuzes in plaats van twee (FASE 33)
+ * ==========================================================================
+ * Had je een titel al in hetzelfde formaat, dan bood het formulier alleen
+ * "bijwerken" of "annuleren". Maar twee schijven van dezelfde film in hetzelfde
+ * formaat is heel gewoon: een oude uitgave naast een remaster, een losse DVD
+ * naast dezelfde DVD uit een boxset. Die kon je dus niet registreren.
+ *
+ * Een confirm() geeft maar twee knoppen, vandaar een eigen scherm. Het wordt
+ * ter plekke opgebouwd en daarna weer opgeruimd, zodat het op elke pagina werkt
+ * die dit bestand laadt (collectie én beheer) zonder in beide HTML-bestanden
+ * te moeten staan.
+ * ========================================================================== */
+
+let addTitleDuplicateChoice = null; // 'update' | 'extra' | null
+
+/**
+ * @returns Promise<'update' | 'extra' | null>  null = annuleren
+ */
+function addTitleAskDuplicate(titel, formaatNaam, aantalZelfde) {
+  return new Promise((resolve) => {
+    const laag = document.createElement('div');
+    laag.className = 'fixed inset-0 z-[95] flex items-center justify-center p-4';
+    laag.style.background = 'rgba(0,0,0,.7)';
+
+    const paneel = document.createElement('div');
+    paneel.className = 'bg-surface rounded-xl w-full max-w-md shadow-2xl ring-1 ring-white/10 p-5 sm:p-6';
+    paneel.style.paddingBottom = 'calc(1.25rem + env(safe-area-inset-bottom))';
+
+    const titelEl = document.createElement('h2');
+    titelEl.className = 'font-display text-2xl tracking-wide mb-2';
+    titelEl.textContent = 'Deze heb je al';
+
+    const uitleg = document.createElement('p');
+    uitleg.className = 'text-sm text-muted mb-1';
+    uitleg.textContent =
+      `Je hebt "${titel}" al ${aantalZelfde > 1 ? aantalZelfde + '× ' : ''}op ${formaatNaam}.`;
+
+    const uitleg2 = document.createElement('p');
+    uitleg2.className = 'text-sm text-muted mb-5';
+    uitleg2.textContent =
+      'Gaat het om een andere uitgave — een remaster, een exemplaar uit een boxset — ' +
+      'kies dan "Tweede exemplaar". Zet er een opmerking of uitvoering bij, dan zie je later welke welke is.';
+
+    const knoppen = document.createElement('div');
+    knoppen.className = 'flex flex-col gap-2';
+
+    const maakKnop = (tekst, klasse, waarde) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = klasse;
+      b.textContent = tekst;
+      b.addEventListener('click', () => klaar(waarde));
+      return b;
+    };
+
+    knoppen.appendChild(maakKnop('Tweede exemplaar toevoegen', 'btn btn-primary w-full', 'extra'));
+    knoppen.appendChild(maakKnop('Bestaand exemplaar bijwerken', 'btn btn-secondary w-full', 'update'));
+    knoppen.appendChild(maakKnop('Annuleren', 'chip w-full', null));
+
+    paneel.append(titelEl, uitleg, uitleg2, knoppen);
+    laag.appendChild(paneel);
+
+    function klaar(waarde) {
+      document.removeEventListener('keydown', opToets);
+      laag.remove();
+      resolve(waarde);
+    }
+    function opToets(ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        klaar(null);
+      }
+    }
+    laag.addEventListener('click', (ev) => {
+      if (ev.target === laag) klaar(null);
+    });
+    document.addEventListener('keydown', opToets);
+
+    document.body.appendChild(laag);
+    paneel.querySelector('button').focus();
+  });
+}
+
 async function addTitleSubmit(e) {
   e.preventDefault();
   const statusEl = document.getElementById('form-status');
   const submitBtn = document.getElementById('submit-btn');
 
-  // Titel bestaat al: bevestigen of we een exemplaar toevoegen dan wel bijwerken.
+  // Titel bestaat al: kiezen wat er moet gebeuren.
+  addTitleDuplicateChoice = null;
   if (addTitleExistingEntry) {
     normalizeMovieEntry(addTitleExistingEntry);
     const chosen = document.getElementById('form-format').value;
-    const already = addTitleExistingEntry.editions.some((e) => e.format === chosen);
-    const ok = confirm(
-      already
-        ? `Je hebt "${addTitleSelectedDetails.title}" al op ${formatLabel(chosen)}.\n\n` +
-            `Dat exemplaar bijwerken met wat nu in het formulier staat?`
-        : `"${addTitleSelectedDetails.title}" staat al in je collectie.\n\n` +
-            `${formatLabel(chosen)} toevoegen als extra exemplaar?\n` +
-            `(Je bestaande exemplaren en hun hoesfoto's blijven ongemoeid.)`
-    );
-    if (!ok) return;
+    const zelfde = addTitleExistingEntry.editions.filter((e) => e.format === chosen);
+    if (zelfde.length) {
+      // Zelfde formaat: bijwerken, of tóch een tweede exemplaar (FASE 33).
+      const keuze = await addTitleAskDuplicate(
+        addTitleSelectedDetails.title,
+        formatLabel(chosen),
+        zelfde.length
+      );
+      if (!keuze) return;
+      addTitleDuplicateChoice = keuze;
+    } else {
+      const ok = confirm(
+        `"${addTitleSelectedDetails.title}" staat al in je collectie.\n\n` +
+          `${formatLabel(chosen)} toevoegen als extra exemplaar?\n` +
+          `(Je bestaande exemplaren en hun hoesfoto's blijven ongemoeid.)`
+      );
+      if (!ok) return;
+      addTitleDuplicateChoice = 'extra';
+    }
   }
 
   submitBtn.disabled = true;
@@ -588,7 +684,12 @@ async function addTitleSubmit(e) {
       normalizeMovieEntry(addTitleExistingEntry);
       const gekozenFormaat = document.getElementById('form-format').value;
       const zelfdeFormaat = addTitleExistingEntry.editions.find((ed) => ed.format === gekozenFormaat);
-      doelEid = zelfdeFormaat ? zelfdeFormaat.eid : nextEditionId(addTitleExistingEntry);
+      // Koos je bewust voor een tweede exemplaar, dan krijgt dat een eigen id —
+      // en dus ook een eigen hoesfoto, los van het exemplaar dat je al had.
+      doelEid =
+        zelfdeFormaat && addTitleDuplicateChoice !== 'extra'
+          ? zelfdeFormaat.eid
+          : nextEditionId(addTitleExistingEntry);
     }
     const coverKey = slug + '-' + doelEid;
 
@@ -648,7 +749,12 @@ async function addTitleSubmit(e) {
       // doelEid is hierboven al bepaald, vóór de foto-upload, zodat de
       // bestandsnaam van de hoesfoto bij het juiste exemplaar hoort.
       const newEdition = addTitleBuildEdition(doelEid, { front: frontCoverId, back: backCoverId });
-      const sameFormat = existing.editions.find((e) => e.format === newEdition.format);
+      // Bij een bewuste tweede kopie niet samenvoegen, maar er echt een
+      // exemplaar bij zetten.
+      const sameFormat =
+        addTitleDuplicateChoice === 'extra'
+          ? null
+          : existing.editions.find((e) => e.format === newEdition.format);
       if (sameFormat) {
         sameFormat.notes = newEdition.notes;
         sameFormat.boxset = newEdition.boxset;
@@ -689,6 +795,7 @@ async function addTitleSubmit(e) {
     statusEl.className = 'text-sm font-mono text-teal';
 
     addTitleExistingEntry = null;
+    addTitleDuplicateChoice = null;
     document.getElementById('add-form').reset();
     document.getElementById('add-form').classList.add('hidden');
     document.getElementById('seasons-section').classList.add('hidden');
