@@ -940,11 +940,15 @@ function initCollectionApp(config) {
       if (q) {
         const inTitle = String(item.title || '').toLowerCase().includes(q);
         const inOriginal = (item.original_title || '').toLowerCase().includes(q);
+        // Gaf je een titel zelf een andere naam, dan blijft de TMDb-naam ook
+        // werken als zoekterm — anders vind je hem niet meer terug onder de
+        // naam die op het doosje staat.
+        const inTmdbNaam = (item.tmdb_title || '').toLowerCase().includes(q);
         const inCast = (item.cast || []).some((name) => name.toLowerCase().includes(q));
         const inDirector = (item.director || '').toLowerCase().includes(q);
         const inWriters = (item.writers || '').toLowerCase().includes(q);
         const inSaga = sagaOf(item).toLowerCase().includes(q);
-        if (!inTitle && !inOriginal && !inCast && !inDirector && !inWriters && !inSaga) return false;
+        if (!inTitle && !inOriginal && !inTmdbNaam && !inCast && !inDirector && !inWriters && !inSaga) return false;
       }
       if (state.activeFormats.size && !allFormats(item).some((f) => state.activeFormats.has(f))) return false;
       if (state.activeVariants.size) {
@@ -5024,6 +5028,29 @@ function initCollectionApp(config) {
     const sagaInput = m.querySelector('[data-edit-saga]');
     if (sagaInput) sagaInput.value = item.saga || '';
 
+    // Eigen titel (FASE 34). Het interne id van een titel blijft ongewijzigd —
+    // daar hangen je hoesfoto's, prijsmetingen en backups aan vast. We wijzigen
+    // alleen de naam die je overal ziet.
+    const titelInput = m.querySelector('[data-edit-title]');
+    const titelHint = m.querySelector('[data-edit-title-hint]');
+    const titelReset = m.querySelector('[data-edit-title-reset]');
+    if (titelInput) {
+      titelInput.value = item.title || '';
+      const tmdbNaam = item.tmdb_title || '';
+      const afwijkend = item.title_locked && tmdbNaam && tmdbNaam !== item.title;
+      if (titelHint) {
+        titelHint.textContent = afwijkend
+          ? `TMDb noemt deze titel "${tmdbNaam}"`
+          : 'Wijzig je dit, dan blijft de TMDb-koppeling gewoon bestaan.';
+      }
+      if (titelReset) {
+        titelReset.classList.toggle('hidden', !afwijkend);
+        titelReset.onclick = () => {
+          titelInput.value = tmdbNaam;
+        };
+      }
+    }
+
     // Duidelijk maken welk exemplaar je aan het bewerken bent.
     const which = m.querySelector('[data-edit-which]');
     if (which) {
@@ -5183,6 +5210,10 @@ function initCollectionApp(config) {
       saga: item.saga,
       custom_poster_path: item.custom_poster_path,
       custom_poster_cover_id: item.custom_poster_cover_id,
+      title: item.title,
+      tmdb_title: item.tmdb_title,
+      title_locked: item.title_locked,
+      custom_title: item.custom_title,
       editions: JSON.parse(JSON.stringify(item.editions || [])),
     };
 
@@ -5221,6 +5252,25 @@ function initCollectionApp(config) {
       // Filmniveau:
       item.content_type = m.querySelector('[data-edit-content]').value;
       item.watched = m.querySelector('[data-edit-watched]').checked;
+      // Eigen titel (FASE 34)
+      const titelInput = m.querySelector('[data-edit-title]');
+      if (titelInput) {
+        const nieuweTitel = titelInput.value.trim();
+        // De TMDb-naam onthouden vóór de eerste wijziging, anders kan je nooit
+        // meer terug en verlies je hem ook als zoekterm.
+        if (!item.tmdb_title) item.tmdb_title = item.title || '';
+        if (!nieuweTitel || nieuweTitel === item.tmdb_title) {
+          // Leeggemaakt of weer gelijk aan TMDb: geen eigen titel meer.
+          item.title = item.tmdb_title || item.title;
+          item.title_locked = false;
+          delete item.custom_title;
+        } else if (nieuweTitel !== item.title) {
+          item.title = nieuweTitel;
+          item.custom_title = nieuweTitel;
+          item.title_locked = true;
+        }
+      }
+
       const sagaInput = m.querySelector('[data-edit-saga]');
       if (sagaInput) {
         item.saga = sagaInput.value.trim();

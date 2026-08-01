@@ -804,6 +804,19 @@ function applyTmdbFields(item, fresh) {
   TMDB_MANAGED_FIELDS.forEach((field) => {
     if (fresh[field] !== undefined) item[field] = fresh[field];
   });
+
+  // FASE 34 — heb je de titel zelf aangepast (bv. omdat TMDb hem in een taal
+  // teruggeeft die je niet leest), dan mag een verversing die niet overschrijven.
+  // De TMDb-titel bewaren we apart: zo blijft "terug naar de TMDb-titel" werken
+  // én blijft die naam doorzoekbaar.
+  if (fresh.title !== undefined) {
+    if (item.title_locked) {
+      item.tmdb_title = fresh.title;
+      item.title = item.custom_title || item.title;
+    } else {
+      item.tmdb_title = fresh.title;
+    }
+  }
   if (fresh.saga) item.saga = fresh.saga;
   if (fresh.seasons) item.seasons = fresh.seasons;
   return item;

@@ -1005,6 +1005,17 @@
               <label>Waar ligt dit exemplaar?</label>
               <input type="text" data-edit-location placeholder="Bv. Kast woonkamer plank 2, of Zolder doos 3">
             </div>
+            <!-- FASE 34 — eigen titel. TMDb levert soms een titel in een taal die
+                 je niet leest; dan wil je hem in je eigen collectie anders
+                 noemen zonder de koppeling met TMDb te verliezen. -->
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <label>Titel in jouw collectie</label>
+                <button type="button" data-edit-title-reset class="hidden chip !py-0.5 !px-2 text-[10px]">Terug naar de TMDb-titel</button>
+              </div>
+              <input type="text" data-edit-title placeholder="Laat leeg om de TMDb-titel te gebruiken">
+              <p data-edit-title-hint class="!normal-case text-xs text-muted font-mono mt-1"></p>
+            </div>
             <div>
               <label>Reeks (houdt samenhorende titels bij elkaar)</label>
               <input type="text" data-edit-saga placeholder="Bv. Harry Potter Collection, of je eigen groepsnaam">
