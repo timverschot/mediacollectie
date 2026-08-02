@@ -11,12 +11,23 @@
  * Verwacht dat assets/drive.js geladen is (driveLoadMovies, driveLoadPrices).
  */
 
-const STATS_FORMAT_LABELS = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
-const STATS_FORMAT_COLORS = { '4k': '#C9A227', bluray: '#2FA4A9', dvd: '#8B8A92' };
-const STATS_TYPE_LABELS = { movie: 'Films', tv: 'TV-reeksen', animation: 'Animatie' };
+/* FASE 44 — hier stonden een eigen labellijst en een eigen kleurenlijst, met
+   drie van de zes formaten erin. Een seizoen op Laserdisc kreeg daardoor
+   dezelfde kleur als 4K en werd getoond als de kale waarde `laserdisc`.
+   MEDIA_FORMATS in drive.js is de enige echte lijst; deze twee functies leiden
+   er alles uit af. */
+function statsFormatLabel(v) {
+  return typeof formatLabel === 'function' ? formatLabel(v) : v || '';
+}
+function statsFormatColor(v) {
+  return typeof formatColor === 'function' ? formatColor(v) : '#8B8A92';
+}
+// Content-types staan niet in drive.js, want ze horen bij de app en niet bij de
+// opslag. Wel op één plek, en compleet — "special" ontbrak hier (FASE 36).
+const STATS_TYPE_LABELS = { movie: 'Films', tv: 'TV-reeksen', animation: 'Animatie', special: 'Specials' };
 
 function statsEsc(str) {
-  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return escHtml(str);
 }
 
 // ---------- Kleine rekenhulpjes ----------
@@ -538,11 +549,11 @@ async function initStatsPage() {
     const rijen = Object.entries(perFormaat)
       .sort((a, b) => b[1] - a[1])
       .map(([f, bedrag]) => ({
-        label: typeof formatLabel === 'function' ? formatLabel(f) : f,
+        label: statsFormatLabel(f),
         value: bedrag,
         // statsBarChart toont `sub` als er een staat, anders de kale waarde.
         sub: statsMoney(bedrag, 'EUR'),
-        color: typeof formatColor === 'function' ? formatColor(f) : '#C9A227',
+        color: statsFormatColor(f),
       }));
 
     els.spend.innerHTML =
@@ -700,7 +711,7 @@ async function initStatsPage() {
           label: `${t.title}${t.year ? ' (' + t.year + ')' : ''}`,
           value: t.value,
           sub: statsMoney(t.value, currency),
-          color: STATS_FORMAT_COLORS[t.format] || '#C9A227',
+          color: statsFormatColor(t.format),
         }))
       )}
 

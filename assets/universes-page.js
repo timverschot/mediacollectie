@@ -6,9 +6,7 @@
 const POSTER_BASE_UNI = 'https://image.tmdb.org/t/p/w154';
 
 function uniEsc(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-  );
+  return escHtml(str);
 }
 
 async function initUniversesPage() {

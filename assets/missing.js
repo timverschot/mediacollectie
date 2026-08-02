@@ -22,9 +22,7 @@
 const MISSING_POSTER = 'https://image.tmdb.org/t/p/w154';
 
 function missEsc(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-  );
+  return escHtml(str);
 }
 
 /** Ontbreekt hier iets van? Geeft de ontbrekende seizoenen van één serie. */

@@ -45,7 +45,7 @@ function initPriceTracker() {
   };
 
   function esc(str) {
-    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return escHtml(str);
   }
 
   function load() {

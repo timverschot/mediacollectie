@@ -258,11 +258,14 @@ function initCollectionApp(config) {
 
   // ---------- Hulpfuncties ----------
 
+  // FASE 44 — één ontsnappingsfunctie voor de hele app; zie escHtml in
+  // drive.js. Deze twee namen blijven bestaan omdat ze op honderden plaatsen
+  // gebruikt worden, maar ze doen nu allebei hetzelfde als de rest.
   function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return escHtml(str);
   }
   function escapeAttr(str) {
-    return escapeHtml(str);
+    return escHtml(str);
   }
 
   // Sorteertitel: lidwoorden vooraan negeren ("The Matrix" → "matrix"),

@@ -118,9 +118,7 @@ async function bulkFindCandidates(entry, apiKey) {
 let bulkRows = [];
 
 function bulkEsc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-  );
+  return escHtml(s);
 }
 
 function initBulkImportUI(onSaved) {

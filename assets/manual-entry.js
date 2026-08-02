@@ -35,9 +35,7 @@ const MANUAL_KINDS = [
 ];
 
 function manualEsc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-  );
+  return escHtml(s);
 }
 
 /** Maakt een id dat gegarandeerd niet botst met een TMDb-titel. */

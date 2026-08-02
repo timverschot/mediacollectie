@@ -225,10 +225,32 @@ function collectorSamenvatting(ed) {
   return uit;
 }
 
-function collectorEsc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+/* ==========================================================================
+ * Eén ontsnappingsfunctie voor de hele app (FASE 44)
+ * ==========================================================================
+ * Er stonden er negen, verspreid over acht bestanden, met twee verschillende
+ * gedragingen: de helft maakte van een lege waarde de tekst "null" of
+ * "undefined" op je scherm, de andere helft een lege tekst. Dat is precies het
+ * soort verschil dat pas opvalt als het al ergens staat.
+ *
+ * Deze is de enige echte; de rest is nu een verwijzing hiernaartoe.
+ * drive.js wordt op elke pagina als eerste geladen, dus hij is overal
+ * beschikbaar.
+ * ========================================================================== */
+function escHtml(waarde) {
+  return String(waarde == null ? '' : waarde).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
   );
+}
+
+// Attributen hebben dezelfde behandeling nodig als tekst: quotes eruit is
+// genoeg zolang je altijd tussen aanhalingstekens plaatst — en dat doen we.
+function escAttr(waarde) {
+  return escHtml(waarde);
+}
+
+function collectorEsc(s) {
+  return escHtml(s);
 }
 
 /**
@@ -329,6 +351,19 @@ function formatShort(value) {
 function formatColor(value) {
   return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].color) || '#8B8A92';
 }
+// Laatst gekozen formaat onthouden. Beginwaarde is DVD: dat is voor de meeste
+// verzamelingen het grootste deel, en het scheelt handmatig omschakelen.
+// (FASE 44 — verhuisd uit add-title.js; hoort bij de formaatlijst hierboven.)
+const ADD_FORMAT_KEY = 'mediacollectie_last_format';
+
+function addTitlePreferredFormat() {
+  try {
+    const v = localStorage.getItem(ADD_FORMAT_KEY);
+    if (v && FORMAT_BY_VALUE[v]) return v;
+  } catch {}
+  return 'dvd';
+}
+
 function formatRank(value) {
   return (FORMAT_BY_VALUE[value] && FORMAT_BY_VALUE[value].rank) || 0;
 }

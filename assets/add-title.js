@@ -19,17 +19,9 @@
  * pagina. onSaved(entry) wordt aangeroepen na een geslaagde opslag.
  */
 
-// Laatst gekozen formaat onthouden. Beginwaarde is DVD: dat is voor de meeste
-// verzamelingen het grootste deel, en het scheelt handmatig omschakelen.
-const ADD_FORMAT_KEY = 'mediacollectie_last_format';
-
-function addTitlePreferredFormat() {
-  try {
-    const v = localStorage.getItem(ADD_FORMAT_KEY);
-    if (v && typeof FORMAT_BY_VALUE !== 'undefined' && FORMAT_BY_VALUE[v]) return v;
-  } catch {}
-  return 'dvd';
-}
+// FASE 44 — ADD_FORMAT_KEY en addTitlePreferredFormat() staan nu in
+// drive.js: ze gaan over de formaatlijst en niet over dit formulier, en de
+// lijst-import op Beheer heeft ze nodig zonder de rest van dit bestand.
 
 let addTitleSelectedDetails = null;
 let addTitleExistingEntry = null; // bestaande collectie-entry met dezelfde slug (of null)
@@ -307,8 +299,9 @@ function addTitleBuildEdition(eid, coverIds) {
   };
 }
 
+// FASE 44 — verwijst naar de enige echte in drive.js.
 function addTitleEscapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return escHtml(str);
 }
 
 async function addTitleDoSearch() {
@@ -574,7 +567,7 @@ function addTitleRenderSeasonPicker(seasons) {
         <span class="text-muted font-mono text-xs">(${s.episode_count ?? '?'} afl.)</span>
       </span>
       <select class="season-format bg-surface border border-white/10 rounded px-2 py-1 text-xs font-mono w-28" data-season="${s.season_number}">
-        ${opt('4k', '4K UHD')}${opt('bluray', 'Blu-ray')}${opt('dvd', 'DVD')}
+        ${typeof MEDIA_FORMATS !== 'undefined' ? MEDIA_FORMATS.map((f) => opt(f.value, f.label)).join('') : opt('dvd', 'DVD')}
       </select>
     </label>
   `

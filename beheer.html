@@ -232,154 +232,24 @@
       </div>
     </details>
 
-    <div class="flex gap-4 mb-6 border-b border-white/5">
-      <button data-tab="single" class="tab-btn pb-3 px-1 border-b-2 border-gold text-ink font-mono text-sm uppercase">Eén titel</button>
-      <button data-tab="bulk" class="tab-btn pb-3 px-1 border-b-2 border-transparent text-muted font-mono text-sm uppercase">Bulk (lijst)</button>
+    <!-- FASE 44 — hier stonden twee tabbladen: "Eén titel" en "Bulk (lijst)".
+         Het eerste laadde exact hetzelfde formulier als de modal op de
+         collectiepagina, met dezelfde element-id's — twee schermen die
+         hetzelfde deden en die dus allebei bijgewerkt moesten worden bij elke
+         wijziging. Toevoegen hoort thuis waar je collectie staat.
+
+         De lijst-import hieronder is wél iets anders en blijft staan. -->
+    <div class="bg-surface rounded-lg p-4 mb-6 text-sm flex flex-wrap gap-3 items-center">
+      <p class="flex-1 min-w-[16rem]">
+        <strong>Titels toevoegen</strong> doe je op de collectiepagina, met
+        <em>+ Titel toevoegen</em> — daar zie je meteen wat erbij komt.
+      </p>
+      <a href="index.html" class="btn btn-primary shrink-0">Naar de collectie</a>
     </div>
 
-    <!-- ENKELE TITEL -->
-    <section id="tab-single">
-      <div class="flex gap-3 mb-4">
-        <input type="search" id="search-input" placeholder="Zoek op titel, of plak een IMDb-link/tt-code…">
-        <button id="search-btn" class="btn btn-primary shrink-0">Zoeken</button>
-        <!-- FASE 36 — voor schijven die in geen enkele databank staan. -->
-        <button id="manual-btn" class="btn btn-secondary shrink-0" title="Voor uitgaves die niet in TMDb of IMDb staan">Handmatig</button>
-      </div>
+    <p class="font-display text-2xl tracking-wide mb-2">Bulk toevoegen uit een lijst</p>
 
-      <div id="search-results" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-6"></div>
-
-      <!-- Meerdere zoekresultaten tegelijk toevoegen. Deze balk ontbrak hier,
-           terwijl add-title.js wél bij elk resultaat een selectievakje toont:
-           je kon aanvinken, de kaart lichtte op, en er verscheen nooit een knop
-           om er iets mee te doen. -->
-      <div id="bulk-add-bar" class="hidden bg-surface rounded-lg p-4 mb-6 space-y-3">
-        <p class="text-sm"><span id="bulk-add-count" class="text-gold font-semibold"></span> geselecteerd — ze krijgen allemaal dezelfde instellingen:</p>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label>Formaat</label>
-            <select id="bulk-format"></select>
-          </div>
-          <div>
-            <label>Status</label>
-            <select id="bulk-owned">
-              <option value="owned" selected>In bezit</option>
-              <option value="wishlist">Verlanglijst</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label>Uit welke boxset? (optioneel)</label>
-          <input type="text" id="bulk-boxset" placeholder="Bv. Ace Ventura Collection">
-        </div>
-        <div class="flex flex-wrap gap-2 items-center">
-          <button type="button" id="bulk-add-btn" class="btn btn-primary">Alle geselecteerde toevoegen</button>
-          <button type="button" id="bulk-clear-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Selectie wissen</button>
-        </div>
-        <p id="bulk-add-status" class="text-sm font-mono"></p>
-      </div>
-
-      <form id="add-form" class="hidden bg-surface rounded-lg p-6 space-y-4">
-        <div class="flex gap-4">
-          <img id="form-poster" class="w-24 rounded shrink-0" alt="">
-          <div>
-            <p id="form-title" class="font-display text-2xl tracking-wide"></p>
-            <p id="form-year" class="text-sm text-muted font-mono"></p>
-          </div>
-        </div>
-
-        <div class="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label>Content-type</label>
-            <select id="form-content-type">
-              <option value="movie">Film</option>
-              <option value="tv">TV-reeks</option>
-              <option value="animation">Animatie</option>
-            </select>
-          </div>
-          <div>
-            <label>Formaat</label>
-            <select id="form-format">
-              <option value="4k">4K UHD</option>
-              <option value="bluray" selected>Blu-ray</option>
-              <option value="dvd">DVD</option>
-            </select>
-          </div>
-          <div>
-            <label>Status</label>
-            <select id="form-owned">
-              <option value="owned" selected>In bezit</option>
-              <option value="wishlist">Verlanglijst (nog te kopen)</option>
-            </select>
-          </div>
-          <div class="flex items-end gap-2 pb-1">
-            <input type="checkbox" id="form-watched" class="w-4 h-4">
-            <label class="!normal-case !text-sm text-ink">Al bekeken</label>
-          </div>
-        </div>
-
-        <div id="seasons-section" class="hidden">
-          <div class="flex items-center justify-between mb-1">
-            <label>Seizoenen</label>
-            <span class="text-xs text-muted normal-case">Vink aan welke je bezit, kies per seizoen het formaat</span>
-          </div>
-          <div id="seasons-list" class="bg-bg rounded-md p-3 space-y-0.5 max-h-64 overflow-y-auto"></div>
-        </div>
-
-        <div class="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label>Opmerkingen</label>
-            <input type="text" id="form-notes" placeholder="Bv. met slipcover">
-          </div>
-          <div>
-            <label>Uit welke boxset?</label>
-            <input type="text" id="form-boxset" placeholder="Leeg laten als losse uitgave">
-          </div>
-          <div>
-            <label>Locatie (optioneel)</label>
-            <input type="text" id="form-location" placeholder="Bv. Kast woonkamer">
-          </div>
-        </div>
-
-        <div>
-          <label>Uitvoering</label>
-          <div id="form-variants" class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
-        </div>
-
-        <!-- FASE 40 — verzamelaarsgegevens bij het toevoegen. Dichtgeklapt, zodat
-             snel invoeren snel blijft; open je hem, dan hoef je de titel later
-             niet opnieuw langs voor de prijs die je nu nog weet. Wordt gevuld
-             uit COLLECTOR_FIELDS in drive.js. -->
-        <details class="rounded-lg ring-1 ring-white/5">
-          <summary class="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase text-muted">
-            Verzamelaarsgegevens (optioneel)
-          </summary>
-          <div id="form-collector" class="grid sm:grid-cols-2 gap-3 px-3 pb-3"></div>
-        </details>
-
-        <div id="saga-bulk" class="hidden bg-bg rounded-md p-3 text-sm">
-          <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>
-          <button type="button" id="saga-bulk-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Alle delen van deze reeks toevoegen</button>
-          <p id="saga-bulk-status" class="text-xs font-mono mt-2"></p>
-        </div>
-
-        <div class="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label>Voorkant hoesfoto (optioneel)</label>
-            <input type="file" id="form-front" accept="image/jpeg,image/png,image/webp" class="!p-1">
-          </div>
-          <div>
-            <label>Achterkant hoesfoto (optioneel)</label>
-            <input type="file" id="form-back" accept="image/jpeg,image/png,image/webp" class="!p-1">
-          </div>
-        </div>
-
-        <button type="submit" id="submit-btn" class="btn btn-primary w-full">Toevoegen aan collectie</button>
-        <p id="form-status" class="text-sm font-mono"></p>
-      </form>
-    </section>
-
-    <!-- BULK -->
-    <section id="tab-bulk" class="hidden">
+    <section id="tab-bulk">
       <p class="text-sm text-muted mb-3">
         Eén titel per regel, formaat: <code class="font-mono text-xs">Titel | Jaar | formaat | content-type</code>
         (jaar/formaat/content-type mogen leeg blijven, standaard is <code class="font-mono text-xs">bluray</code> / <code class="font-mono text-xs">movie</code>).<br>
@@ -416,8 +286,6 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
 
   <script src="assets/drive.js"></script>
   <script src="assets/admin.js"></script>
-  <script src="assets/manual-entry.js"></script>
-  <script src="assets/add-title.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -437,9 +305,6 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
       if (typeof tmdbSearch === 'undefined' || typeof applyTmdbFields === 'undefined' ||
           typeof tmdbMediaTypeOf === 'undefined') {
         missing.push('assets/admin.js');
-      }
-      if (typeof initAddTitleUI === 'undefined' || typeof addTitlePreferredFormat === 'undefined') {
-        missing.push('assets/add-title.js');
       }
       if (!missing.length) return;
       document.addEventListener('DOMContentLoaded', () => {
@@ -550,19 +415,6 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     };
 
     // Tabs
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach((b) => {
-          b.classList.remove('border-gold', 'text-ink');
-          b.classList.add('border-transparent', 'text-muted');
-        });
-        btn.classList.add('border-gold', 'text-ink');
-        btn.classList.remove('border-transparent', 'text-muted');
-        document.getElementById('tab-single').classList.toggle('hidden', btn.dataset.tab !== 'single');
-        document.getElementById('tab-bulk').classList.toggle('hidden', btn.dataset.tab !== 'bulk');
-      });
-    });
-
     // Settings modal
     const modal = document.getElementById('settings-modal');
     function openSettings() {
@@ -891,9 +743,6 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
         statusEl.className = 'text-sm font-mono text-red-400';
       }
     });
-
-    // Zoeken + toevoegen van één titel: gedeelde logica, zie assets/add-title.js
-    initAddTitleUI();
 
     // Bulk
     document.getElementById('bulk-submit').addEventListener('click', async () => {

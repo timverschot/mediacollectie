@@ -329,9 +329,7 @@ function tmdbPreviewOverlay(kandidaten, start) {
     knoppen.className = 'flex flex-wrap gap-2 justify-end mt-5';
 
     function esc(t) {
-      return String(t == null ? '' : t).replace(/[&<>"']/g, (c) =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
-      );
+      return escHtml(t);
     }
 
     function teken() {
