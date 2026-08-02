@@ -5498,9 +5498,14 @@ function initCollectionApp(config) {
       // overschrijven.
       const coverKey = item.id + '-' + ed.eid;
       if (frontFile) {
-        status.textContent = 'Voorkant-foto uploaden...';
+        // Eerst verkleinen, dán uploaden — en dat ook zeggen. Bij een grote
+        // foto duurt het verkleinen merkbaar lang, en zonder deze melding lijkt
+        // de pagina te hangen terwijl ze gewoon aan het werk is (FASE 38).
+        status.textContent = `Voorkant-foto verkleinen (${Math.round(frontFile.size / 1024)} kB)…`;
         status.className = 'text-sm font-mono text-muted';
-        ed.custom_front_cover_id = await driveUploadCoverFile(await resizeImageFile(frontFile, 1200), coverKey, 'front');
+        const voorkantKlein = await resizeImageFile(frontFile, 1200);
+        status.textContent = 'Voorkant-foto uploaden…';
+        ed.custom_front_cover_id = await driveUploadCoverFile(voorkantKlein, coverKey, 'front');
         ed.custom_front_cover = '';
         if (typeof driveReleaseCoverUrl === 'function') driveReleaseCoverUrl(ed.custom_front_cover_id);
       } else if (m.querySelector('[data-edit-remove-front]').checked) {
@@ -5509,9 +5514,11 @@ function initCollectionApp(config) {
         ed.custom_front_cover = '';
       }
       if (backFile) {
-        status.textContent = 'Achterkant-foto uploaden...';
+        status.textContent = `Achterkant-foto verkleinen (${Math.round(backFile.size / 1024)} kB)…`;
         status.className = 'text-sm font-mono text-muted';
-        ed.custom_back_cover_id = await driveUploadCoverFile(await resizeImageFile(backFile, 1200), coverKey, 'back');
+        const achterkantKlein = await resizeImageFile(backFile, 1200);
+        status.textContent = 'Achterkant-foto uploaden…';
+        ed.custom_back_cover_id = await driveUploadCoverFile(achterkantKlein, coverKey, 'back');
         ed.custom_back_cover = '';
         if (typeof driveReleaseCoverUrl === 'function') driveReleaseCoverUrl(ed.custom_back_cover_id);
       } else if (m.querySelector('[data-edit-remove-back]').checked) {

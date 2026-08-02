@@ -78,33 +78,133 @@ function slugify(title, year) {
   return year ? `${s}-${year}` : s;
 }
 
-function resizeImageFile(file, maxWidth) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
+/**
+ * Verkleint een gekozen hoesfoto tot een JPEG (base64, zonder kop) (FASE 38).
+ *
+ * De oude versie deed dit zo: het hele bestand als data-URL inlezen, die tekst
+ * aan een <img> hangen, en het volledige beeld naar een canvas tekenen. Drie
+ * problemen die pas opvallen bij een grote foto — een scan van een hoes, of een
+ * foto van een moderne telefoon:
+ *
+ * 1. Een data-URL is base64: een bestand van 30 MB wordt een tekenreeks van
+ *    40 MB in het geheugen, en die staat er twee keer terwijl de browser hem
+ *    decodeert.
+ * 2. Het uitpakken gebeurde op de hoofddraad. Zolang dat bezig is, doet de
+ *    pagina niets — dat is precies het moment waarop een browser "reageert
+ *    niet" meldt.
+ * 3. Een uitgepakte foto kost breedte × hoogte × 4 bytes. Een scan van 12000 ×
+ *    9000 is 432 MB. Op een toestel dat dat niet heeft, loopt het tabblad vast.
+ *
+ * Deze versie gebruikt createImageBitmap: die pakt het beeld buiten de
+ * hoofddraad uit, kent géén base64-tussenstap, en kan meteen naar de gewenste
+ * afmeting schalen. Zo blijft de pagina bedienbaar en blijft het geheugen
+ * begrensd, hoe groot je bronbestand ook is.
+ */
+
+// Ruimer dan welke hoesfoto ook, maar klein genoeg om nooit een tabblad om te
+// leggen. Groter dan dit weigeren we mét uitleg, in plaats van te bevriezen.
+const COVER_MAX_BYTES = 40 * 1024 * 1024; // 40 MB
+const COVER_MAX_PIXELS = 80 * 1000 * 1000; // 80 megapixel
+
+function _coverFout(bericht) {
+  const e = new Error(bericht);
+  e.coverProbleem = true;
+  return e;
+}
+
+async function resizeImageFile(file, maxWidth) {
+  if (!file) throw _coverFout('Geen bestand gekozen.');
+  if (!/^image\//.test(file.type || '')) {
+    throw _coverFout(
+      `"${file.name}" lijkt geen afbeelding (${file.type || 'onbekend type'}). ` +
+        'Kies een JPG, PNG of WEBP. Foto\'s van een iPhone staan soms in HEIC — ' +
+        'exporteer die eerst als JPG.'
+    );
+  }
+  if (file.size > COVER_MAX_BYTES) {
+    throw _coverFout(
+      `Deze foto is ${Math.round(file.size / 1024 / 1024)} MB. ` +
+        'Dat is te groot om in de browser te verwerken; verklein hem eerst of maak een gewone foto in plaats van een scan.'
+    );
+  }
+
+  const bitmap = await _decodeerAfbeelding(file);
+  try {
+    if (bitmap.width * bitmap.height > COVER_MAX_PIXELS) {
+      throw _coverFout(
+        `Deze foto is ${bitmap.width}×${bitmap.height} pixels. ` +
+          'Dat is te veel om te verwerken; scan of fotografeer de hoes op een lagere resolutie.'
+      );
+    }
+    const schaal = Math.min(1, maxWidth / bitmap.width);
+    const breed = Math.max(1, Math.round(bitmap.width * schaal));
+    const hoog = Math.max(1, Math.round(bitmap.height * schaal));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = breed;
+    canvas.height = hoog;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, breed, hoog);
+
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(_coverFout('De foto kon niet omgezet worden naar JPEG.'))),
+        'image/jpeg',
+        0.85
+      );
+    });
+    // Canvas meteen vrijgeven: een 1200px-canvas is klein, maar in een lange
+    // sessie stapelen ze anders op.
+    canvas.width = 0;
+    canvas.height = 0;
+    return await _blobNaarBase64(blob);
+  } finally {
+    // Belangrijk: zonder close() blijft de uitgepakte foto in het geheugen tot
+    // de opruimer langskomt, en dat kan bij een grote scan honderden MB zijn.
+    if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+  }
+}
+
+/**
+ * Pakt het beeld uit. createImageBitmap doet dat buiten de hoofddraad; lukt dat
+ * niet (oudere browser, of een formaat dat de browser niet kent), dan valt het
+ * terug op de oude weg — maar dan wél met een begrijpelijke fout in plaats van
+ * een stille mislukking.
+ */
+async function _decodeerAfbeelding(file) {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(file);
+    } catch (err) {
+      console.warn('createImageBitmap mislukt, terugval op de klassieke weg:', err);
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(
-          (blob) => {
-            const fr = new FileReader();
-            fr.onload = () => resolve(fr.result.split(',')[1]);
-            fr.onerror = reject;
-            fr.readAsDataURL(blob);
-          },
-          'image/jpeg',
-          0.85
+      img.onload = () => resolve(img);
+      img.onerror = () =>
+        reject(
+          _coverFout(
+            `"${file.name}" kon niet gelezen worden. Staat de foto in HEIC (iPhone), ` +
+              'exporteer hem dan eerst als JPG.'
+          )
         );
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+      // Een object-URL in plaats van een data-URL: geen base64-kopie van het
+      // hele bestand in het geheugen.
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function _blobNaarBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1]);
+    fr.onerror = () => reject(_coverFout('De verkleinde foto kon niet gelezen worden.'));
+    fr.readAsDataURL(blob);
   });
 }
 
