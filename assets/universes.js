@@ -28,9 +28,65 @@ function universeCacheKey(u) {
  * Alle titels die bij een universum horen, films en (indien gewenst) series,
  * gesorteerd op releasedatum. Geeft { items, truncated } terug.
  */
+/* --------------------------------------------------------------------------
+ * Ledenlijsten bewaren tussen bezoeken (FASE 43)
+ * --------------------------------------------------------------------------
+ * De ledenlijst werd bewust niet opgeslagen, zodat nieuwe releases vanzelf in
+ * je compleetheidsteller verschijnen. Dat klopt als idee, maar het kostte tot
+ * zestig opeenvolgende TMDb-verzoeken met pauzes ertussen — bij élke opening
+ * van de collectie, ook als je die dag nooit op een universum filtert.
+ *
+ * Een bewaartermijn van een dag houdt beide kanten: geen verkeer bij normaal
+ * gebruik, en een nieuwe film staat er hoogstens een dag later in.
+ * ------------------------------------------------------------------------ */
+const UNIVERSE_CACHE_KEY = 'mediacollectie_universe_members';
+const UNIVERSE_CACHE_MS = 24 * 60 * 60 * 1000;
+
+function _universeCacheLees(key) {
+  try {
+    const alles = JSON.parse(localStorage.getItem(UNIVERSE_CACHE_KEY) || '{}');
+    const rij = alles[key];
+    if (!rij || !rij.op || Date.now() - rij.op > UNIVERSE_CACHE_MS) return null;
+    return rij.data;
+  } catch {
+    return null;
+  }
+}
+
+function _universeCacheSchrijf(key, data) {
+  try {
+    const alles = JSON.parse(localStorage.getItem(UNIVERSE_CACHE_KEY) || '{}');
+    // Wat verlopen is meteen opruimen, anders groeit dit bestand met elk
+    // trefwoord dat je ooit geprobeerd hebt.
+    Object.keys(alles).forEach((k) => {
+      if (!alles[k] || !alles[k].op || Date.now() - alles[k].op > UNIVERSE_CACHE_MS) delete alles[k];
+    });
+    alles[key] = { op: Date.now(), data };
+    localStorage.setItem(UNIVERSE_CACHE_KEY, JSON.stringify(alles));
+  } catch {
+    // Vol of niet beschikbaar: dan halen we het gewoon opnieuw op.
+  }
+}
+
+/** Wist de bewaarde ledenlijsten. Gebruikt na het wijzigen van een universum. */
+function universeCacheWissen() {
+  try {
+    localStorage.removeItem(UNIVERSE_CACHE_KEY);
+  } catch {}
+  Object.keys(_universeMemberCache).forEach((k) => delete _universeMemberCache[k]);
+}
+
 async function loadUniverseMembers(universe, apiKey) {
   const key = universeCacheKey(universe);
   if (_universeMemberCache[key]) return _universeMemberCache[key];
+
+  // Eerst de bewaarde lijst van hoogstens een dag oud: dat scheelt bij een
+  // groot universum tientallen verzoeken en seconden wachten.
+  const bewaard = _universeCacheLees(key);
+  if (bewaard) {
+    _universeMemberCache[key] = bewaard;
+    return bewaard;
+  }
 
   const movies = await tmdbDiscoverByKeyword(universe.keyword_id, 'movie', apiKey);
   let items = movies.items;
@@ -51,6 +107,7 @@ async function loadUniverseMembers(universe, apiKey) {
 
   const result = { items, truncated };
   _universeMemberCache[key] = result;
+  _universeCacheSchrijf(key, result);
   return result;
 }
 

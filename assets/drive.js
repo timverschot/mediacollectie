@@ -1154,6 +1154,19 @@ async function withWriteLock(fn) {
 
 // ---------- Generieke Drive-bestandshelpers (App Data-map) ----------
 
+/**
+ * Een Drive-fout in gewone taal (FASE 43).
+ */
+function driveFoutTekst(status) {
+  if (status === 401 || status === 403) {
+    return 'Google gaf geen toegang tot je Drive. Log opnieuw in en probeer het nog eens.';
+  }
+  if (status === 404) return 'Dit bestand staat niet meer in je Drive.';
+  if (status === 429) return 'Google vraagt om even te wachten. Probeer het over een minuut opnieuw.';
+  if (status >= 500) return 'Google Drive heeft zelf een storing. Je gegevens zijn niet gewijzigd.';
+  return `Google Drive antwoordde onverwacht (code ${status}). Er is niets gewijzigd.`;
+}
+
 async function driveApiFetch(url, options = {}) {
   const token = await ensureToken();
   const resp = await fetch(url, {
@@ -1161,8 +1174,12 @@ async function driveApiFetch(url, options = {}) {
     headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
   });
   if (!resp.ok) {
+    // FASE 43 — hier stond de ruwe JSON van Google in de melding. Dat is voor
+    // de console; op je scherm hoort te staan wat er aan de hand is en wat je
+    // eraan kan doen. De ruwe tekst gaat wél naar de console.
     const text = await resp.text().catch(() => '');
-    throw new Error(`Drive-fout (${resp.status}): ${text.slice(0, 200)}`);
+    console.error('Drive-fout', resp.status, text.slice(0, 500));
+    throw new Error(driveFoutTekst(resp.status));
   }
   return resp;
 }
@@ -1553,7 +1570,11 @@ async function driveUploadCoverFile(base64Jpeg, id, side) {
  * gebruikte gaat eruit — inclusief revokeObjectURL, want alleen de sleutel
  * weggooien geeft het geheugen niet terug.
  */
-const COVER_CACHE_MAX = 24;
+// FASE 43 — 24 was kleiner dan één schermvol posters in het raster, dus bij
+// het scrollen werd de foto die je net zag alweer ingetrokken. 48 dekt een
+// schermvol met marge; een verkleinde hoesfoto is enkele honderden kB, dus dit
+// blijft ruim binnen wat een gsm aankan.
+const COVER_CACHE_MAX = 48;
 const _coverUrlCache = {};
 const _coverUrlOrder = []; // oudst gebruikt eerst
 

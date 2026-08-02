@@ -127,6 +127,8 @@ async function initMissingPage() {
   const eigenReeksen = eigenReeksenFrom(movies);
   let sagaResultaten = null; // pas gevuld na het nakijken
   let tab = 'alles';
+  // FASE 42 — wat je aangevinkt hebt om op je verlanglijst te zetten.
+  const gekozenSet = new Set();
 
   // Titels die je al hebt of al op de verlanglijst zette, herkennen we op id.
   const heb = new Set(movies.map((m) => m.id));
@@ -144,11 +146,17 @@ async function initMissingPage() {
           const poster = r.item.poster_path
             ? `<img src="${missEsc(MISSING_POSTER + r.item.poster_path)}" alt="" loading="lazy" class="w-full rounded ring-1 ring-white/10">`
             : '<div class="w-full aspect-[2/3] rounded bg-bg"></div>';
+          // FASE 42 — deze chips waren dode tekst. Nu zijn het knoppen: klik
+          // ze aan en zet ze in één keer op je verlanglijst.
           const nummers = r.ontbreekt
-            .map(
-              (s) =>
-                `<span class="chip !py-1 !px-2.5 text-[11px] !border-gold/40 !text-gold" title="${missEsc(s.name || '')}">S${s.season_number}</span>`
-            )
+            .map((s) => {
+              const sleutel = `seizoen:${r.item.id}:${s.season_number}`;
+              const gekozen = gekozenSet.has(sleutel);
+              return `<button type="button" data-pick="${missEsc(sleutel)}"
+                  class="chip !py-1 !px-2.5 text-[11px] ${gekozen ? 'chip-active' : '!border-gold/40 !text-gold'}"
+                  aria-pressed="${gekozen ? 'true' : 'false'}"
+                  title="${missEsc(s.name || '')} — aanklikken om op je verlanglijst te zetten">S${s.season_number}</button>`;
+            })
             .join('');
           return `
             <div class="panel flex gap-4">
@@ -207,12 +215,20 @@ async function initMissingPage() {
                 ? `<img src="${missEsc(MISSING_POSTER + p.poster_path)}" alt="" loading="lazy" class="w-full rounded">`
                 : '<div class="w-full aspect-[2/3] rounded bg-bg"></div>';
               const wens = opWens.has(p.id);
+              const sleutel = `deel:${p.tmdb_id}:${p.title}`;
+              const gekozen = gekozenSet.has(sleutel);
               return `
-                <div class="w-24 shrink-0">
-                  <div class="ring-1 ${wens ? 'ring-gold/60' : 'ring-white/10'} rounded overflow-hidden">${poster}</div>
+                <button type="button" data-pick="${missEsc(sleutel)}" aria-pressed="${gekozen ? 'true' : 'false'}"
+                        class="w-24 shrink-0 text-left" ${wens ? 'disabled' : ''}
+                        title="${wens ? 'Staat al op je verlanglijst' : 'Aanklikken om op je verlanglijst te zetten'}">
+                  <div class="ring-2 ${
+                    gekozen ? 'ring-gold' : wens ? 'ring-gold/60' : 'ring-white/10'
+                  } rounded overflow-hidden">${poster}</div>
                   <p class="text-[11px] leading-tight mt-1 truncate" title="${missEsc(p.title)}">${missEsc(p.title)}</p>
-                  <p class="text-[10px] text-muted font-mono">${p.release_year || '—'}${wens ? ' · wens' : ''}</p>
-                </div>`;
+                  <p class="text-[10px] font-mono ${gekozen ? 'text-gold' : 'text-muted'}">${p.release_year || '—'}${
+                wens ? ' · wens' : gekozen ? ' · gekozen' : ''
+              }</p>
+                </button>`;
             })
             .join('');
           if (!delen) return '';
@@ -297,6 +313,220 @@ async function initMissingPage() {
     toonEigenReeksen();
     toonSagas();
     toonSamenvatting();
+    werkSelectieBalkBij();
+    bouwAfdruklijst();
+  }
+
+  /* ---------- Aanvinken en op de verlanglijst zetten (FASE 42) ----------
+   *
+   * De pagina zei zelf "bedoeld om mee te nemen naar de winkel", maar er viel
+   * niets aan te vinken, niets op de verlanglijst te zetten en niets af te
+   * drukken. Alles was dode tekst.
+   */
+  const pickBar = document.getElementById('pick-bar');
+  const pickCount = document.getElementById('pick-count');
+  const pickStatus = document.getElementById('pick-status');
+
+  function werkSelectieBalkBij() {
+    if (!pickBar) return;
+    const n = gekozenSet.size;
+    pickBar.classList.toggle('hidden', n === 0);
+    if (pickCount) pickCount.textContent = `${n} ${n === 1 ? 'ding' : 'dingen'} gekozen`;
+    // Ruimte onderaan zodat de balk niets afdekt.
+    document.body.style.paddingBottom = n ? '5rem' : '';
+  }
+
+  document.addEventListener('click', (e) => {
+    const knop = e.target.closest('[data-pick]');
+    if (!knop || knop.disabled) return;
+    e.preventDefault();
+    const sleutel = knop.dataset.pick;
+    if (gekozenSet.has(sleutel)) gekozenSet.delete(sleutel);
+    else gekozenSet.add(sleutel);
+    tekenAlles();
+  });
+
+  const pickNone = document.getElementById('pick-none');
+  if (pickNone) {
+    pickNone.addEventListener('click', () => {
+      gekozenSet.clear();
+      if (pickStatus) pickStatus.textContent = '';
+      tekenAlles();
+    });
+  }
+
+  const pickWish = document.getElementById('pick-wish');
+  if (pickWish) pickWish.addEventListener('click', zetGekozenOpVerlanglijst);
+
+  /**
+   * Twee soorten selectie, twee wegen:
+   *
+   * - Een **seizoen** hoort bij een serie die je al hebt. Daar komt een
+   *   exemplaar met `wishlist: true` bij, precies zoals de knop in het
+   *   detailscherm doet. Het seizoen telt daardoor niet als bezit.
+   * - Een **deel van een filmreeks** heb je nog helemaal niet. Dat wordt een
+   *   nieuw record, opgebouwd met dezelfde fabriek als overal elders, en
+   *   toegevoegd zonder ooit een bestaande titel te overschrijven.
+   */
+  async function zetGekozenOpVerlanglijst() {
+    const keuzes = [...gekozenSet];
+    if (!keuzes.length) return;
+    pickWish.disabled = true;
+
+    const c = typeof getConfig === 'function' ? getConfig() : {};
+    let gedaan = 0;
+    let overgeslagen = 0;
+
+    const seizoenen = keuzes.filter((k) => k.startsWith('seizoen:'));
+    const delen = keuzes.filter((k) => k.startsWith('deel:'));
+
+    // Seizoenen per serie samennemen: één schrijfactie per titel in plaats van
+    // één per seizoen.
+    const perFilm = new Map();
+    seizoenen.forEach((k) => {
+      const [, filmId, nummer] = k.split(':');
+      if (!perFilm.has(filmId)) perFilm.set(filmId, []);
+      perFilm.get(filmId).push(Number(nummer));
+    });
+
+    for (const [filmId, nummers] of perFilm) {
+      const film = movies.find((m) => m.id === filmId);
+      if (!film) { overgeslagen += nummers.length; continue; }
+      if (pickStatus) pickStatus.textContent = `${film.title}…`;
+      let gewijzigd = false;
+      nummers.forEach((nr) => {
+        const seizoen = (film.seasons || []).find((s) => s.season_number === nr);
+        if (!seizoen) { overgeslagen++; return; }
+        if (!Array.isArray(seizoen.editions)) seizoen.editions = [];
+        // Al gewenst in dit formaat? Dan niets doen — geen dubbels stapelen.
+        const formaat = typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd';
+        if (seizoen.editions.some((ed) => ed.wishlist && ed.format === formaat)) { overgeslagen++; return; }
+        seizoen.editions.push({
+          ...nieuwSeizoenExemplaar(nextSeasonEditionId(seizoen), formaat),
+          wishlist: true,
+          date_added: new Date().toISOString().slice(0, 10),
+        });
+        gewijzigd = true;
+        gedaan++;
+      });
+      if (gewijzigd) {
+        normalizeSeasonEditions(film);
+        try {
+          await upsertMovieInDrive(film);
+        } catch (err) {
+          if (pickStatus) pickStatus.textContent = '✗ ' + err.message;
+          pickWish.disabled = false;
+          return;
+        }
+      }
+    }
+
+    for (let i = 0; i < delen.length; i++) {
+      const [, tmdbId, titel] = delen[i].split(':');
+      if (pickStatus) pickStatus.textContent = `(${i + 1}/${delen.length}) ${titel}…`;
+      if (!c.tmdbKey) { overgeslagen++; continue; }
+      try {
+        const details = await tmdbDetails(Number(tmdbId), 'movie', c.tmdbKey);
+        const entry = nieuweCollectieTitel({
+          id: slugify(details.title, details.release_year),
+          content_type: 'movie',
+          format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+          wishlist: true,
+          details,
+        });
+        const uitkomst = await insertMovieIfAbsentInDrive(entry);
+        if (uitkomst === 'toegevoegd') {
+          gedaan++;
+          movies.push(entry);
+          opWens.add(entry.id);
+          heb.add(entry.id);
+        } else {
+          overgeslagen++;
+        }
+      } catch (err) {
+        console.warn('Deel overgeslagen:', titel, err);
+        overgeslagen++;
+      }
+      await new Promise((r) => setTimeout(r, 120));
+    }
+
+    gekozenSet.clear();
+    pickWish.disabled = false;
+    if (pickStatus) {
+      pickStatus.textContent =
+        `✓ ${gedaan} op je verlanglijst` + (overgeslagen ? ` · ${overgeslagen} overgeslagen (stond er al)` : '');
+    }
+    tekenAlles();
+  }
+
+  /* ---------- Afdrukken (FASE 42) ----------
+   * Een boodschappenlijst hoort op papier te passen: titels met vakjes ervoor,
+   * geen posters, geen filters, zwart op wit.
+   */
+  function bouwAfdruklijst() {
+    const el = document.getElementById('print-list');
+    if (!el) return;
+    const blokken = [];
+
+    if (series.length) {
+      blokken.push(
+        '<h3>Series — ontbrekende seizoenen</h3><ul>' +
+          series
+            .map(
+              (r) =>
+                `<li>${missEsc(r.item.title)} — seizoen ${r.ontbreekt
+                  .map((s) => s.season_number)
+                  .join(', ')}</li>`
+            )
+            .join('') +
+          '</ul>'
+      );
+    }
+
+    const eigenMetWens = eigenReeksen.filter((g) => g.wensen.length);
+    if (eigenMetWens.length) {
+      blokken.push(
+        '<h3>Je eigen reeksen</h3><ul>' +
+          eigenMetWens
+            .map((g) =>
+              g.wensen
+                .map((m) => `<li>${missEsc(m.title)}${m.release_year ? ' (' + m.release_year + ')' : ''} — ${missEsc(g.naam)}</li>`)
+                .join('')
+            )
+            .join('') +
+          '</ul>'
+      );
+    }
+
+    if (sagaResultaten) {
+      const metGaten = sagaResultaten.filter((r) => r.ontbreekt.length);
+      if (metGaten.length) {
+        blokken.push(
+          '<h3>Filmreeksen — ontbrekende delen</h3><ul>' +
+            metGaten
+              .map((r) =>
+                r.ontbreekt
+                  .map((p) => `<li>${missEsc(p.title)}${p.release_year ? ' (' + p.release_year + ')' : ''} — ${missEsc(r.naam)}</li>`)
+                  .join('')
+              )
+              .join('') +
+            '</ul>'
+        );
+      }
+    }
+
+    const datum = new Date().toLocaleDateString('nl-BE');
+    el.innerHTML = blokken.length
+      ? `<h2>Nog te halen</h2><p>Mijn Mediacollectie · ${missEsc(datum)}</p>` + blokken.join('')
+      : `<h2>Nog te halen</h2><p>Niets ontbrekend gevonden op ${missEsc(datum)}.</p>`;
+  }
+
+  const printKnop = document.getElementById('missing-print');
+  if (printKnop) {
+    printKnop.addEventListener('click', () => {
+      bouwAfdruklijst();
+      window.print();
+    });
   }
 
   // ---- Filmreeksen nakijken (op verzoek) ----

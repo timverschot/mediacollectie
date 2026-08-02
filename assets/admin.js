@@ -251,12 +251,25 @@ function imdbIdUit(tekst) {
  * kom je er alsnog. (Een echte IMDb-API bestaat niet gratis: IMDb verkoopt zijn
  * gegevens via AWS Data Exchange aan bedrijfstarieven.)
  */
+/**
+ * Een TMDb-fout in gewone taal (FASE 43). "TMDb-fout: 401" zegt jou niets;
+ * "je sleutel wordt niet aanvaard" zegt wat je moet doen.
+ */
+function tmdbFoutTekst(status) {
+  if (status === 401) return 'TMDb aanvaardt je sleutel niet. Kijk hem na via Beheer → Instellingen.';
+  if (status === 404) return 'TMDb kent deze titel niet (meer).';
+  if (status === 429) return 'Te veel opvragingen bij TMDb. Wacht even en probeer opnieuw.';
+  if (status >= 500) return 'TMDb heeft zelf een storing. Probeer het straks nog eens.';
+  if (status === 0) return 'Geen verbinding met TMDb.';
+  return `TMDb antwoordde onverwacht (code ${status}).`;
+}
+
 async function tmdbFindByImdb(imdbId, apiKey) {
   const url =
     `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}` +
     `?api_key=${encodeURIComponent(apiKey)}&language=nl-NL&external_source=imdb_id`;
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error('TMDb-fout: ' + resp.status);
+  if (!resp.ok) throw new Error(tmdbFoutTekst(resp.status));
   const data = await resp.json();
   const films = (data.movie_results || []).map((r) => ({ ...r, media_type: 'movie' }));
   const series = (data.tv_results || []).map((r) => ({ ...r, media_type: 'tv' }));
@@ -275,7 +288,7 @@ async function tmdbSearch(query, apiKey) {
   }
   const url = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(apiKey)}&language=nl-NL&query=${encodeURIComponent(query)}`;
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error('TMDb-fout: ' + resp.status);
+  if (!resp.ok) throw new Error(tmdbFoutTekst(resp.status));
   const data = await resp.json();
   return (data.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv');
 }
@@ -413,7 +426,7 @@ function tmdbPreviewOverlay(kandidaten, start) {
 async function tmdbGet(path, params, apiKey) {
   const query = new URLSearchParams({ api_key: apiKey, ...params }).toString();
   const resp = await fetch(`https://api.themoviedb.org/3/${path}?${query}`);
-  if (!resp.ok) throw new Error('TMDb-fout: ' + resp.status);
+  if (!resp.ok) throw new Error(tmdbFoutTekst(resp.status));
   return resp.json();
 }
 

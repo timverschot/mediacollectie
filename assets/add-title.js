@@ -351,7 +351,7 @@ async function addTitleDoSearch() {
         <button type="button" class="absolute top-1 right-1 z-10 flex items-center justify-center w-7 h-7 rounded bg-black/70 hover:bg-black/90 text-ink text-sm"
           data-preview title="Bekijk de gegevens van deze titel">&#128269;</button>
         <button type="button" class="absolute bottom-9 right-1 z-10 chip !py-0.5 !px-2 text-[10px] !bg-black/70 !border-gold/50 !text-gold"
-          data-wish title="Meteen op je verlanglijst zetten">+ wens</button>
+          data-wish title="Meteen op je verlanglijst zetten">+ verlanglijst</button>
         ${r.poster_path ? `<img src="${addTitleEscapeHtml('https://image.tmdb.org/t/p/w342' + r.poster_path)}" loading="lazy" class="w-full rounded mb-1">` : '<div class="w-full aspect-[2/3] bg-bg rounded mb-1"></div>'}
         <p class="text-xs leading-tight" title="${addTitleEscapeHtml(title)}">${addTitleEscapeHtml(title)}</p>
         <p class="text-[10px] text-muted font-mono">${date.slice(0, 4)}</p>
@@ -481,7 +481,7 @@ async function addTitleQuickWishlist(r, knop) {
     }
     zeg(`✓ "${details.title}" op je verlanglijst gezet.`, 'text-teal');
     if (knop) {
-      knop.textContent = '✓ wens';
+      knop.textContent = '✓ verlanglijst';
       knop.classList.add('chip-active');
     }
     if (addTitleOnSaved) addTitleOnSaved(entry);

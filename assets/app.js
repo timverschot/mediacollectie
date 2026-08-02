@@ -325,7 +325,12 @@ function initCollectionApp(config) {
    * De kosten schalen met je eigen keuzes: alleen titels waarbij jij dit
    * instelt halen een bestand op. Bij de rest verandert er niets.
    */
-  const coverPosterCache = new Map(); // Drive-bestand-id -> blob-URL
+  // FASE 43 — hier stond een eigen cache van Drive-id naar blob-URL. Die wist
+  // niets van de LRU in drive.js, die na 24 foto's de oudste blob-URL intrekt.
+  // Gevolg: na een filterklik gaf deze cache een adres terug dat niet meer
+  // bestond, en bleef de poster leeg zonder terugval. Er is nu nog één cache —
+  // die in drive.js — en een geladen poster die alsnog stukgaat probeert het
+  // één keer opnieuw voor hij terugvalt op de TMDb-poster.
   let coverPosterWaarnemer = null;
 
   function coverPosterObserver() {
@@ -350,12 +355,23 @@ function initCollectionApp(config) {
     const fileId = el.dataset.coverPoster;
     if (!fileId) return;
     try {
-      let url = coverPosterCache.get(fileId);
-      if (!url) {
-        if (typeof driveCoverBlobUrl !== 'function') return;
-        url = await driveCoverBlobUrl(fileId);
-        coverPosterCache.set(fileId, url);
-      }
+      if (typeof driveCoverBlobUrl !== 'function') return;
+      const url = await driveCoverBlobUrl(fileId);
+
+      // Een blob-URL kan intussen ingetrokken zijn door de LRU. Dan laadt het
+      // beeld niet en krijgen we onerror: één keer opnieuw ophalen, en lukt dat
+      // ook niet, dan de gewone poster tonen in plaats van een leeg vak.
+      el.onerror = async () => {
+        el.onerror = null;
+        try {
+          if (typeof driveReleaseCoverUrl === 'function') driveReleaseCoverUrl(fileId);
+          el.src = await driveCoverBlobUrl(fileId);
+        } catch {
+          const terugval = el.dataset.coverFallback;
+          if (terugval) el.src = terugval;
+        }
+      };
+
       el.src = url;
       el.classList.remove('opacity-0');
       const skel = el.previousElementSibling;
@@ -1605,6 +1621,9 @@ function initCollectionApp(config) {
     }
     els.grid.classList.remove('hidden');
     if (els.shelfStage) els.shelfStage.classList.add('hidden');
+    // FASE 43 — de plank leeghalen bij het verlaten. Voorheen bleven zijn
+    // slides de hele sessie in de DOM staan, ook al keek je naar het raster.
+    ruimShelfOp();
 
     const units = buildRenderUnits();
     // Kom je terug uit de plank, zorg dan dat de ankertitel meegeladen wordt
@@ -1729,30 +1748,29 @@ function initCollectionApp(config) {
       return;
     }
 
+    // FASE 43 — vroeger werd hier de volledige inhoud van álle eenheden
+    // opgebouwd: bij 652 titels 3914 DOM-elementen en 652 losse klikhandlers,
+    // goed voor een bevriezing van bijna een halve seconde. En na terugkeer
+    // naar het raster bleven die 652 slides de hele sessie staan.
+    //
+    // Nu krijgt elke eenheid alleen een leeg hokje met de juiste breedte — dat
+    // houdt de geometrie van de plank exact zoals ze was — en wordt de inhoud
+    // pas gevuld voor de slides rond de actieve. Wat uit beeld schuift wordt
+    // weer leeggemaakt.
     els.shelfTrack.innerHTML = units
-      .map((u, i) => {
-        const item = u.type === 'group' ? u.items[0] : u.item;
-        const cover = posterUrl(item);
-        const title = u.type === 'group' ? u.saga : item.title;
-        return `
-          <div class="shelf-slide" data-shelf-i="${i}">
-            <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] ring-1 ring-white/10 shadow-2xl">
-              ${
-                cover
-                  ? `<img data-src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" class="shelf-img w-full h-full object-cover">`
-                  : posterFallbackHtml(title)
-              }
-              ${u.type === 'group' ? `<span class="saga-count">${u.items.length} delen</span>` : ribbonsHtml(item)}
-            </div>
-          </div>`;
-      })
+      .map((u, i) => `<div class="shelf-slide" data-shelf-i="${i}"></div>`)
       .join('');
 
-    els.shelfTrack.querySelectorAll('[data-shelf-i]').forEach((s) => {
-      s.addEventListener('click', () => {
-        const i = Number(s.dataset.shelfI);
+    // Eén handler op de rail in plaats van één per slide.
+    if (!els.shelfTrack.dataset.wired) {
+      els.shelfTrack.dataset.wired = '1';
+      els.shelfTrack.addEventListener('click', (e) => {
+        const slide = e.target.closest('[data-shelf-i]');
+        if (!slide) return;
+        const i = Number(slide.dataset.shelfI);
+        const u = shelfUnits[i];
+        if (!u) return;
         if (i === shelfActive) {
-          const u = shelfUnits[i];
           if (u.type === 'group') openGroupModal(u.saga);
           else openModal(u.item.id);
         } else {
@@ -1760,9 +1778,35 @@ function initCollectionApp(config) {
           updateShelf();
         }
       });
-    });
+    }
 
     updateShelf();
+  }
+
+  /** De inhoud van één slide opbouwen; alleen voor wat in beeld komt. */
+  function vulShelfSlide(slide, u) {
+    if (!u || slide.dataset.gevuld === '1') return;
+    const item = u.type === 'group' ? u.items[0] : u.item;
+    const cover = posterUrl(item);
+    const title = u.type === 'group' ? u.saga : item.title;
+    slide.innerHTML = `
+      <div class="poster-wrap relative rounded-md overflow-hidden aspect-[2/3] bg-[#1E1E26] ring-1 ring-white/10 shadow-2xl">
+        ${
+          cover
+            ? `<img data-src="${escapeAttr(cover)}" alt="${escapeAttr(title)}" class="shelf-img w-full h-full object-cover">`
+            : posterFallbackHtml(title)
+        }
+        ${u.type === 'group' ? `<span class="saga-count">${u.items.length} delen</span>` : ribbonsHtml(item)}
+      </div>`;
+    slide.dataset.gevuld = '1';
+  }
+
+  /** Alles uit de plank halen. Aangeroepen bij het verlaten van die weergave. */
+  function ruimShelfOp() {
+    if (!els.shelfTrack) return;
+    els.shelfTrack.querySelectorAll('.shelf-img').forEach((img) => img.removeAttribute('src'));
+    els.shelfTrack.innerHTML = '';
+    shelfUnits = [];
   }
 
   let shelfUnits = [];
@@ -1780,15 +1824,23 @@ function initCollectionApp(config) {
       const d = i - shelfActive;
       const img = s.querySelector('.shelf-img');
       if (Math.abs(d) > SHELF_WINDOW) {
-        // Ver weg (en toch onzichtbaar buiten de plank): poster lossen en de
-        // 3D-laag opheffen om geheugen vrij te geven.
+        // Ver weg (en toch onzichtbaar buiten de plank): poster lossen, de
+        // 3D-laag opheffen én — sinds FASE 43 — de inhoud helemaal weghalen.
         if (img && img.getAttribute('src')) img.removeAttribute('src');
+        if (s.dataset.gevuld === '1' && Math.abs(d) > SHELF_WINDOW + 3) {
+          // Iets ruimer dan het venster leegmaken, zodat één stapje heen en
+          // weer niet telkens opnieuw opbouwt.
+          s.innerHTML = '';
+          delete s.dataset.gevuld;
+        }
         s.style.transform = 'none';
         s.style.opacity = '0';
         return;
       }
-      // Binnen bereik: poster laden (indien nog niet) en positioneren.
-      if (img && !img.getAttribute('src') && img.dataset.src) img.setAttribute('src', img.dataset.src);
+      // Binnen bereik: inhoud opbouwen als dat nog niet gebeurd is.
+      vulShelfSlide(s, shelfUnits[i]);
+      const img2 = s.querySelector('.shelf-img');
+      if (img2 && !img2.getAttribute('src') && img2.dataset.src) img2.setAttribute('src', img2.dataset.src);
       const scale = d === 0 ? 1 : 0.72;
       const opacity = d === 0 ? 1 : 0.5;
       const ry = Math.max(-1, Math.min(1, -d)) * 22;
@@ -3456,7 +3508,7 @@ function initCollectionApp(config) {
                 </div>
                 <p class="text-[11px] leading-tight text-ink truncate" title="${escapeAttr(c.name)}">${escapeHtml(c.name)}</p>
                 ${c.character ? `<p class="text-[10px] leading-tight text-muted truncate" title="${escapeAttr(c.character)}">${escapeHtml(c.character)}</p>` : ''}
-                ${c.episode_count ? `<p class="text-[10px] leading-tight text-muted/70 font-mono">${c.episode_count} afl.</p>` : ''}
+                ${c.episode_count ? `<p class="text-[10px] leading-tight text-muted font-mono">${c.episode_count} afl.</p>` : ''}
               </div>`;
           })
           .join('');
@@ -4215,7 +4267,7 @@ function initCollectionApp(config) {
               e.runtime ? e.runtime + ' min' : '',
             ].filter(Boolean).join(' · ');
             return `
-              <div class="flex gap-3 sm:gap-4 ${isSeen ? 'opacity-70' : ''}">
+              <div class="flex gap-3 sm:gap-4 ${isSeen ? 'opacity-85' : ''}">
                 <button type="button" data-ep-open="${i}" class="shrink-0 w-32 sm:w-44 rounded-md overflow-hidden ring-1 ring-white/10 hover:ring-gold/50 bg-[#14141A] block transition">
                   ${
                     still
@@ -5046,7 +5098,7 @@ function initCollectionApp(config) {
           )}" title="Aanvinken om samen toe te voegen — op de verlanglijst of meteen als in bezit">`;
           right = `
             <span class="flex gap-2 shrink-0">
-              <button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ wens</button>
+              <button type="button" class="text-gold hover:text-white text-xs underline" data-saga-add="${escapeAttr(p.tmdb_id)}">+ verlanglijst</button>
               <button type="button" class="text-teal hover:text-white text-xs underline" data-saga-own="${escapeAttr(p.tmdb_id)}">+ in bezit…</button>
             </span>`;
         }
@@ -5479,7 +5531,7 @@ function initCollectionApp(config) {
                   <button type="button" class="text-teal hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
                   <!-- FASE 37 — een seizoen dat je nog moet kopen kon je nergens
                        vastleggen; alleen 'in bezit' bestond. -->
-                  <button type="button" class="text-gold hover:text-white text-xs underline" data-wish-season="${s.season_number}">op verlanglijst</button>
+                  <button type="button" class="text-gold hover:text-white text-xs underline" data-wish-season="${s.season_number}">+ verlanglijst</button>
                 </div>
               </div>
             </div>
@@ -5610,6 +5662,9 @@ function initCollectionApp(config) {
 
     els.modal.classList.remove('hidden');
     document.body.classList.add('overflow-hidden');
+    // FASE 43 — de focus mee naar binnen nemen. Zonder dit liep Tab door naar
+    // de kaarten eronder, die niet meescrollen: je focus verdween uit beeld.
+    focusNaarOverlay(els.modal);
   }
 
   // ---------- Bewerken ----------
@@ -6079,6 +6134,7 @@ function initCollectionApp(config) {
     currentModalId = null;
     els.modal.classList.add('hidden');
     document.body.classList.remove('overflow-hidden');
+    focusTerug();
   }
 
   // ---------- Events ----------
@@ -6099,6 +6155,87 @@ function initCollectionApp(config) {
    *    Nu geeft de keten door dat er niets te sluiten viel, zodat Escape in een
    *    open zoekveld gewoon doet wat de browser normaal doet.
    */
+  /* ---------- Toetsenbord en focus (FASE 43) ----------
+   *
+   * Twee dingen die er nooit van gekomen zijn.
+   *
+   * 1. Vier soorten aanklikbare regels in de detailschermen — delen van een
+   *    reeks, exemplarenrijen, namen in de credits, gastrollen — reageerden
+   *    niet op Enter. Je tabde erop en er gebeurde niets.
+   * 2. Geen enkel detailscherm hield de focus vast. Tab liep door naar de
+   *    kaarten eronder, die niet meescrollen: je focus verdween letterlijk uit
+   *    beeld. En bij sluiten kwam hij niet terug waar je was.
+   */
+
+  // Enter en spatie op alles wat zich als knop aandient binnen een overlay.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target;
+    if (!el || el.getAttribute('role') !== 'button') return;
+    // Het raster heeft zijn eigen afhandeling; die niet dubbel laten vuren.
+    if (els.grid && els.grid.contains(el)) return;
+    if (!el.closest('#detail-modal, #person-modal, #episode-modal, #group-modal')) return;
+    e.preventDefault();
+    el.click();
+  });
+
+  /** Alles waar je met Tab naartoe kan binnen een element. */
+  function focusbareElementen(root) {
+    return [...root.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+        'textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+    )].filter((el) => el.offsetParent !== null || el === document.activeElement);
+  }
+
+  // Waar de focus stond vóór er een overlay openging.
+  let focusVoorOverlay = null;
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const laag = document.querySelector(
+      '#detail-modal:not(.hidden), #person-modal:not(.hidden), #episode-modal:not(.hidden), ' +
+        '#group-modal:not(.hidden), #bulk-edit-modal:not(.hidden), #add-title-modal:not(.hidden)'
+    );
+    if (!laag) return;
+    const kandidaten = focusbareElementen(laag);
+    if (!kandidaten.length) return;
+    const eerste = kandidaten[0];
+    const laatste = kandidaten[kandidaten.length - 1];
+
+    // Staat de focus buiten de laag (bv. nog op een kaart eronder), dan
+    // meteen naar binnen halen.
+    if (!laag.contains(document.activeElement)) {
+      e.preventDefault();
+      (e.shiftKey ? laatste : eerste).focus();
+      return;
+    }
+    if (!e.shiftKey && document.activeElement === laatste) {
+      e.preventDefault();
+      eerste.focus();
+    } else if (e.shiftKey && document.activeElement === eerste) {
+      e.preventDefault();
+      laatste.focus();
+    }
+  });
+
+  /** Onthoudt waar je was en zet de focus in de zojuist geopende laag. */
+  function focusNaarOverlay(laag) {
+    if (!laag) return;
+    if (!laag.contains(document.activeElement)) focusVoorOverlay = document.activeElement;
+    const kandidaten = focusbareElementen(laag);
+    const doel = laag.querySelector('[data-modal-close], #modal-close') || kandidaten[0];
+    if (doel && typeof doel.focus === 'function') doel.focus({ preventScroll: true });
+  }
+
+  /** Zet de focus terug waar hij was vóór de overlay openging. */
+  function focusTerug() {
+    const el = focusVoorOverlay;
+    focusVoorOverlay = null;
+    if (el && document.contains(el) && typeof el.focus === 'function') {
+      el.focus({ preventScroll: true });
+    }
+  }
+
   function overlayLagen() {
     const zichtbaar = (el) => el && !el.classList.contains('hidden');
     const anderePagina = (id) => {

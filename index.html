@@ -212,7 +212,7 @@
   .peek-top { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px; }
   .peek-star { font-family:'JetBrains Mono',monospace; font-size:11px; color:#C9A227; font-weight:600; }
   .peek-fmt { font-family:'JetBrains Mono',monospace; font-size:9.5px; color:#F2F0EA; }
-  .peek-tag { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:8.5px; text-transform:uppercase; letter-spacing:.04em; border:1px solid rgba(47,164,169,.55); color:#2FA4A9; border-radius:9999px; padding:2px 7px; }
+  .peek-tag { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; border:1px solid rgba(47,164,169,.55); color:#2FA4A9; border-radius:9999px; padding:2px 7px; }
   .peek-tag.unseen { border-color: rgba(139,138,146,.5); color:#8B8A92; }
 
   /* Tekst afkappen na 2 of 3 regels (voor seizoen-/afleveringsbeschrijvingen). */
@@ -648,9 +648,18 @@
     .letter-chip { min-width: 2.25rem; padding: 0.5rem 0.35rem; }
     .nav-link { padding: 0.35rem 0; }
     select, input[type="search"] { min-height: 2.75rem; }
-    .delete-btn { opacity: 1; width: 2rem; height: 2rem; }
-    /* Op aanraakschermen is de verwijderknop altijd zichtbaar (linksboven),
-       dus verhuist de waarde-pill naar linksonder.
+    /* FASE 42 — de verwijderknop stond hier permanent zichtbaar op élke
+       poster. In een tweekoloms raster op een gsm is dat een rood knopje op
+       een dozijn plekken tegelijk, en één misgetikte veeg opende de
+       verwijderdialoog. Verwijderen hoort iets te zijn dat je opzoekt, niet
+       iets dat je per ongeluk raakt.
+
+       Hij zit nu in het detailscherm (waar "Volledige titel verwijderen" al
+       stond) en in de selectiemodus, die daar precies voor bedoeld is. */
+    .delete-btn { display: none !important; }
+    /* De waarde-pill stond hier linksonder omdat de verwijderknop linksboven
+       zat; die plek is nu vrij, maar de indeling blijft zoals ze was — anders
+       springt alles op je scherm van plaats.
        De bekeken-stip gaat naar bovenaan, net naast de verwijderknop. Niet
        naast de pill: die is bij een bedrag van vier cijfers breed genoeg om de
        stip te overlappen, en rechtsonder zit al de seizoenenteller. */
@@ -746,10 +755,10 @@
           <option value="watched_desc">Laatst bekeken</option>
         </select>
         <div id="view-chips" class="flex gap-1 shrink-0" role="group" aria-label="Weergave">
-          <button type="button" class="chip" data-view="grid" title="Posterraster">▦</button>
-          <button type="button" class="chip" data-view="shelf" title="Plank — filmische cover-flow">▤▤</button>
-          <button type="button" class="chip" data-view="compact" title="Compacte lijst met kleine afbeeldingen">▤</button>
-          <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen">≡</button>
+          <button type="button" class="chip" data-view="grid" title="Posterraster" aria-label="Posterraster">▦</button>
+          <button type="button" class="chip" data-view="shelf" title="Plank — filmische cover-flow" aria-label="Plankweergave">▤▤</button>
+          <button type="button" class="chip" data-view="compact" title="Compacte lijst met kleine afbeeldingen" aria-label="Compacte lijst">▤</button>
+          <button type="button" class="chip" data-view="text" title="Pure tekstlijst — snelst om door te scrollen" aria-label="Tekstlijst">≡</button>
         </div>
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
         <button id="select-toggle" type="button" class="chip" aria-pressed="false" title="Meerdere titels aanvinken om ze samen te verwijderen">Selecteren</button>
@@ -874,7 +883,7 @@
       <p class="max-w-md leading-relaxed">
         This product uses the TMDB API but is not endorsed or certified by TMDB.
       </p>
-      <p class="text-[10px] opacity-70">Prijsgegevens via de eBay Browse API</p>
+      <p class="text-[10px] text-muted">Prijsgegevens via de eBay Browse API</p>
     </div>
   </footer>
 
@@ -1620,7 +1629,7 @@
     <div class="flex flex-wrap items-center gap-2">
       <span id="select-count" class="font-mono text-sm text-gold mr-auto">0 geselecteerd</span>
       <button type="button" id="select-all" class="chip !py-1.5">Alles in beeld</button>
-      <button type="button" id="select-none" class="chip !py-1.5">Wissen</button>
+      <button type="button" id="select-none" class="chip !py-1.5" title="Alleen de selectie ongedaan maken — er wordt niets verwijderd">Selectie leegmaken</button>
       <button type="button" id="select-edit" class="chip !py-1.5 !border-gold/50 !text-gold" disabled>Bewerken</button>
       <button type="button" id="select-delete" class="chip !py-1.5 !border-red-500/50 !text-red-400" disabled>Verwijderen</button>
       <button type="button" id="select-close" class="chip !py-1.5" aria-label="Selectiemodus sluiten">Klaar</button>

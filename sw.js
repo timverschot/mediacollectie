@@ -19,7 +19,7 @@
  * Versienummer ophogen forceert een schone installatie bij je volgende bezoek.
  */
 
-const VERSION = 'v42';
+const VERSION = 'v44';
 // De postercache heeft een EIGEN versie, los van de schil. Zo wist een gewone
 // JS/HTML-update (VERSION ophogen) niet telkens alle gedownloade posters —
 // scheelt fors dataverbruik op gsm. Verhoog IMAGE_VERSION enkel als je de
@@ -27,7 +27,11 @@ const VERSION = 'v42';
 const IMAGE_VERSION = 'v1';
 const SHELL_CACHE = `mediacollectie-shell-${VERSION}`;
 const IMAGE_CACHE = `mediacollectie-images-${IMAGE_VERSION}`;
-const MAX_IMAGES = 600;
+// FASE 43 — 600 was kleiner dan een collectie van 680 titels, dus de posters
+// die je het eerst zag vielen er telkens uit en werden opnieuw opgehaald. Ruimer
+// gezet: een poster op w342 is enkele tientallen kB, dus dit blijft bescheiden
+// naast wat een browser sowieso aan cache mag gebruiken.
+const MAX_IMAGES = 1500;
 
 // Relatieve paden, zodat dit ook werkt onder een submap op GitHub Pages.
 const SHELL_ASSETS = [
@@ -159,20 +163,45 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Eigen bestanden: netwerk eerst, cache als vangnet.
+  // Eigen bestanden: eerst de bewaarde kopie, dan op de achtergrond verversen
+  // (FASE 43).
+  //
+  // Voorheen was dit netwerk-eerst. Dat betekende dat de app bij élke opening
+  // ~145 kB opnieuw ophaalde terwijl er een geldige kopie klaarstond, en dat je
+  // op een trage verbinding stond te wachten op bestanden die je al had.
+  //
+  // Nu krijg je de kopie meteen en wordt de nieuwe versie ernáást opgehaald en
+  // bewaard. Wat je ziet is dus hoogstens één bezoek oud — precies waarom het
+  // versienummer hierboven bij elke wijziging omhoog moet en waarom er na een
+  // upload één keer Ctrl+Shift+R nodig is. Dat was al zo; deze wissel maakt dat
+  // niet erger.
   if (url.origin === self.location.origin) {
     event.respondWith(
       (async () => {
+        const cache = await caches.open(SHELL_CACHE);
+        const hit = await cache.match(request);
+
+        const vanHetNet = fetch(request)
+          .then((resp) => {
+            if (resp && resp.status === 200) cache.put(request, resp.clone());
+            return resp;
+          })
+          .catch((err) => {
+            // Geen verbinding: als er een kopie is, is dat geen probleem.
+            if (hit) return null;
+            throw err;
+          });
+
+        if (hit) {
+          // Niet op het netwerk wachten, maar het wel afmaken.
+          event.waitUntil(vanHetNet.catch(() => {}));
+          return hit;
+        }
+
         try {
-          const resp = await fetch(request);
-          if (resp && resp.status === 200) {
-            const cache = await caches.open(SHELL_CACHE);
-            cache.put(request, resp.clone());
-          }
-          return resp;
+          const resp = await vanHetNet;
+          if (resp) return resp;
         } catch (err) {
-          const hit = await caches.match(request);
-          if (hit) return hit;
           // Navigatie zonder verbinding en zonder kopie: val terug op de
           // startpagina, die wél bewaard is.
           if (request.mode === 'navigate') {
@@ -181,6 +210,7 @@ self.addEventListener('fetch', (event) => {
           }
           throw err;
         }
+        throw new Error('Geen antwoord en geen bewaarde kopie voor ' + request.url);
       })()
     );
   }

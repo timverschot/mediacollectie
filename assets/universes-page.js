@@ -99,6 +99,8 @@ async function initUniversesPage() {
 
     try {
       await driveSaveUniverses(universes);
+      // FASE 43 — de bewaarde ledenlijsten kloppen nu misschien niet meer.
+      if (typeof universeCacheWissen === 'function') universeCacheWissen();
       els.results.innerHTML = '';
       els.query.value = '';
       els.status.textContent = `✓ "${universe.name}" toegevoegd.`;
@@ -318,6 +320,8 @@ async function initUniversesPage() {
         if (!confirm(`"${universe.name}" verwijderen? Je collectie zelf blijft ongewijzigd.`)) return;
         universes = universes.filter((u) => u.id !== universe.id);
         await driveSaveUniverses(universes);
+      // FASE 43 — de bewaarde ledenlijsten kloppen nu misschien niet meer.
+      if (typeof universeCacheWissen === 'function') universeCacheWissen();
         await renderAll();
       });
 

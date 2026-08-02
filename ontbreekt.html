@@ -71,6 +71,23 @@
   .btn-primary { background: #C9A227; color: #14141A; }
   .btn-secondary { background: transparent; border: 1px solid rgba(242,240,234,0.2); color: #F2F0EA; }
   @media (pointer: coarse) { .chip { padding: 0.55rem 1rem; } }
+
+  /* FASE 42 — afdrukken. Een boodschappenlijst op papier heeft niets aan
+     posters, filters of een donkere achtergrond die je inktpatroon leegzuigt.
+     Alleen de lijst gaat mee, in zwart op wit. */
+  @media print {
+    body { background: #fff !important; color: #000 !important; }
+    header, nav, #missing-tabs, #missing-print, #pick-bar, #login-gate,
+    #missing-series, #missing-eigen, #missing-sagas, #saga-load-box,
+    #missing-summary, #missing-empty, #page-error, .sprocket-strip,
+    label:has(#missing-hide-wish) { display: none !important; }
+    #print-list { display: block !important; color: #000; }
+    #print-list h2 { font-size: 16pt; margin: 0 0 4pt; }
+    #print-list h3 { font-size: 12pt; margin: 10pt 0 2pt; border-bottom: 1px solid #999; }
+    #print-list p { font-size: 9pt; color: #444; margin: 0 0 8pt; }
+    #print-list li { font-size: 11pt; margin: 0 0 2pt; list-style: none; }
+    #print-list li::before { content: '☐  '; }
+  }
 </style>
 
 <!-- ⚠ Tailwind staat hier BEWUST ná het stijlblok hierboven, en niet in de kop
@@ -126,6 +143,9 @@
       <label class="text-sm flex items-center gap-2 text-ink ml-auto">
         <input type="checkbox" id="missing-hide-wish" class="w-4 h-4"> Verberg wat al op mijn verlanglijst staat
       </label>
+      <!-- FASE 42 — de pagina zei zelf "bedoeld om mee te nemen naar de
+           winkel", maar je kon er niets mee: alles was dode tekst. -->
+      <button type="button" id="missing-print" class="chip shrink-0">Afdrukken</button>
     </div>
 
     <p id="missing-summary" class="font-mono text-sm text-muted"></p>
@@ -150,7 +170,22 @@
 
     <p id="page-error" class="hidden text-center text-red-400 py-8 font-mono text-sm"></p>
 
+    <!-- FASE 42 — de boodschappenlijst die je meeneemt. Wordt alleen bij het
+         afdrukken zichtbaar; op het scherm staat de gewone pagina. -->
+    <section id="print-list" class="hidden"></section>
   </main>
+
+  <!-- FASE 42 — selectiebalk. Verschijnt zodra je iets aanvinkt. -->
+  <div id="pick-bar" class="hidden fixed inset-x-0 bottom-0 z-40 bg-surface/95 backdrop-blur border-t border-white/10">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap gap-3 items-center"
+         style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom))">
+      <p id="pick-count" class="font-mono text-sm text-gold"></p>
+      <button type="button" id="pick-wish" class="btn btn-primary !py-1.5 !px-3 text-xs">+ verlanglijst</button>
+      <button type="button" id="pick-none" class="chip !py-1 !px-2.5 text-xs">Selectie leegmaken</button>
+      <span id="pick-status" class="text-xs font-mono text-muted"></span>
+    </div>
+  </div>
+
 
   <div id="login-gate" class="fixed inset-0 z-[60] flex items-center justify-center bg-bg">
     <div class="text-center max-w-sm px-6">
