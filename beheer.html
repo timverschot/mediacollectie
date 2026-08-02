@@ -345,6 +345,17 @@
           <div id="form-variants" class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
         </div>
 
+        <!-- FASE 40 — verzamelaarsgegevens bij het toevoegen. Dichtgeklapt, zodat
+             snel invoeren snel blijft; open je hem, dan hoef je de titel later
+             niet opnieuw langs voor de prijs die je nu nog weet. Wordt gevuld
+             uit COLLECTOR_FIELDS in drive.js. -->
+        <details class="rounded-lg ring-1 ring-white/5">
+          <summary class="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase text-muted">
+            Verzamelaarsgegevens (optioneel)
+          </summary>
+          <div id="form-collector" class="grid sm:grid-cols-2 gap-3 px-3 pb-3"></div>
+        </details>
+
         <div id="saga-bulk" class="hidden bg-bg rounded-md p-3 text-sm">
           <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>
           <button type="button" id="saga-bulk-btn" class="btn btn-secondary !py-1.5 !px-3 text-xs">Alle delen van deze reeks toevoegen</button>

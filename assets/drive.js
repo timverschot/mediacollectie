@@ -98,6 +98,220 @@ function editionVariantKeys(edition) {
   return EDITION_VARIANTS.filter((v) => edition[v.key]).map((v) => v.key);
 }
 
+/* ==========================================================================
+ * Verzamelaarsvelden per exemplaar (FASE 40)
+ * ==========================================================================
+ * Het datamodel was rijk aan *wat een film is* — regie, cast, genre, rating —
+ * en arm aan *wat een schijf is*. Wat je ervoor betaalde, in welke staat hij
+ * is, aan wie je hem uitleende: nergens plaats voor. Alles moest in het vrije
+ * opmerkingenveld, dat niet eens doorzocht werd.
+ *
+ * De plek lag al klaar: een exemplaar heeft sinds lang een eigen structuur, en
+ * sinds FASE 35 geldt dat ook voor seizoenen. Er ontbraken alleen velden.
+ *
+ * Ze staan hier in één lijst, en zowel het bewerkscherm, het toevoegformulier
+ * als het seizoen-exemplaarscherm bouwen zich daaruit op. Zo kan er niet weer
+ * een scherm achterblijven bij de rest — dat is precies hoe de universumpagina
+ * `added_at` nooit kreeg.
+ * ========================================================================== */
+
+const COLLECTOR_CONDITIONS = [
+  { value: 'nieuw', label: 'Nieuw (geseald)' },
+  { value: 'alsnieuw', label: 'Als nieuw' },
+  { value: 'goed', label: 'Goed' },
+  { value: 'redelijk', label: 'Redelijk' },
+  { value: 'matig', label: 'Matig / beschadigd' },
+];
+
+const COLLECTOR_REGIONS = [
+  { value: 'vrij', label: 'Regiovrij / alle regio’s' },
+  { value: 'dvd1', label: 'DVD regio 1 — VS, Canada' },
+  { value: 'dvd2', label: 'DVD regio 2 — Europa, Japan' },
+  { value: 'dvd3', label: 'DVD regio 3 — Zuidoost-Azië' },
+  { value: 'dvd4', label: 'DVD regio 4 — Latijns-Amerika, Oceanië' },
+  { value: 'dvd5', label: 'DVD regio 5 — Afrika, Rusland, India' },
+  { value: 'dvd6', label: 'DVD regio 6 — China' },
+  { value: 'bdA', label: 'Blu-ray regio A' },
+  { value: 'bdB', label: 'Blu-ray regio B — Europa' },
+  { value: 'bdC', label: 'Blu-ray regio C' },
+];
+
+/**
+ * `soort` bepaalt hoe het veld getekend en teruggelezen wordt:
+ *   getal  — <input type="number">, leeg of een getal
+ *   datum  — <input type="date">
+ *   keuze  — <select> met een lege eerste optie
+ *   tekst  — <input type="text">
+ * `zoekbaar` betekent dat de inhoud meetelt bij het zoekveld.
+ */
+const COLLECTOR_FIELDS = [
+  {
+    key: 'purchase_price', label: 'Betaald', soort: 'getal',
+    stap: '0.01', min: '0', voorvoegsel: '€', plaatshouder: 'Bv. 12.99',
+  },
+  { key: 'purchase_date', label: 'Gekocht op', soort: 'datum' },
+  { key: 'condition', label: 'Staat', soort: 'keuze', opties: COLLECTOR_CONDITIONS },
+  {
+    key: 'loaned_to', label: 'Uitgeleend aan', soort: 'tekst', zoekbaar: true,
+    plaatshouder: 'Leeg = staat in je kast',
+  },
+  { key: 'region', label: 'Regiocode', soort: 'keuze', opties: COLLECTOR_REGIONS },
+  { key: 'disc_count', label: 'Aantal schijven', soort: 'getal', stap: '1', min: '1', plaatshouder: 'Bv. 3' },
+  { key: 'languages', label: 'Talen', soort: 'tekst', zoekbaar: true, plaatshouder: 'Bv. NL, EN, FR' },
+  { key: 'subtitles', label: 'Ondertitels', soort: 'tekst', zoekbaar: true, plaatshouder: 'Bv. NL, EN' },
+];
+
+/** Lege waarde voor elk verzamelaarsveld — de vorm die een nieuw exemplaar krijgt. */
+function legeCollectorVelden() {
+  return Object.fromEntries(COLLECTOR_FIELDS.map((v) => [v.key, '']));
+}
+
+/**
+ * Vult ontbrekende verzamelaarsvelden aan en zet ze in de juiste vorm.
+ * Getallen worden echte getallen (of leeg), de rest wordt tekst zonder spaties
+ * aan de randen. Veilig om meermaals aan te roepen.
+ */
+function normalizeCollectorFields(ed) {
+  if (!ed || typeof ed !== 'object') return ed;
+  COLLECTOR_FIELDS.forEach((v) => {
+    const w = ed[v.key];
+    if (w === undefined || w === null || w === '') { ed[v.key] = ''; return; }
+    if (v.soort === 'getal') {
+      const n = Number(w);
+      ed[v.key] = Number.isFinite(n) ? n : '';
+    } else {
+      ed[v.key] = String(w).trim();
+    }
+  });
+  return ed;
+}
+
+/** Is dit exemplaar op dit moment uitgeleend? */
+function isUitgeleend(ed) {
+  return !!(ed && String(ed.loaned_to || '').trim());
+}
+
+/** Wat je voor dit exemplaar betaalde, als getal. 0 als je niets invulde. */
+function betaaldBedrag(ed) {
+  const n = Number(ed && ed.purchase_price);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function conditionLabel(v) {
+  const c = COLLECTOR_CONDITIONS.find((x) => x.value === v);
+  return c ? c.label : v || '';
+}
+function regionLabel(v) {
+  const r = COLLECTOR_REGIONS.find((x) => x.value === v);
+  return r ? r.label : v || '';
+}
+
+/**
+ * Korte losse stukjes voor onder een exemplaar in de detailweergave.
+ * Alleen wat ingevuld is, in de volgorde waarin je het wil zien staan.
+ */
+function collectorSamenvatting(ed) {
+  if (!ed) return [];
+  const uit = [];
+  if (isUitgeleend(ed)) uit.push('↗ uitgeleend aan ' + ed.loaned_to);
+  const prijs = betaaldBedrag(ed);
+  if (prijs) uit.push('€' + prijs.toFixed(2).replace('.', ','));
+  if (ed.purchase_date) uit.push('gekocht ' + ed.purchase_date);
+  if (ed.condition) uit.push(conditionLabel(ed.condition));
+  if (ed.disc_count) uit.push(ed.disc_count + (Number(ed.disc_count) === 1 ? ' schijf' : ' schijven'));
+  if (ed.region) uit.push(regionLabel(ed.region));
+  if (ed.languages) uit.push('🔊 ' + ed.languages);
+  if (ed.subtitles) uit.push('💬 ' + ed.subtitles);
+  return uit;
+}
+
+function collectorEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
+}
+
+/**
+ * Tekent alle verzamelaarsvelden voor één exemplaar (FASE 40).
+ *
+ * Eén functie voor drie schermen — het bewerkpaneel, het toevoegformulier en
+ * het seizoen-exemplaarscherm — zodat een nieuw veld nergens vergeten kan
+ * worden. Elk invoerveld krijgt `data-col="<sleutel>"`; teruglezen gebeurt met
+ * collectorLeesVelden() hieronder.
+ *
+ * `opts.stijl` kiest de opmaak: 'paneel' volgt de bestaande labels van het
+ * bewerkpaneel, 'compact' die van het kleine seizoenscherm.
+ */
+function collectorVeldenHtml(ed, opts) {
+  const o = opts || {};
+  const waarden = ed || {};
+  const compact = o.stijl === 'compact';
+  const labelKlasse = compact
+    ? 'block text-xs font-mono text-muted uppercase mb-1'
+    : '';
+  const invoerKlasse = compact
+    ? 'w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted'
+    : '';
+
+  const veld = (v) => {
+    const w = waarden[v.key];
+    const waarde = w === undefined || w === null ? '' : String(w);
+    const cls = invoerKlasse ? ` class="${invoerKlasse}"` : '';
+    if (v.soort === 'keuze') {
+      const opties = [`<option value="">—</option>`]
+        .concat(
+          (v.opties || []).map(
+            (x) =>
+              `<option value="${collectorEsc(x.value)}"${
+                waarde === x.value ? ' selected' : ''
+              }>${collectorEsc(x.label)}</option>`
+          )
+        )
+        .join('');
+      return `<select data-col="${v.key}"${cls}>${opties}</select>`;
+    }
+    const type = v.soort === 'getal' ? 'number' : v.soort === 'datum' ? 'date' : 'text';
+    const extra =
+      (v.stap ? ` step="${collectorEsc(v.stap)}"` : '') +
+      (v.min !== undefined ? ` min="${collectorEsc(v.min)}"` : '') +
+      (v.plaatshouder ? ` placeholder="${collectorEsc(v.plaatshouder)}"` : '');
+    return `<input type="${type}" data-col="${v.key}" value="${collectorEsc(waarde)}"${extra}${cls}>`;
+  };
+
+  return COLLECTOR_FIELDS.map(
+    (v) => `
+      <div>
+        <label${labelKlasse ? ` class="${labelKlasse}"` : ''}>${collectorEsc(v.label)}${
+      v.voorvoegsel ? ` (${collectorEsc(v.voorvoegsel)})` : ''
+    }</label>
+        ${veld(v)}
+      </div>`
+  ).join('');
+}
+
+/**
+ * Leest de verzamelaarsvelden terug uit een stuk scherm en geeft ze in de
+ * juiste vorm terug. Een leeg getalveld wordt '' en niet 0 — anders zou "niets
+ * ingevuld" er in de statistieken uitzien als "gratis gekregen".
+ */
+function collectorLeesVelden(root) {
+  const uit = {};
+  if (!root) return uit;
+  COLLECTOR_FIELDS.forEach((v) => {
+    const el = root.querySelector(`[data-col="${v.key}"]`);
+    if (!el) return;
+    const ruw = String(el.value == null ? '' : el.value).trim();
+    if (!ruw) { uit[v.key] = ''; return; }
+    if (v.soort === 'getal') {
+      const n = Number(ruw);
+      uit[v.key] = Number.isFinite(n) ? n : '';
+    } else {
+      uit[v.key] = ruw;
+    }
+  });
+  return uit;
+}
+
 function editionVariantLabels(edition) {
   if (!edition) return [];
   return EDITION_VARIANTS.filter((v) => edition[v.key]).map((v) => v.label);
@@ -143,6 +357,7 @@ function normalizeMovieEntry(m) {
         custom_back_cover_id: m.custom_back_cover_id || '',
         custom_front_cover: m.custom_front_cover || '',
         custom_back_cover: m.custom_back_cover || '',
+        ...legeCollectorVelden(),
       },
     ];
   } else {
@@ -157,6 +372,7 @@ function normalizeMovieEntry(m) {
       if (ed.notes == null) ed.notes = '';
       if (ed.boxset == null) ed.boxset = '';
       if (ed.location == null) ed.location = '';
+      normalizeCollectorFields(ed);
     });
   }
 
@@ -195,6 +411,8 @@ function nieuweCollectieTitel(opties) {
     custom_back_cover_id: o.back_cover_id || '',
     custom_front_cover: '',
     custom_back_cover: '',
+    ...legeCollectorVelden(),
+    ...(o.collector || {}),
   };
 
   const entry = {
@@ -247,6 +465,9 @@ function nieuwSeizoenExemplaar(eid, format) {
     date_added: '',
     custom_front_cover_id: '',
     custom_back_cover_id: '',
+    // FASE 40 — een seizoen-exemplaar is een schijf als elke andere: ook
+    // daarvan wil je weten wat je betaalde en aan wie je het uitleende.
+    ...legeCollectorVelden(),
   };
 }
 
@@ -269,6 +490,7 @@ function normalizeSeasonEditions(m) {
       ['notes', 'boxset', 'location', 'custom_front_cover_id', 'custom_back_cover_id'].forEach((veld) => {
         if (ed[veld] == null) ed[veld] = '';
       });
+      normalizeCollectorFields(ed);
     });
 
     syncLegacySeasonFields(s);

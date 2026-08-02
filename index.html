@@ -781,6 +781,14 @@
           <button type="button" class="chip" data-watched="watched">Bekeken</button>
           <button type="button" class="chip" data-watched="unwatched">Niet bekeken</button>
         </div>
+        <!-- FASE 40 — uitgeleend. Opt-in zoals de verlanglijst: standaard toont
+             de collectie gewoon alles, dit filter zoekt op wat er niet in je
+             kast staat. -->
+        <span class="text-xs font-mono text-muted uppercase ml-4 mr-1">Uitgeleend</span>
+        <div id="loaned-chips" class="flex flex-wrap gap-2">
+          <button type="button" class="chip" data-loaned="uit" title="Alleen schijven die je aan iemand uitleende">Uitgeleend</button>
+          <button type="button" class="chip" data-loaned="thuis" title="Alleen schijven die in je kast staan">In je kast</button>
+        </div>
       </div>
 
       <div class="flex flex-wrap gap-2 items-center">
@@ -1021,6 +1029,25 @@
               <label>Waar ligt dit exemplaar?</label>
               <input type="text" data-edit-location placeholder="Bv. Kast woonkamer plank 2, of Zolder doos 3">
             </div>
+
+            <!-- FASE 40 — verzamelaarsvelden. De inhoud wordt opgebouwd uit
+                 COLLECTOR_FIELDS in drive.js, zodat dit scherm, het
+                 toevoegformulier en het seizoen-exemplaarscherm nooit uit
+                 elkaar kunnen groeien. -->
+            <details data-edit-collector-box class="rounded-lg bg-surface/60 ring-1 ring-white/5">
+              <summary class="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase text-muted">
+                Verzamelaarsgegevens <span data-edit-collector-count class="text-gold"></span>
+              </summary>
+              <div data-edit-collector class="grid sm:grid-cols-2 gap-3 px-3 pb-3"></div>
+            </details>
+
+            <div>
+              <label>Toegevoegd aan je collectie op</label>
+              <input type="date" data-edit-added>
+              <p class="!normal-case text-xs text-muted font-mono mt-1">
+                Bepaalt de volgorde bij “Onlangs toegevoegd”. Voer je een bestaande collectie in, dan mag hier de échte datum staan.
+              </p>
+            </div>
             <!-- FASE 34 — eigen titel. TMDb levert soms een titel in een taal die
                  je niet leest; dan wil je hem in je eigen collectie anders
                  noemen zonder de koppeling met TMDb te verliezen. -->
@@ -1235,6 +1262,17 @@
           <label>Uitvoering</label>
           <div id="form-variants" class="flex flex-wrap gap-x-5 gap-y-2 mt-1"></div>
         </div>
+
+        <!-- FASE 40 — verzamelaarsgegevens bij het toevoegen. Dichtgeklapt, zodat
+             snel invoeren snel blijft; open je hem, dan hoef je de titel later
+             niet opnieuw langs voor de prijs die je nu nog weet. Wordt gevuld
+             uit COLLECTOR_FIELDS in drive.js. -->
+        <details class="rounded-lg ring-1 ring-white/5">
+          <summary class="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase text-muted">
+            Verzamelaarsgegevens (optioneel)
+          </summary>
+          <div id="form-collector" class="grid sm:grid-cols-2 gap-3 px-3 pb-3"></div>
+        </details>
 
         <div id="saga-bulk" class="hidden bg-surface rounded-md p-3 text-sm">
           <p class="mb-2">Deze titel hoort bij <strong id="saga-bulk-name"></strong>.</p>

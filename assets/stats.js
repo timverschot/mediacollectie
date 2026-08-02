@@ -235,6 +235,8 @@ async function initStatsPage() {
     watchYear: document.getElementById('chart-watch-year'),
     myRatings: document.getElementById('chart-my-ratings'),
     value: document.getElementById('value-block'),
+    spendKpis: document.getElementById('spend-kpis'),
+    spend: document.getElementById('spend-block'),
     scopeChips: document.getElementById('scope-chips'),
   };
 
@@ -477,6 +479,77 @@ async function initStatsPage() {
       : '<p class="text-sm text-muted py-3">Nog geen eigen scores gegeven.</p>';
   }
 
+  /**
+   * Wat je collectie je gekost heeft (FASE 40).
+   *
+   * Alleen exemplaren waar je écht een prijs bij zette tellen mee. Een
+   * exemplaar zonder prijs wordt níet als € 0 geteld — dan zou "nog niet
+   * ingevuld" er in het totaal uitzien als "gratis gekregen", en zou het cijfer
+   * stiller zakken naarmate je meer toevoegt.
+   */
+  function renderSpend(list) {
+    const perFormaat = {};
+    let totaal = 0;
+    let metPrijs = 0;
+    let zonderPrijs = 0;
+    let duurste = null;
+
+    const telExemplaar = (ed, titel) => {
+      if (!ed || ed.wishlist) return;
+      const bedrag = typeof betaaldBedrag === 'function' ? betaaldBedrag(ed) : 0;
+      if (!bedrag) { zonderPrijs++; return; }
+      metPrijs++;
+      totaal += bedrag;
+      const f = ed.format || 'onbekend';
+      perFormaat[f] = (perFormaat[f] || 0) + bedrag;
+      if (!duurste || bedrag > duurste.bedrag) duurste = { bedrag, titel, format: f };
+    };
+
+    list.forEach((m) => {
+      (m.editions || []).forEach((ed) => telExemplaar(ed, m.title));
+      (m.seasons || []).forEach((s) =>
+        (s.editions || []).forEach((ed) => telExemplaar(ed, `${m.title} — seizoen ${s.season_number}`))
+      );
+    });
+
+    const gemiddeld = metPrijs ? totaal / metPrijs : 0;
+
+    if (els.spendKpis) {
+      els.spendKpis.innerHTML = [
+        statsKpi('Totaal betaald', statsMoney(totaal, 'EUR'), `over ${metPrijs} ${metPrijs === 1 ? 'exemplaar' : 'exemplaren'}`),
+        statsKpi('Gemiddeld per schijf', metPrijs ? statsMoney(gemiddeld, 'EUR') : '—'),
+        statsKpi(
+          'Duurste aankoop',
+          duurste ? statsMoney(duurste.bedrag, 'EUR') : '—',
+          duurste ? duurste.titel : ''
+        ),
+        statsKpi('Nog geen prijs', String(zonderPrijs), zonderPrijs ? 'exemplaren zonder aankoopprijs' : 'alles ingevuld'),
+      ].join('');
+    }
+
+    if (!els.spend) return;
+    if (!metPrijs) {
+      els.spend.innerHTML =
+        '<p class="text-sm text-muted py-2">Nog geen aankoopprijzen ingevuld. Je vindt het veld bij een titel onder ' +
+        '<span class="text-[#C9A227]">✎ Bewerken → Verzamelaarsgegevens</span>, en bij het toevoegen van een nieuwe titel.</p>';
+      return;
+    }
+
+    const rijen = Object.entries(perFormaat)
+      .sort((a, b) => b[1] - a[1])
+      .map(([f, bedrag]) => ({
+        label: typeof formatLabel === 'function' ? formatLabel(f) : f,
+        value: bedrag,
+        // statsBarChart toont `sub` als er een staat, anders de kale waarde.
+        sub: statsMoney(bedrag, 'EUR'),
+        color: typeof formatColor === 'function' ? formatColor(f) : '#C9A227',
+      }));
+
+    els.spend.innerHTML =
+      '<p class="text-xs font-mono uppercase text-muted mb-2">Betaald per formaat</p>' +
+      statsBarChart(rijen);
+  }
+
   function renderValue(list) {
     const byId = {};
     // Gearchiveerde metingen overslaan, net als de collectiepagina doet. Volg je
@@ -656,6 +729,7 @@ async function initStatsPage() {
       ['Groei over tijd', els.growth, () => renderGrowth(list)],
       ['Bekeken', els.watched, () => renderWatched(list)],
       ['Kijkgedrag', els.watchKpis, () => renderWatchBehaviour(list)],
+      ['Wat je betaalde', els.spend, () => renderSpend(list)],
       ['Collectiewaarde', els.value, () => renderValue(list)],
     ];
 

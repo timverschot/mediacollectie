@@ -105,6 +105,12 @@ function initAddTitleUI(onSaved) {
     ).join('');
   }
 
+  // FASE 40 — verzamelaarsvelden uit dezelfde gedeelde lijst.
+  const collectorBox = document.getElementById('form-collector');
+  if (collectorBox && typeof collectorVeldenHtml === 'function') {
+    collectorBox.innerHTML = collectorVeldenHtml({});
+  }
+
   const bulkBtn = document.getElementById('saga-bulk-btn');
   if (bulkBtn) bulkBtn.addEventListener('click', addTitleAddWholeSaga);
 
@@ -292,6 +298,12 @@ function addTitleBuildEdition(eid, coverIds) {
     custom_back_cover_id: (coverIds && coverIds.back) || '',
     custom_front_cover: '',
     custom_back_cover: '',
+    // FASE 40 — verzamelaarsgegevens uit het dichtgeklapte blok. Vul je niets
+    // in, dan komen er lege velden te staan, precies zoals overal elders.
+    ...(typeof legeCollectorVelden === 'function' ? legeCollectorVelden() : {}),
+    ...(typeof collectorLeesVelden === 'function'
+      ? collectorLeesVelden(document.getElementById('form-collector'))
+      : {}),
   };
 }
 

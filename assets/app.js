@@ -178,6 +178,7 @@ function initCollectionApp(config) {
     activeStatus: new Set(),   // 'owned' / 'wishlist'
     activeSaga: new Set(),     // 'in' = hoort bij een filmreeks, 'los' = losstaand
     activeWatched: new Set(),  // 'watched' / 'unwatched'
+    activeLoaned: new Set(),   // FASE 40 — 'uit' / 'thuis'
     activeDecades: new Set(),  // 1970, 1980, … (beginjaar van het decennium)
     activeCerts: new Set(),    // leeftijdskeuring, bv. 'AL', '12', '16'
     activeVariants: new Set(), // uitvoeringen: steelbook, limited, extended, directors
@@ -224,6 +225,7 @@ function initCollectionApp(config) {
     statusChips: document.getElementById('status-chips'),
     sagaChips: document.getElementById('saga-chips'),
     watchedChips: document.getElementById('watched-chips'),
+    loanedChips: document.getElementById('loaned-chips'),
     letterChips: document.getElementById('letter-chips'),
     groupToggle: document.getElementById('group-sagas-toggle'),
     selectToggle: document.getElementById('select-toggle'),
@@ -923,6 +925,7 @@ function initCollectionApp(config) {
       s(state.activeStatus),
       s(state.activeSaga),
       s(state.activeWatched),
+      s(state.activeLoaned),
       s(state.activeDecades),
       s(state.activeCerts),
       s(state.activeVariants),
@@ -934,6 +937,33 @@ function initCollectionApp(config) {
       state.view,
       state.groupSagas ? 'g' : '',
     ].join('|');
+  }
+
+  /**
+   * Alles wat jíj bij een titel schreef, als één doorzoekbare tekst (FASE 40).
+   * Het resultaat wordt per titel onthouden zolang de titel niet verandert —
+   * bij 680 titels wordt dit anders bij elke toetsaanslag opnieuw opgebouwd.
+   */
+  const eigenTekstCache = new WeakMap();
+  function eigenTekstVan(item) {
+    const gehad = eigenTekstCache.get(item);
+    if (gehad !== undefined) return gehad;
+    const stukken = [];
+    const uitEd = (e) => {
+      stukken.push(e.notes, e.boxset, e.location);
+      if (typeof COLLECTOR_FIELDS !== 'undefined') {
+        COLLECTOR_FIELDS.forEach((v) => { if (v.zoekbaar) stukken.push(e[v.key]); });
+      }
+    };
+    (item.editions || []).forEach(uitEd);
+    (item.seasons || []).forEach((s) => (s.editions || []).forEach(uitEd));
+    const tekst = stukken.filter(Boolean).join(' ').toLowerCase();
+    eigenTekstCache.set(item, tekst);
+    return tekst;
+  }
+  /** Na een bewerking moet de zoektekst van die titel opnieuw opgebouwd worden. */
+  function vergeetEigenTekst(item) {
+    if (item) eigenTekstCache.delete(item);
   }
 
   function applyFilters() {
@@ -950,7 +980,16 @@ function initCollectionApp(config) {
         const inDirector = (item.director || '').toLowerCase().includes(q);
         const inWriters = (item.writers || '').toLowerCase().includes(q);
         const inSaga = sagaOf(item).toLowerCase().includes(q);
-        if (!inTitle && !inOriginal && !inTmdbNaam && !inCast && !inDirector && !inWriters && !inSaga) return false;
+        // FASE 40 — je eigen aantekeningen waren nooit doorzoekbaar, terwijl
+        // dáár tot nu toe alles in stond wat het datamodel niet kon opslaan.
+        // Nu zoeken we ook in opmerkingen, boxset, locatie, aan wie je iets
+        // uitleende, en de talen op de schijf — van films én van seizoenen.
+        const inEigen = !inTitle && !inOriginal && !inTmdbNaam && !inCast && !inDirector && !inWriters && !inSaga
+          ? eigenTekstVan(item).includes(q)
+          : false;
+        if (!inTitle && !inOriginal && !inTmdbNaam && !inCast && !inDirector && !inWriters && !inSaga && !inEigen) {
+          return false;
+        }
       }
       if (state.activeFormats.size && !allFormats(item).some((f) => state.activeFormats.has(f))) return false;
       if (state.activeVariants.size) {
@@ -990,6 +1029,15 @@ function initCollectionApp(config) {
       if (state.activeWatched.size) {
         const w = item.watched ? 'watched' : 'unwatched';
         if (!state.activeWatched.has(w)) return false;
+      }
+      // FASE 40 — uitgeleend. Kijkt naar alle exemplaren, ook die van
+      // seizoenen: leen je seizoen 2 uit, dan wil je die serie hier zien.
+      if (state.activeLoaned.size) {
+        const alle = (item.editions || []).concat(
+          ...(item.seasons || []).map((s) => s.editions || [])
+        );
+        const uitgeleend = alle.some((e) => !e.wishlist && isUitgeleend(e));
+        if (!state.activeLoaned.has(uitgeleend ? 'uit' : 'thuis')) return false;
       }
       // FASE 32 — filter op filmreeksen. Er was wel een filter op TV-reeksen,
       // maar niets om alleen films te zien die bij een reeks horen (Bond, Star
@@ -1659,7 +1707,14 @@ function initCollectionApp(config) {
               .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).label || k)
               .join(' · ')
           : '';
-      const extra = [uitvoeringen, ed.boxset, ed.location, ed.notes].filter(Boolean).join(' · ');
+      // FASE 40 — ook bij een seizoen-exemplaar tonen wat je betaalde, in welke
+      // staat het is en aan wie je het uitleende.
+      const verzamel =
+        typeof collectorSamenvatting === 'function' ? collectorSamenvatting(ed) : [];
+      const extra = [uitvoeringen, ed.boxset, ed.location, ed.notes]
+        .concat(verzamel)
+        .filter(Boolean)
+        .join(' · ');
       const wens = !!ed.wishlist;
       return `
           <div class="flex items-center gap-2 py-1${wens ? ' opacity-90' : ''}">
@@ -1740,6 +1795,19 @@ function initCollectionApp(config) {
             <input type="text" data-f="location" value="${escapeAttr(ed.location || '')}" placeholder="Bv. Kast woonkamer"
               class="w-full bg-bg border border-white/10 rounded-md px-3 py-2 text-sm text-ink placeholder:text-muted">
           </div>
+          <!-- FASE 40 — dezelfde verzamelaarsvelden als bij een film: een
+               seizoen-exemplaar is ook gewoon een schijf in je kast. -->
+          <details class="rounded-md bg-bg/60 ring-1 ring-white/5"${
+            typeof COLLECTOR_FIELDS !== 'undefined' &&
+            COLLECTOR_FIELDS.some((v) => ed[v.key] !== '' && ed[v.key] != null)
+              ? ' open'
+              : ''
+          }>
+            <summary class="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase text-muted">Verzamelaarsgegevens</summary>
+            <div data-col-box class="grid grid-cols-2 gap-3 px-3 pb-3">
+              ${typeof collectorVeldenHtml === 'function' ? collectorVeldenHtml(ed, { stijl: 'compact' }) : ''}
+            </div>
+          </details>
         </div>
         <div class="flex gap-2 justify-end mt-5">
           <button type="button" data-annuleer class="chip">Annuleren</button>
@@ -1767,6 +1835,9 @@ function initCollectionApp(config) {
         paneel.querySelectorAll('[data-v]').forEach((cb) => {
           uit[cb.dataset.v] = cb.checked;
         });
+        if (typeof collectorLeesVelden === 'function') {
+          Object.assign(uit, collectorLeesVelden(paneel.querySelector('[data-col-box]')));
+        }
         klaar(uit);
       });
       laag.addEventListener('click', (e) => { if (e.target === laag) klaar(null); });
@@ -1778,6 +1849,7 @@ function initCollectionApp(config) {
   /** Wijziging aan de seizoenen wegschrijven, met terugdraaien bij een fout. */
   function bewaarSeizoenen(item, vorigeSeizoenen) {
     normalizeSeasonEditions(item);
+    vergeetEigenTekst(item);
     buildFacetChips(state.all);
     applyFilters();
     openModal(item.id);
@@ -3329,6 +3401,7 @@ function initCollectionApp(config) {
       state.activeStatus.size +
       state.activeSaga.size +
       state.activeWatched.size +
+      state.activeLoaned.size +
       state.activeDecades.size +
       state.activeCerts.size +
       state.activeVariants.size +
@@ -3356,6 +3429,7 @@ function initCollectionApp(config) {
       { key: 'status', set: state.activeStatus, chips: els.statusChips },
       { key: 'saga', set: state.activeSaga, chips: els.sagaChips },
       { key: 'watched', set: state.activeWatched, chips: els.watchedChips },
+      { key: 'loaned', set: state.activeLoaned, chips: els.loanedChips },
       { key: 'genres', set: state.activeGenres, chips: els.genreChips },
       { key: 'decades', set: state.activeDecades, chips: els.decadeChips },
       { key: 'certs', set: state.activeCerts, chips: els.certChips },
@@ -3456,6 +3530,7 @@ function initCollectionApp(config) {
     state.activeStatus.clear();
     state.activeSaga.clear();
     state.activeWatched.clear();
+    state.activeLoaned.clear();
     state.activeDecades.clear();
     state.activeCerts.clear();
     state.activeVariants.clear();
@@ -3473,6 +3548,7 @@ function initCollectionApp(config) {
     if (els.statusChips) els.statusChips.querySelectorAll('[data-status]').forEach((c) => c.classList.remove('chip-active'));
     if (els.sagaChips) els.sagaChips.querySelectorAll('[data-saga-filter]').forEach((c) => c.classList.remove('chip-active'));
     if (els.watchedChips) els.watchedChips.querySelectorAll('[data-watched]').forEach((c) => c.classList.remove('chip-active'));
+    if (els.loanedChips) els.loanedChips.querySelectorAll('[data-loaned]').forEach((c) => c.classList.remove('chip-active'));
     if (!(opts && opts.stil)) applyFilters();
   }
 
@@ -4235,6 +4311,9 @@ function initCollectionApp(config) {
         if (e.boxset) bits.push(escapeHtml(e.boxset));
         if (e.location) bits.push('📍 ' + escapeHtml(e.location));
         if (e.notes) bits.push(escapeHtml(e.notes));
+        // FASE 40 — betaald, staat, uitgeleend, regiocode, schijven, talen.
+        const verzamel =
+          typeof collectorSamenvatting === 'function' ? collectorSamenvatting(e) : [];
         const hasPhotos = e.custom_front_cover_id || e.custom_front_cover || e.custom_back_cover_id || e.custom_back_cover;
 
         return `
@@ -4249,6 +4328,13 @@ function initCollectionApp(config) {
           e.wishlist ? ' <span class="text-gold font-mono text-[10px]">verlanglijst</span>' : ''
         }</span>
               ${bits.length ? `<span class="block text-[11px] text-muted truncate">${bits.join(' · ')}</span>` : ''}
+              ${
+                verzamel.length
+                  ? `<span class="block text-[11px] ${
+                      isUitgeleend(e) ? 'text-gold' : 'text-muted'
+                    }">${verzamel.map(escapeHtml).join(' · ')}</span>`
+                  : ''
+              }
               ${
                 priceInfo
                   ? `<span class="block text-[11px] font-mono text-teal/90" title="Richtwaarde op eBay (mediaan) met de middenrange">${escapeHtml(
@@ -5335,6 +5421,29 @@ function initCollectionApp(config) {
     if (boxsetInput) boxsetInput.value = ed.boxset || '';
     const locationInput = m.querySelector('[data-edit-location]');
     if (locationInput) locationInput.value = ed.location || '';
+
+    // FASE 40 — verzamelaarsvelden, opgebouwd uit de gedeelde lijst.
+    const colBox = m.querySelector('[data-edit-collector]');
+    if (colBox && typeof collectorVeldenHtml === 'function') {
+      colBox.innerHTML = collectorVeldenHtml(ed);
+      // Op het kopje tonen hoeveel er al ingevuld is, zodat je niet hoeft open
+      // te klappen om te zien of er iets in zit.
+      const teller = m.querySelector('[data-edit-collector-count]');
+      if (teller) {
+        const n = COLLECTOR_FIELDS.filter((v) => ed[v.key] !== '' && ed[v.key] != null).length;
+        teller.textContent = n ? `· ${n} ingevuld` : '';
+      }
+      const doos = m.querySelector('[data-edit-collector-box]');
+      // Staat er al iets in, dan meteen open: dan wil je het zien.
+      if (doos) doos.open = COLLECTOR_FIELDS.some((v) => ed[v.key] !== '' && ed[v.key] != null);
+    }
+
+    // FASE 40 — de toevoegdatum was altijd "vandaag" en nergens aanpasbaar.
+    // Bij het invoeren van een bestaande collectie is die datum als
+    // sorteersleutel daardoor waardeloos.
+    const addedInput = m.querySelector('[data-edit-added]');
+    if (addedInput) addedInput.value = (item.date_added || '').slice(0, 10);
+
     const sagaInput = m.querySelector('[data-edit-saga]');
     if (sagaInput) sagaInput.value = item.saga || '';
 
@@ -5621,7 +5730,27 @@ function initCollectionApp(config) {
       const locationInput = m.querySelector('[data-edit-location]');
       if (locationInput) ed.location = locationInput.value.trim();
 
+      // FASE 40 — verzamelaarsvelden.
+      const colBox = m.querySelector('[data-edit-collector]');
+      if (colBox && typeof collectorLeesVelden === 'function') {
+        Object.assign(ed, collectorLeesVelden(colBox));
+      }
+
+      // FASE 40 — aanpasbare toevoegdatum. `added_at` bepaalt de volgorde
+      // binnen één dag; die zetten we mee zodat een handmatig gekozen datum
+      // ook echt op zijn plek in "Onlangs toegevoegd" komt te staan.
+      const addedInput = m.querySelector('[data-edit-added]');
+      if (addedInput) {
+        const nieuw = addedInput.value.trim();
+        if (nieuw && nieuw !== (item.date_added || '').slice(0, 10)) {
+          item.date_added = nieuw;
+          item.added_at = nieuw + 'T12:00:00.000Z';
+        }
+      }
+
       syncLegacyFieldsFromEditions(item);
+      // De doorzoekbare eigen tekst is nu verouderd (FASE 40).
+      vergeetEigenTekst(item);
       // Posterkeuze: null = niets veranderd, '' = terug naar de standaardposter.
       if (pendingPosterPath !== null) item.custom_poster_path = pendingPosterPath;
       if (pendingPosterCoverId !== null) item.custom_poster_cover_id = pendingPosterCoverId;
@@ -5795,6 +5924,17 @@ function initCollectionApp(config) {
     els.watchedChips.querySelectorAll('[data-watched]').forEach((chip) => {
       chip.addEventListener('click', () => {
         toggleSetValue(state.activeWatched, chip.dataset.watched);
+        chip.classList.toggle('chip-active');
+        applyFilters();
+      });
+    });
+  }
+
+  // FASE 40 — uitgeleend of in je kast.
+  if (els.loanedChips) {
+    els.loanedChips.querySelectorAll('[data-loaned]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        toggleSetValue(state.activeLoaned, chip.dataset.loaned);
         chip.classList.toggle('chip-active');
         applyFilters();
       });
