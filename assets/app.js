@@ -1642,34 +1642,51 @@ function initCollectionApp(config) {
    */
 
   function seasonEditionsHtml(s) {
-    const eds = (s.editions || []).filter((e) => !e.wishlist);
-    if (!eds.length) return '';
-    const regels = eds
-      .map((ed) => {
-        const uitvoeringen =
-          typeof editionVariantKeys === 'function'
-            ? editionVariantKeys(ed)
-                .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).label || k)
-                .join(' · ')
-            : '';
-        const extra = [uitvoeringen, ed.boxset, ed.location, ed.notes].filter(Boolean).join(' · ');
-        return `
-          <div class="flex items-center gap-2 py-1">
+    // FASE 39 — hier stond `.filter((e) => !e.wishlist)`, waardoor het seizoen
+    // dat je in FASE 37 op de verlanglijst zette nérgens verscheen: je zag
+    // niets, je kon het niet weghalen, en nog eens klikken stapelde onzichtbare
+    // duplicaten op. Wensen horen zichtbaar te zijn — met een eigen label,
+    // zodat ze nooit met bezit verward worden.
+    const alle = s.editions || [];
+    const bezit = alle.filter((e) => !e.wishlist);
+    const wensen = alle.filter((e) => e.wishlist);
+    if (!alle.length) return '';
+
+    const regel = (ed) => {
+      const uitvoeringen =
+        typeof editionVariantKeys === 'function'
+          ? editionVariantKeys(ed)
+              .map((k) => (EDITION_VARIANTS.find((v) => v.key === k) || {}).label || k)
+              .join(' · ')
+          : '';
+      const extra = [uitvoeringen, ed.boxset, ed.location, ed.notes].filter(Boolean).join(' · ');
+      const wens = !!ed.wishlist;
+      return `
+          <div class="flex items-center gap-2 py-1${wens ? ' opacity-90' : ''}">
             <span class="font-mono text-[11px] px-1.5 py-0.5 rounded" style="background:rgba(255,255,255,.06);color:${formatColor(
               ed.format
             )}">${escapeHtml(formatShort(ed.format) || '—')}</span>
+            ${
+              wens
+                ? '<span class="font-mono text-[10px] px-1.5 py-0.5 rounded border border-gold/40 text-gold shrink-0">wens</span>'
+                : ''
+            }
             <span class="text-[11px] text-muted truncate flex-1 min-w-0">${escapeHtml(extra)}</span>
             <button type="button" class="text-gold hover:text-white text-[11px] underline shrink-0"
               data-edit-season-ed="${s.season_number}" data-eid="${escapeAttr(ed.eid)}">bewerken</button>
             <button type="button" class="text-muted hover:text-red-400 text-[11px] underline shrink-0"
               data-del-season-ed="${s.season_number}" data-eid="${escapeAttr(ed.eid)}">weg</button>
           </div>`;
-      })
-      .join('');
+    };
+
+    const kop = [];
+    if (bezit.length) kop.push(bezit.length === 1 ? 'exemplaar' : bezit.length + ' exemplaren');
+    if (wensen.length) kop.push(wensen.length === 1 ? '1 wens' : wensen.length + ' wensen');
+
     return `
       <div class="mt-2 rounded-md bg-bg/60 px-2 py-1">
-        <p class="text-[10px] font-mono text-muted uppercase mb-0.5">${eds.length === 1 ? 'exemplaar' : eds.length + ' exemplaren'}</p>
-        ${regels}
+        <p class="text-[10px] font-mono text-muted uppercase mb-0.5">${kop.join(' · ')}</p>
+        ${bezit.map(regel).join('')}${wensen.map(regel).join('')}
         <button type="button" class="text-teal hover:text-white text-[11px] underline mt-1"
           data-add-season-ed="${s.season_number}">+ nog een exemplaar</button>
       </div>`;
@@ -1865,6 +1882,12 @@ function initCollectionApp(config) {
     if (!season) return;
     const vorige = JSON.parse(JSON.stringify(item.seasons));
     if (!Array.isArray(season.editions)) season.editions = [];
+    // FASE 39 — de wens was onzichtbaar, dus klikte je gewoon nog eens en
+    // stapelden er duplicaten op. Zelfde formaat = niets te doen.
+    if (season.editions.some((e) => e.wishlist && e.format === format)) {
+      showToast(`Seizoen ${seasonNumber} stond al op je verlanglijst`, 'ok');
+      return;
+    }
     season.editions.push({
       ...nieuwSeizoenExemplaar(nextSeasonEditionId(season), format),
       wishlist: true,
@@ -5049,9 +5072,18 @@ function initCollectionApp(config) {
     const seasonsList = els.modal.querySelector('[data-field="seasons-list"]');
     if (item.seasons && item.seasons.length) {
       seasonsSection.classList.remove('hidden');
-      const fmtLabel = { '4k': '4K UHD', bluray: 'Blu-ray', dvd: 'DVD' };
-      const fmtOption = (value, label, selected) =>
-        `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`;
+      // FASE 39 — hier stond een eigen lijstje met drie van de zes formaten.
+      // Een seizoen op Laserdisc toonde daardoor de kale waarde `laserdisc`, en
+      // je kon het ook niet kiezen. MEDIA_FORMATS is de enige echte lijst.
+      const fmtLabel = {};
+      MEDIA_FORMATS.forEach((f) => { fmtLabel[f.value] = f.label; });
+      const fmtOpties = (selected) =>
+        MEDIA_FORMATS.map(
+          (f) =>
+            `<option value="${escapeAttr(f.value)}" ${selected === f.value ? 'selected' : ''}>${escapeHtml(
+              f.label
+            )}</option>`
+        ).join('');
       seasonsList.innerHTML = item.seasons
         .map((s) => {
           // Seizoencover: eigen seizoenposter indien beschikbaar (na een
@@ -5102,6 +5134,10 @@ function initCollectionApp(config) {
               </div>
             `;
           }
+          // Niet in bezit. FASE 39 — stond hier een wens op de verlanglijst,
+          // dan was die volledig onzichtbaar. Nu staat ze er gewoon, met de
+          // knop om ze weer weg te halen.
+          const wensen = (s.editions || []).filter((e) => e.wishlist);
           return `
             <div class="flex gap-3 sm:gap-4 border-b border-white/10 last:border-0 py-3 first:pt-0 opacity-80">
               <div class="shrink-0 w-20 sm:w-24 rounded-md overflow-hidden ring-1 ring-white/10 bg-[#14141A]">
@@ -5109,11 +5145,16 @@ function initCollectionApp(config) {
               </div>
               <div class="flex-1 min-w-0">
                 <p class="font-display tracking-wide text-lg text-ink leading-tight truncate">${escapeHtml(s.name)}</p>
-                <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · <span class="text-muted">niet in bezit</span></p>
+                <p class="text-xs text-muted font-mono mt-0.5">${yr ? yr + ' · ' : ''}${s.episode_count ?? '?'} afl. · ${
+              wensen.length
+                ? '<span class="text-gold">op je verlanglijst</span>'
+                : '<span class="text-muted">niet in bezit</span>'
+            }</p>
                 ${s.overview ? `<p class="text-xs text-muted mt-1.5 clamp-2 leading-snug">${escapeHtml(s.overview)}</p>` : ''}
+                ${wensen.length ? seasonEditionsHtml(s) : ''}
                 <div class="flex items-center gap-2 mt-2">
                   <select class="add-season-format bg-surface border border-white/10 rounded px-2 py-1 text-xs font-mono" data-season="${s.season_number}">
-                    ${fmtOption('4k', '4K UHD', 'bluray')}${fmtOption('bluray', 'Blu-ray', 'bluray')}${fmtOption('dvd', 'DVD', 'bluray')}
+                    ${fmtOpties('bluray')}
                   </select>
                   <button type="button" class="text-teal hover:text-white text-xs underline" data-add-season="${s.season_number}">in bezit</button>
                   <!-- FASE 37 — een seizoen dat je nog moet kopen kon je nergens
@@ -5263,7 +5304,15 @@ function initCollectionApp(config) {
       (f) => `<option value="${f.value}">${escapeHtml(f.label)}</option>`
     ).join('');
 
-    m.querySelector('[data-edit-content]').value = item.content_type || 'movie';
+    // FASE 39 — een waarde die niet in de lijst staat maakt een <select> leeg,
+    // en bij opslaan gaat die leegte terug naar het record. Kent de app het
+    // type niet, dan zetten we het er eerst bij in plaats van het te wissen.
+    const typeSel = m.querySelector('[data-edit-content]');
+    const huidigType = item.content_type || 'movie';
+    if (!Array.from(typeSel.options).some((o) => o.value === huidigType)) {
+      typeSel.add(new Option(huidigType, huidigType));
+    }
+    typeSel.value = huidigType;
     formatSel.value = ed.format || 'bluray';
     m.querySelector('[data-edit-owned]').value = ed.wishlist ? 'wishlist' : 'owned';
     m.querySelector('[data-edit-watched]').checked = !!item.watched;

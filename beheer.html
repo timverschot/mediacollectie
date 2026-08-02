@@ -129,6 +129,27 @@
         <div id="backup-list" class="space-y-1 text-sm font-mono text-muted">Laden...</div>
         <p id="backup-status" class="text-sm font-mono mt-2"></p>
       </div>
+
+      <!-- FASE 39 — hoesfoto's zijn losse Drive-bestanden en zaten in géén
+           enkele backup. Bij het verwijderen van een titel werden ze definitief
+           gewist, terwijl dat de enige onvervangbare gegevens hier zijn: TMDb
+           komt terug, de foto van jouw doosje niet. Ze worden nu bewaard tot
+           jij hier zegt dat ze weg mogen. -->
+      <div class="border-t border-white/10 pt-3 mt-3">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-xs font-mono uppercase text-muted">Bewaarde hoesfoto’s</p>
+          <button id="covers-scan-btn" class="text-xs text-muted underline">nakijken</button>
+        </div>
+        <p class="text-xs text-muted mb-2">
+          Hoesfoto’s van verwijderde titels blijven in Drive staan, zodat ze
+          terugkomen als je een backup terugzet. Hier gooi je alleen weg wat
+          nergens meer in voorkomt — ook niet in een backup.
+        </p>
+        <div class="flex flex-wrap gap-3 items-center">
+          <button id="covers-clean-btn" class="btn btn-secondary" disabled>Ongebruikte hoesfoto’s opruimen</button>
+          <span id="covers-status" class="text-sm font-mono text-muted">Nog niet nagekeken.</span>
+        </div>
+      </div>
     </div>
 
     <div class="bg-surface rounded-lg p-4 mb-6 text-sm">
@@ -177,8 +198,9 @@
       <div class="px-4 pb-4 text-sm space-y-3">
         <p>
           Begin je met een schone lei? Dit wist <strong>alle titels</strong> uit je collectie.
-          Er wordt eerst automatisch een backup naar je Drive geschreven, die je daarna
-          kan terugzetten via <em>Backups</em> hierboven.
+          Er wordt eerst automatisch een backup naar je Drive geschreven — titels,
+          prijsgeschiedenis en universums — die je daarna kan terugzetten via
+          <em>Backups</em> hierboven.
         </p>
         <p id="wipe-count" class="font-mono text-xs text-muted">Aantal titels wordt geladen…</p>
 
@@ -186,7 +208,7 @@
           <label class="!normal-case !text-sm text-ink flex items-start gap-2">
             <input type="checkbox" id="wipe-covers" class="w-4 h-4 mt-0.5">
             <span>Ook alle hoesfoto’s uit Drive verwijderen
-              <span class="block text-xs text-muted">Laat dit uit als je de backup misschien nog wil terugzetten — die bevat alleen de titels, niet de foto’s.</span>
+              <span class="block text-xs text-muted">Laat dit uit als je de backup misschien nog wil terugzetten: hoesfoto’s zijn losse bestanden en zitten niet in de backup. Zet je hem terug met dit vinkje uit, dan staan je foto’s er gewoon weer bij.</span>
             </span>
           </label>
           <label class="!normal-case !text-sm text-ink flex items-start gap-2">
@@ -583,6 +605,54 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
         s.textContent = `✓ ${n} gevolgde titels gedownload`; s.className = 'text-sm font-mono text-teal';
       } catch (err) {
         s.textContent = '✗ ' + err.message; s.className = 'text-sm font-mono text-red-400';
+      }
+    });
+
+    /* FASE 39 — opruimen van hoesfoto's waar niets meer naar verwijst.
+       Bewust in twee stappen: eerst tellen (er gebeurt niets), dan pas
+       weggooien, en alleen wat noch in je collectie noch in een backup
+       voorkomt. */
+    let _weesAantal = 0;
+    async function scanWeesfotos() {
+      const s = document.getElementById('covers-status');
+      const knop = document.getElementById('covers-clean-btn');
+      knop.disabled = true;
+      s.className = 'text-sm font-mono text-muted';
+      try {
+        const uit = await driveOpruimenWeesfotos({ alleenTellen: true }, (t) => { s.textContent = t; });
+        _weesAantal = uit.gevonden;
+        if (!uit.gevonden) {
+          s.textContent = `Niets op te ruimen (${uit.totaal} foto’s, allemaal in gebruik).`;
+          return;
+        }
+        s.textContent = `${uit.gevonden} van ${uit.totaal} foto’s worden nergens meer gebruikt.`;
+        s.className = 'text-sm font-mono text-gold';
+        knop.disabled = false;
+      } catch (err) {
+        s.textContent = '✗ ' + err.message;
+        s.className = 'text-sm font-mono text-red-400';
+      }
+    }
+
+    document.getElementById('covers-scan-btn').addEventListener('click', scanWeesfotos);
+    document.getElementById('covers-clean-btn').addEventListener('click', async () => {
+      const s = document.getElementById('covers-status');
+      const knop = document.getElementById('covers-clean-btn');
+      if (!confirm(
+        `${_weesAantal} hoesfoto’s definitief verwijderen uit Drive?\n\n` +
+        `Deze foto's komen niet voor in je collectie en ook niet in een van je backups. ` +
+        `Dit kan niet ongedaan gemaakt worden.`
+      )) return;
+      knop.disabled = true;
+      try {
+        const uit = await driveOpruimenWeesfotos({}, (t) => { s.textContent = t; });
+        s.textContent = `✓ ${uit.verwijderd} hoesfoto’s opgeruimd.`;
+        s.className = 'text-sm font-mono text-teal';
+        _weesAantal = 0;
+      } catch (err) {
+        s.textContent = '✗ ' + err.message;
+        s.className = 'text-sm font-mono text-red-400';
+        knop.disabled = false;
       }
     });
 

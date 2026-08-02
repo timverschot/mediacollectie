@@ -146,7 +146,15 @@
     box-shadow: 0 12px 30px rgba(0,0,0,.55);
     font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.35;
     opacity: 0; transition: opacity .22s ease, transform .22s ease;
+    /* FASE 39 — twee gaten die samen taps opvingen op de plek waar je duim zit.
+       1. `.hidden` (display:none) verloor van de ID-regel hierboven, dus het
+          blok bleef ná het wegklikken gewoon staan: onzichtbaar, 206x120 px,
+          onderaan het midden.
+       2. Ook tijdens het in- en uitvliegen mag een melding niets opvangen. */
+    pointer-events: none;
   }
+  #toast.hidden { display: none; }
+  #toast button { pointer-events: auto; }
   #toast.toast-in { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.toast-ok { box-shadow: 0 12px 30px rgba(0,0,0,.55), inset 3px 0 0 #2FA4A9; }
   #toast.toast-bezig { box-shadow: 0 12px 30px rgba(0,0,0,.55), inset 3px 0 0 #C9A227; }
@@ -964,10 +972,15 @@
             <div class="grid sm:grid-cols-2 gap-3">
               <div>
                 <label>Content-type</label>
+                <!-- FASE 39: "special" ontbrak hier, terwijl handmatig
+                     toevoegen (FASE 36) dat wél wegschrijft. Bewerkte je één
+                     opmerking van een special, dan werd het veld leeg en viel
+                     de titel uit élk type-filter, inclusief de Specials-chip. -->
                 <select data-edit-content>
                   <option value="movie">Film</option>
                   <option value="tv">TV-reeks</option>
                   <option value="animation">Animatie</option>
+                  <option value="special">Special / anders</option>
                 </select>
               </div>
               <div>

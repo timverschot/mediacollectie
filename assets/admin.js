@@ -891,14 +891,13 @@ const TMDB_MANAGED_FIELDS = [
  * zoals "Kerstfilms" blijft staan).
  */
 function applyTmdbFields(item, fresh) {
-  if (fresh.seasons && item.seasons) {
-    fresh = {
-      ...fresh,
-      seasons: fresh.seasons.map((s) => {
-        const old = item.seasons.find((o) => o.season_number === s.season_number);
-        return old ? { ...s, owned: old.owned, format: old.format } : { ...s, owned: false, format: '' };
-      }),
-    };
+  // FASE 39 — hier stond een regel die van elk bestaand seizoen alléén `owned`
+  // en `format` overnam. Alles wat FASE 35 aan seizoenen gaf — exemplaren,
+  // uitvoering, boxset, locatie, opmerking, hoesfoto's — werd bij één klik op
+  // "alles verversen" van élke serie tegelijk gewist, zonder melding.
+  // mergeSeasons() draait het om: TMDb mag enkel zijn eigen velden bijwerken.
+  if (fresh.seasons) {
+    fresh = { ...fresh, seasons: mergeSeasons(item.seasons, fresh.seasons) };
   }
 
   TMDB_MANAGED_FIELDS.forEach((field) => {

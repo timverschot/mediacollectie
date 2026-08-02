@@ -448,33 +448,25 @@ async function addTitleQuickWishlist(r, knop) {
       zeg(`"${details.title}" staat al in je collectie.`, 'text-gold');
       return;
     }
-    const nu = new Date();
-    const entry = {
+    // FASE 39 — één fabriek voor een nieuw record (zie drive.js), zodat velden
+    // als `added_at` nooit meer op één plek kunnen ontbreken.
+    const entry = nieuweCollectieTitel({
       id: slug,
       content_type: r.media_type === 'tv' ? 'tv' : 'movie',
-      date_added: nu.toISOString().slice(0, 10),
-      added_at: nu.toISOString(),
-      watched: false,
-      editions: [
-        {
-          eid: 'e1',
-          format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
-          notes: '',
-          boxset: '',
-          location: '',
-          wishlist: true,
-          date_added: nu.toISOString().slice(0, 10),
-          custom_front_cover_id: '',
-          custom_back_cover_id: '',
-          custom_front_cover: '',
-          custom_back_cover: '',
-        },
-      ],
-      ...details,
-      seasons: [],
-    };
-    normalizeMovieEntry(entry);
-    await upsertMovieInDrive(entry);
+      format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+      wishlist: true,
+      details,
+    });
+    entry.seasons = [];
+
+    // Niet upsert: de controle hierboven werkte met een lijst die intussen
+    // verouderd kan zijn. insertMovieIfAbsent kijkt binnen de vergrendeling
+    // opnieuw en raakt een bestaande titel gegarandeerd niet aan.
+    const uitkomst = await insertMovieIfAbsentInDrive(entry);
+    if (uitkomst === 'bestond-al') {
+      zeg(`"${details.title}" staat al in je collectie.`, 'text-gold');
+      return;
+    }
     zeg(`✓ "${details.title}" op je verlanglijst gezet.`, 'text-teal');
     if (knop) {
       knop.textContent = '✓ wens';
@@ -914,7 +906,16 @@ async function addTitleSubmit(e) {
       entry = existing;
       entry.content_type = document.getElementById('form-content-type').value;
       entry.watched = document.getElementById('form-watched').checked;
-      if (seasons.length) entry.seasons = seasons;
+      // FASE 39 — hier stond `entry.seasons = seasons`, wat de volledige
+      // seizoenenlijst verving door wat de vinkjes zeiden. En die staan
+      // standaard állemaal aan, met één formaat: koop je de 4K-box van een
+      // serie waarvan je S1 op DVD en S2 als steelbook hebt, dan was die
+      // opbouw weg. Nu komt er per aangevinkt seizoen een exemplaar bíj.
+      if (seasons.length) {
+        entry.seasons = mergeSeizoenKeuzes(entry.seasons, seasons, {
+          altijdExtra: addTitleDuplicateChoice === 'extra',
+        });
+      }
       // TMDb-gegevens verversen, persoonlijke keuzes behouden.
       if (typeof applyTmdbFields === 'function') applyTmdbFields(entry, addTitleSelectedDetails);
       syncLegacyFieldsFromEditions(entry);

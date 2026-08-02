@@ -169,6 +169,55 @@ function normalizeMovieEntry(m) {
   return m;
 }
 
+/* --------------------------------------------------------------------------
+ * Eén fabriek voor een nieuwe titel (FASE 39)
+ * --------------------------------------------------------------------------
+ * De opbouw van een nieuw collectie-record stond op acht plaatsen met de hand
+ * geschreven en was uit elkaar gegroeid: de universumpagina had `added_at`
+ * nooit gekregen, waardoor alles wat je daar toevoegde verkeerd sorteerde bij
+ * "Onlangs toegevoegd". Zo'n fout kan alleen ontstaan als hetzelfde ding op
+ * meerdere plaatsen wordt opgebouwd. Vandaar deze ene plek.
+ * ------------------------------------------------------------------------ */
+function nieuweCollectieTitel(opties) {
+  const o = opties || {};
+  const nu = new Date();
+  const vandaag = nu.toISOString().slice(0, 10);
+  const exemplaar = {
+    eid: 'e1',
+    format: o.format || 'dvd',
+    notes: o.notes || '',
+    boxset: o.boxset || '',
+    location: o.location || '',
+    ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
+    wishlist: !!o.wishlist,
+    date_added: vandaag,
+    custom_front_cover_id: o.front_cover_id || '',
+    custom_back_cover_id: o.back_cover_id || '',
+    custom_front_cover: '',
+    custom_back_cover: '',
+  };
+
+  const entry = {
+    id: o.id,
+    content_type: o.content_type || 'movie',
+    date_added: vandaag,
+    // Zonder dit veld valt de titel terug op de datum alleen, en dan staan alle
+    // titels van vandaag in willekeurige volgorde bij "Onlangs toegevoegd".
+    added_at: nu.toISOString(),
+    watched: false,
+    editions: [exemplaar],
+    ...(o.details || {}),
+  };
+
+  // Seizoenen van TMDb komen leeg binnen: bezit leg je apart vast.
+  if (o.details && Array.isArray(o.details.seasons)) {
+    entry.seasons = o.details.seasons.map((s) => ({ ...s, owned: false, format: '', editions: [] }));
+  }
+
+  normalizeMovieEntry(entry);
+  return entry;
+}
+
 /* ==========================================================================
  * Seizoenen met meerdere exemplaren (FASE 35)
  * ==========================================================================
@@ -260,6 +309,95 @@ function nextSeasonEditionId(s) {
 function seasonOwnedFormats(s) {
   const set = new Set((s.editions || []).filter((e) => !e.wishlist && e.format).map((e) => e.format));
   return [...set].sort((a, b) => formatRank(b) - formatRank(a));
+}
+
+/* --------------------------------------------------------------------------
+ * Seizoenen samenvoegen in plaats van vervangen (FASE 39)
+ * --------------------------------------------------------------------------
+ * Twee plekken schreven de seizoenenlijst van een serie compleet opnieuw: de
+ * verversing in Beheer en het opnieuw toevoegen van een serie die je al had.
+ * Alles wat FASE 35 aan een seizoen gaf — exemplaren, uitvoering, boxset,
+ * locatie, opmerking, hoesfoto's — ging daarbij verloren zonder melding.
+ *
+ * Vanaf nu gaat alles langs deze twee functies. De regel is simpel: TMDb mag
+ * alleen de velden aanraken die van TMDb kómen. Al de rest is van jou.
+ * ------------------------------------------------------------------------ */
+
+/** De enige seizoenvelden die TMDb bezit en dus mag bijwerken. */
+const SEASON_TMDB_FIELDS = ['name', 'episode_count', 'poster_path', 'overview', 'air_date'];
+
+/**
+ * Voegt een verse seizoenenlijst van TMDb samen met wat er al stond.
+ *
+ * - Bestaat een seizoen al, dan blijft het record ongewijzigd op de
+ *   TMDb-velden na. Alles wat jij vastlegde blijft dus staan, ook velden die
+ *   deze code nog niet kent.
+ * - Kent TMDb een seizoen dat jij nog niet had, dan komt het erbij als leeg.
+ * - Kent TMDb een seizoen niet (meer) terwijl jij er wél iets van hebt, dan
+ *   blijft het staan. Een hernummering bij TMDb mag nooit jouw schijven wissen.
+ */
+function mergeSeasons(oude, verse) {
+  const oudLijst = Array.isArray(oude) ? oude : [];
+  const verseLijst = Array.isArray(verse) ? verse : [];
+  // Geen verse gegevens = niets te doen. Nooit terugvallen op een lege lijst.
+  if (!verseLijst.length) return oudLijst;
+
+  const perNummer = new Map(oudLijst.map((s) => [s.season_number, s]));
+  const samen = verseLijst.map((vers) => {
+    const oud = perNummer.get(vers.season_number);
+    perNummer.delete(vers.season_number);
+    if (!oud) return { ...vers, owned: false, format: '', editions: [] };
+    // Een eigen kopie van de exemplaren: anders deelt het resultaat zijn lijst
+    // met het origineel, en verandert een latere toevoeging stilletjes ook het
+    // record waar je van vertrok. Precies de soort verstrengeling die deze
+    // hele fase moet wegnemen.
+    const bij = { ...oud, editions: Array.isArray(oud.editions) ? oud.editions.map((e) => ({ ...e })) : [] };
+    SEASON_TMDB_FIELDS.forEach((veld) => {
+      const w = vers[veld];
+      if (w !== undefined && w !== null && w !== '') bij[veld] = w;
+    });
+    return bij;
+  });
+
+  // Wat TMDb niet meer kent maar jij wel bezit of nog wil: behouden.
+  perNummer.forEach((oud) => {
+    if (oud.owned || (Array.isArray(oud.editions) && oud.editions.length)) samen.push(oud);
+  });
+
+  samen.sort((a, b) => (a.season_number || 0) - (b.season_number || 0));
+  return samen;
+}
+
+/**
+ * Verwerkt de seizoenkeuzes uit het toevoegformulier (vinkje + formaat) in een
+ * bestaande seizoenenlijst.
+ *
+ * Koop je de 4K-box van een serie waarvan je seizoen 1 op DVD en seizoen 2 als
+ * steelbook hebt, dan komt er per seizoen een 4K-exemplaar bíj — de bestaande
+ * exemplaren blijven staan. Had je dat formaat al, dan gebeurt er niets, zodat
+ * twee keer opslaan geen dubbels oplevert. Met `altijdExtra` (bewuste tweede
+ * kopie) mag dat wél.
+ */
+function mergeSeizoenKeuzes(bestaande, keuzes, opties) {
+  const altijdExtra = !!(opties && opties.altijdExtra);
+  const vandaag = new Date().toISOString().slice(0, 10);
+  const lijst = mergeSeasons(bestaande, keuzes);
+
+  (Array.isArray(keuzes) ? keuzes : []).forEach((keuze) => {
+    if (!keuze || !keuze.owned || !keuze.format) return;
+    const s = lijst.find((x) => x.season_number === keuze.season_number);
+    if (!s) return;
+    if (!Array.isArray(s.editions)) s.editions = [];
+    const alGehad = s.editions.some((e) => !e.wishlist && e.format === keuze.format);
+    if (alGehad && !altijdExtra) return;
+    s.editions.push({
+      ...nieuwSeizoenExemplaar(nextSeasonEditionId(s), keuze.format),
+      date_added: vandaag,
+    });
+    syncLegacySeasonFields(s);
+  });
+
+  return lijst;
 }
 
 // Het representatieve exemplaar: het beste formaat dat je écht bezit,
@@ -803,7 +941,18 @@ async function driveSaveNamedFile(name, obj) {
 async function driveLoadMovies() {
   const fileId = await driveGetOrCreateFileId('movies.json', []);
   const movies = await driveReadJsonFile(fileId);
-  const list = Array.isArray(movies) ? movies : [];
+  // FASE 39 — vroeger: `Array.isArray(movies) ? movies : []`. Leverde Drive ooit
+  // iets anders dan een lijst, dan begon elke bewerking bij nul en schreef de
+  // eerstvolgende opslag één titel terug over je hele collectie, met de melding
+  // "opgeslagen". Liever hier stoppen: een bewerking die niet doorgaat is te
+  // herstellen, een lege collectie niet.
+  if (!Array.isArray(movies)) {
+    throw new Error(
+      'movies.json in Drive bevat geen lijst met titels. Er is niets gewijzigd. ' +
+        'Zet via Beheer → Herstellen een backup terug.'
+    );
+  }
+  const list = movies;
   // Altijd normaliseren: elke titel krijgt een exemplarenlijst. Dit gebeurt
   // enkel in het geheugen — naar Drive wordt pas geschreven bij een bewerking.
   list.forEach(normalizeMovieEntry);
@@ -859,27 +1008,74 @@ async function driveLoadMoviesForDisplay() {
   }
 }
 
+/**
+ * Schrijft de collectie weg, maar alleen als de lijst het aantal titels heeft
+ * dat de aanroeper verwacht (FASE 39).
+ *
+ * Elke schrijfactie weet precies hoeveel titels er na afloop moeten staan:
+ * evenveel, eentje meer, of zoveel minder als je wilde verwijderen. Klopt dat
+ * niet, dan is er iets misgegaan tussen lezen en schrijven en gaat er niets
+ * naar Drive. Dit is de laatste rem vóór je collectie: alles wat je bezit
+ * hangt aan dit ene bestand.
+ */
+async function _bewaarCollectie(movies, verwacht, wat) {
+  if (typeof verwacht === 'number' && movies.length !== verwacht) {
+    throw new Error(
+      `Veiligheidsstop: ${wat || 'deze bewerking'} zou de collectie op ${movies.length} titels zetten ` +
+        `terwijl er ${verwacht} verwacht werden. Er is niets gewijzigd — probeer het opnieuw.`
+    );
+  }
+  await driveSaveNamedFile('movies.json', movies);
+}
+
 async function upsertMovieInDrive(entry) {
   return withWriteLock(async () => {
     const { movies } = await driveLoadMovies();
+    const voor = movies.length;
     const idx = movies.findIndex((m) => m.id === entry.id);
     const status = idx >= 0 ? 'bijgewerkt' : 'toegevoegd';
     if (idx >= 0) movies[idx] = entry;
     else movies.push(entry);
-    await driveSaveNamedFile('movies.json', movies);
+    await _bewaarCollectie(movies, idx >= 0 ? voor : voor + 1, 'het opslaan van één titel');
     return status;
+  });
+}
+
+/**
+ * Voegt een titel toe, maar raakt een bestaande titel met hetzelfde id nooit
+ * aan (FASE 39).
+ *
+ * Bedoeld voor de "+ verlanglijst"-knoppen. Die werkten met de lijst die bij
+ * het openen van de pagina was opgehaald: stond dat tabblad open terwijl je op
+ * je gsm iets toevoegde, dan zette één klik je bezit, je exemplaren en je
+ * hoesfoto's terug naar een kaal wensrecord. De controle hoort binnen de
+ * vergrendeling, tegen wat er nú in Drive staat.
+ *
+ * Geeft 'toegevoegd' of 'bestond-al' terug.
+ */
+async function insertMovieIfAbsentInDrive(entry) {
+  return withWriteLock(async () => {
+    const { movies } = await driveLoadMovies();
+    if (movies.some((m) => m.id === entry.id)) return 'bestond-al';
+    movies.push(entry);
+    await _bewaarCollectie(movies, movies.length, 'het toevoegen aan de verlanglijst');
+    return 'toegevoegd';
   });
 }
 
 async function upsertMoviesBatchInDrive(entries) {
   return withWriteLock(async () => {
     const { movies } = await driveLoadMovies();
+    const bestaand = new Set(movies.map((m) => m.id));
+    const nieuw = new Set();
+    entries.forEach((e) => { if (e && !bestaand.has(e.id)) nieuw.add(e.id); });
+    const verwacht = movies.length + nieuw.size;
     entries.forEach((entry) => {
       const idx = movies.findIndex((m) => m.id === entry.id);
       if (idx >= 0) movies[idx] = entry;
       else movies.push(entry);
     });
-    await driveSaveNamedFile('movies.json', movies);
+    await _bewaarCollectie(movies, verwacht, 'het opslaan van meerdere titels');
   });
 }
 
@@ -905,7 +1101,9 @@ async function deleteMoviesInDrive(ids) {
     const { movies } = await driveLoadMovies();
     const filtered = movies.filter((m) => !weg.has(m.id));
     const verwijderd = movies.length - filtered.length;
-    if (verwijderd) await driveSaveNamedFile('movies.json', filtered);
+    if (verwijderd) {
+      await _bewaarCollectie(filtered, movies.length - verwijderd, 'het verwijderen van titels');
+    }
     return verwijderd;
   });
 }
@@ -1104,16 +1302,124 @@ async function driveCoverBlobUrl(fileId) {
   return url;
 }
 
+/* --------------------------------------------------------------------------
+ * Hoesfoto's verdwijnen niet meteen (FASE 39)
+ * --------------------------------------------------------------------------
+ * Een backup bevat movies.json — hoesfoto's zijn losse bestanden en gingen
+ * nergens in mee. Verwijderde je één titel, dan werden zijn foto's definitief
+ * gewist, zonder backup vooraf. En dat zijn precies de enige onvervangbare
+ * gegevens in dit systeem: TMDb-data komt altijd terug, de foto van jóuw
+ * doosje niet.
+ *
+ * Oplossing: bij het verwijderen van een titel of exemplaar wordt de foto niet
+ * gewist maar hernoemd naar `wees-...`. Het bestand blijft dus bestaan onder
+ * hetzelfde id — en omdat movies.json alleen id's bewaart, komt de foto vanzelf
+ * weer tevoorschijn zodra je een backup terugzet.
+ *
+ * Echt weggooien gebeurt alleen nog als jij dat vraagt, via Beheer →
+ * "Ongebruikte hoesfoto's opruimen". Die kijkt niet alleen naar je huidige
+ * collectie maar ook naar élke backup, zodat opruimen nooit een backup
+ * onherstelbaar maakt.
+ * ------------------------------------------------------------------------ */
+
+const COVER_ORPHAN_PREFIX = 'wees-';
+
+/** Geeft één Drive-bestand een nieuwe naam. */
+async function driveRenameFile(fileId, naam) {
+  await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: naam }),
+  });
+}
+
 async function driveDeleteCoverFile(fileId) {
   if (!fileId) return;
-  // Eerst de blob-URL vrijgeven: het bestand bestaat straks niet meer, dus de
-  // kopie in het geheugen hoeft er ook niet meer te zijn.
+  // De blob-URL vrijgeven: de foto is niet meer in beeld, dus de kopie in het
+  // geheugen hoeft er ook niet meer te zijn.
   driveReleaseCoverUrl(fileId);
   try {
-    await driveDeleteFile(fileId);
+    const resp = await driveApiFetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name`
+    );
+    const { name } = await resp.json();
+    if (name && !name.startsWith(COVER_ORPHAN_PREFIX)) {
+      await driveRenameFile(fileId, COVER_ORPHAN_PREFIX + name);
+    }
   } catch {
-    // Al verwijderd of onbereikbaar: geen probleem.
+    // Al weg of onbereikbaar: geen probleem, en zeker geen reden om de
+    // verwijdering van de titel te laten stranden.
   }
+}
+
+/**
+ * Zoekt hoesfoto's waar niets meer naar verwijst en gooit die echt weg.
+ *
+ * Gekeken wordt naar je huidige collectie én naar alle backups. Een foto van
+ * een titel die je vorige week verwijderde blijft dus staan zolang de backup
+ * van vóór die verwijdering er nog is — precies zolang je hem nog terug kan
+ * halen.
+ *
+ * Met `{ alleenTellen: true }` wordt er niets verwijderd en krijg je enkel het
+ * aantal terug, zodat het scherm kan tonen wát er gaat gebeuren.
+ */
+async function driveOpruimenWeesfotos(opties, onProgress) {
+  const o = opties || {};
+  const melden = (t) => { if (onProgress) onProgress(t); };
+
+  const gebruikt = new Set();
+  const verzamel = (lijst) => {
+    (lijst || []).forEach((m) => {
+      if (!m || typeof m !== 'object') return;
+      [m.custom_front_cover_id, m.custom_back_cover_id].forEach((v) => { if (v) gebruikt.add(v); });
+      (m.editions || []).forEach((ed) => {
+        if (ed.custom_front_cover_id) gebruikt.add(ed.custom_front_cover_id);
+        if (ed.custom_back_cover_id) gebruikt.add(ed.custom_back_cover_id);
+      });
+      (m.seasons || []).forEach((s) => {
+        (s.editions || []).forEach((ed) => {
+          if (ed.custom_front_cover_id) gebruikt.add(ed.custom_front_cover_id);
+          if (ed.custom_back_cover_id) gebruikt.add(ed.custom_back_cover_id);
+        });
+      });
+    });
+  };
+
+  melden('Huidige collectie nakijken…');
+  const { movies } = await driveLoadMovies();
+  verzamel(movies);
+
+  const backups = await driveListBackups();
+  for (let i = 0; i < backups.length; i++) {
+    melden(`Backups nakijken… (${i + 1}/${backups.length})`);
+    try {
+      verzamel(await driveReadJsonFile(backups[i].id));
+    } catch {
+      // Een onleesbare backup mag niet leiden tot het weggooien van foto's:
+      // dan liever stoppen dan gokken.
+      throw new Error(`Backup "${backups[i].name}" is niet leesbaar. Er is niets opgeruimd.`);
+    }
+  }
+
+  melden('Hoesfoto’s zoeken…');
+  const bestanden = await driveListCoverFiles({ inclusiefWezen: true });
+  const wezen = bestanden.filter((f) => !gebruikt.has(f.id));
+
+  if (o.alleenTellen) return { gevonden: wezen.length, verwijderd: 0, totaal: bestanden.length };
+
+  let verwijderd = 0;
+  for (let i = 0; i < wezen.length; i++) {
+    melden(`Opruimen… (${i + 1}/${wezen.length})`);
+    try {
+      driveReleaseCoverUrl(wezen[i].id);
+      await driveDeleteFile(wezen[i].id);
+      verwijderd++;
+    } catch {
+      // Eén onbereikbaar bestand mag de rest niet blokkeren.
+    }
+  }
+  melden('Klaar.');
+  return { gevonden: wezen.length, verwijderd, totaal: bestanden.length };
 }
 
 /**
@@ -1328,6 +1634,42 @@ async function driveListBackups() {
   return (data.files || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
 }
 
+const UNIVERSE_BACKUP_PREFIX = 'universes-backup-';
+
+// Alle universum-backups in Drive, nieuwste eerst (FASE 39).
+async function driveListUniverseBackups() {
+  const q = encodeURIComponent(`name contains '${UNIVERSE_BACKUP_PREFIX}' and trashed=false`);
+  const resp = await driveApiFetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,createdTime,size)&pageSize=100`
+  );
+  const data = await resp.json();
+  return (data.files || []).sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+}
+
+/**
+ * Zet de universums weg onder dezelfde naamstaart als de collectiebackup, net
+ * zoals dat al met de prijzen gebeurde. Mislukt dit, dan is dat een waarschuwing
+ * en geen fout: de collectie zelf is het belangrijkst.
+ */
+async function _backupUniversumsMet(staart, maxBewaren) {
+  try {
+    const universes = await driveLoadUniverses();
+    if (!universes || !universes.length) return null;
+    const naam = `${UNIVERSE_BACKUP_PREFIX}${staart}.json`;
+    await driveCreateJsonFile(naam, universes);
+    if (maxBewaren) {
+      const zelfde = await driveListUniverseBackups();
+      for (const f of zelfde.slice(maxBewaren)) {
+        try { await driveDeleteFile(f.id); } catch {}
+      }
+    }
+    return naam;
+  } catch (e) {
+    console.warn('Universums niet mee geback-upt (collectie wél):', e);
+    return null;
+  }
+}
+
 // Alle prijsbackups in Drive, nieuwste eerst.
 async function driveListPriceBackups() {
   const q = encodeURIComponent(`name contains '${PRICE_BACKUP_PREFIX}' and trashed=false`);
@@ -1384,6 +1726,7 @@ async function driveAutoBackup() {
 
       await driveCreateJsonFile(`${BACKUP_PREFIX}${today}.json`, movies);
       await _backupPricesMet(today, BACKUP_KEEP);
+      await _backupUniversumsMet(today, BACKUP_KEEP);
 
       // Oude automatische backups opruimen (nieuwste BACKUP_KEEP blijven staan).
       const after = (await driveListBackups()).filter((f) => _isDatedBackupName(f.name));
@@ -1419,6 +1762,9 @@ async function driveBackupNow(reden) {
     const naam = `${BACKUP_PREFIX}${label}-${stamp}.json`;
     await driveCreateJsonFile(naam, movies);
     await _backupPricesMet(`${label}-${stamp}`, 6);
+    // FASE 39 — de wisdialoog beloofde een backup; universums zaten daar niet
+    // in. Nu wel, zodat "eerst een backup" ook echt alles dekt.
+    await _backupUniversumsMet(`${label}-${stamp}`, 6);
 
     // Hoogstens 3 van deze veiligheidskopieën bewaren, anders groeit het aan.
     const zelfde = (await driveListBackups()).filter((f) => f.name.startsWith(`${BACKUP_PREFIX}${label}-`));
@@ -1438,14 +1784,22 @@ async function driveBackupNow(reden) {
  * overtypen, en er gaat altijd eerst een backup naar Drive.
  * ========================================================================== */
 
-// Alle hoesfoto-bestanden in de App Data-map.
-async function driveListCoverFiles() {
+/**
+ * Alle hoesfoto-bestanden in de App Data-map.
+ * Met `{ inclusiefWezen: true }` ook de bestanden die bij een verwijdering
+ * hernoemd werden naar `wees-cover-...` (FASE 39).
+ */
+async function driveListCoverFiles(opties) {
   const q = encodeURIComponent(`name contains 'cover-' and trashed=false`);
   const resp = await driveApiFetch(
     `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=1000`
   );
   const data = await resp.json();
-  return (data.files || []).filter((f) => /^cover-.*\.(jpg|jpeg|png)$/i.test(f.name));
+  const patroon =
+    opties && opties.inclusiefWezen
+      ? /^(wees-)?cover-.*\.(jpg|jpeg|png)$/i
+      : /^cover-.*\.(jpg|jpeg|png)$/i;
+  return (data.files || []).filter((f) => patroon.test(f.name));
 }
 
 /**
@@ -1477,7 +1831,7 @@ async function driveWipeCollection(opties, onProgress) {
 
   if (o.covers) {
     melden('Hoesfoto’s verwijderen…');
-    const files = await driveListCoverFiles();
+    const files = await driveListCoverFiles({ inclusiefWezen: true });
     for (let i = 0; i < files.length; i++) {
       melden(`Hoesfoto’s verwijderen… (${i + 1}/${files.length})`);
       try {

@@ -217,34 +217,18 @@ async function initUniversesPage() {
         const details = await tmdbDetails(r.tmdb_id, r.media_type === 'tv' ? 'tv' : 'movie', config.tmdbKey);
         const id = slugify(details.title, details.release_year);
         if (collection.some((m) => m.id === id)) continue;
-        const today = new Date().toISOString().slice(0, 10);
-        const entry = {
+        // FASE 39 — zelfde fabriek als overal (mét `added_at`), en toevoegen
+        // dat een bestaande titel nooit overschrijft.
+        const entry = nieuweCollectieTitel({
           id,
           content_type: r.media_type === 'tv' ? 'tv' : 'movie',
-          date_added: today,
-          watched: false,
-          editions: [
-            {
-              eid: 'e1',
-              format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
-              notes: '',
-              boxset: '',
-              location: '',
-              wishlist: true,
-              date_added: today,
-              custom_front_cover_id: '',
-              custom_back_cover_id: '',
-              custom_front_cover: '',
-              custom_back_cover: '',
-            },
-          ],
-          ...details,
-          seasons: details.seasons ? details.seasons.map((s) => ({ ...s, owned: false, format: '' })) : [],
-        };
-        normalizeMovieEntry(entry);
-        await upsertMovieInDrive(entry);
+          format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+          wishlist: true,
+          details,
+        });
+        const uitkomst = await insertMovieIfAbsentInDrive(entry);
         collection.push(entry);
-        added++;
+        if (uitkomst === 'toegevoegd') added++;
       } catch (err) {
         console.warn('Overslaan:', r.title, err);
       }
@@ -264,42 +248,29 @@ async function initUniversesPage() {
     btn.textContent = 'bezig…';
     try {
       const details = await tmdbDetails(tmdbId, mediaType === 'tv' ? 'tv' : 'movie', config.tmdbKey);
-      const entry = {
+      // FASE 39 — dit record werd hier met de hand opgebouwd en was uit elkaar
+      // gegroeid met de rest: `added_at` ontbrak, waardoor alles wat je op deze
+      // pagina toevoegde verkeerd sorteerde bij "Onlangs toegevoegd". Nu via
+      // dezelfde fabriek als overal elders.
+      const entry = nieuweCollectieTitel({
         id: slugify(details.title, details.release_year),
         content_type: mediaType === 'tv' ? 'tv' : 'movie',
-        date_added: new Date().toISOString().slice(0, 10),
-        watched: false,
-        editions: [
-          {
-            eid: 'e1',
-            format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
-            notes: '',
-            boxset: '',
-            // Alle vier de uitvoeringen meteen zetten; voorheen stond alleen
-            // steelbook hier en kwamen de andere drie pas bij de volgende
-            // normalisatieronde erbij.
-            ...Object.fromEntries(EDITION_VARIANTS.map((v) => [v.key, false])),
-            wishlist: true,
-            date_added: new Date().toISOString().slice(0, 10),
-            custom_front_cover_id: '',
-            custom_back_cover_id: '',
-            custom_front_cover: '',
-            custom_back_cover: '',
-          },
-        ],
-        ...details,
-        seasons: details.seasons
-          ? details.seasons.map((s) => ({ ...s, owned: false, format: '' }))
-          : [],
-      };
-      normalizeMovieEntry(entry);
+        format: typeof addTitlePreferredFormat === 'function' ? addTitlePreferredFormat() : 'dvd',
+        wishlist: true,
+        details,
+      });
 
-      if (collection.some((m) => m.id === entry.id)) {
+      // FASE 39 — `collection` is de lijst van bij het openen van de pagina.
+      // Stond dit tabblad open terwijl je op je gsm iets toevoegde, dan zette
+      // een upsert je bezit, exemplaren en hoesfoto's terug naar een kaal
+      // wensrecord. De controle hoort binnen de vergrendeling te gebeuren,
+      // tegen wat er nú in Drive staat.
+      const uitkomst = await insertMovieIfAbsentInDrive(entry);
+      if (uitkomst === 'bestond-al') {
         btn.textContent = 'stond er al';
+        if (!collection.some((m) => m.id === entry.id)) collection.push(entry);
         return;
       }
-
-      await upsertMovieInDrive(entry);
       collection.push(entry);
       btn.outerHTML = '<span class="font-mono text-[11px] text-gold shrink-0">verlanglijst</span>';
     } catch (err) {
