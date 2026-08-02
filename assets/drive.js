@@ -735,6 +735,9 @@ function tryRestoreSession() {
     if (cached && cached.access_token && cached.expires_at > Date.now() + 30000) {
       accessToken = cached.access_token;
       tokenExpiresAt = cached.expires_at;
+      // FASE 41 — ook een token uit de cache krijgt zijn vooruitziende
+      // vernieuwing; anders begon het vooruitwerken pas na een nieuwe login.
+      if (typeof planTokenVernieuwing === 'function') planTokenVernieuwing();
       notifyAuthenticated();
       return;
     }
@@ -890,6 +893,8 @@ function onTokenError(err) {
 function storeToken(resp) {
   accessToken = resp.access_token;
   tokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000;
+  // FASE 41 — meteen de volgende stille vernieuwing plannen.
+  if (typeof planTokenVernieuwing === 'function') planTokenVernieuwing();
   try {
     localStorage.setItem(
       DRIVE_TOKEN_CACHE_KEY,
@@ -977,6 +982,75 @@ function whenTokenClientReady(timeoutMs) {
  * pogingen zouden elkaars callbacks overschrijven.
  */
 let tokenRenewal = null;
+
+/* ==========================================================================
+ * De aanmelding die je niet meer onderbreekt (FASE 41)
+ * ==========================================================================
+ * Een Google-token leeft precies één uur. Dat valt niet te verlengen — maar
+ * het kan wél stil vernieuwd worden vóórdat het verloopt.
+ *
+ * Tot nu toe gebeurde dat pas op het moment dat je iets opsloeg en het token
+ * al bijna om was. Lukte de stille vernieuwing dan niet, dan sloeg de
+ * inlogpoort dicht midden in je werk.
+ *
+ * Vanaf nu wordt er vooruit gewerkt: zolang je actief bent, vernieuwt de app
+ * het token ruim op tijd, op een rustig moment. Ben je weg, dan gebeurt er
+ * niets — er is geen reden om op de achtergrond een sessie levend te houden
+ * voor een tabblad waar niemand naar kijkt.
+ *
+ * En als een vooruitziende poging mislukt, blijft je scherm gewoon staan. Pas
+ * wanneer een échte schrijfactie strandt, komt de poort terug.
+ * ========================================================================== */
+
+const TOKEN_VOORUIT_MS = 5 * 60 * 1000;   // zoveel vóór het verlopen vernieuwen
+const ACTIEF_BINNEN_MS = 15 * 60 * 1000;  // zo lang geldt "je bent aan het werk"
+let laatsteActiviteit = Date.now();
+let vooruitTimer = null;
+
+function driveMarkeerActiviteit() {
+  laatsteActiviteit = Date.now();
+}
+
+function driveIsActief() {
+  return Date.now() - laatsteActiviteit < ACTIEF_BINNEN_MS;
+}
+
+/** Plant de volgende stille vernieuwing, ruim vóór het token verloopt. */
+function planTokenVernieuwing() {
+  clearTimeout(vooruitTimer);
+  if (!accessToken || !tokenExpiresAt) return;
+  // Minstens tien seconden wachten: anders zou een net vernieuwd token dat
+  // toevallig kort geldig is meteen een nieuwe ronde starten.
+  const wacht = Math.max(10000, tokenExpiresAt - Date.now() - TOKEN_VOORUIT_MS);
+  vooruitTimer = setTimeout(async () => {
+    if (!driveIsActief()) {
+      // Niet aan het werk: niets doen. Kom je terug, dan pakt de
+      // zichtbaarheids-luisteraar hieronder het op.
+      return;
+    }
+    try {
+      await ensureToken();
+    } catch {
+      // Mislukt is hier geen ramp: je scherm blijft staan, en de eerstvolgende
+      // schrijfactie probeert het opnieuw. Alleen dán mag de poort terugkomen.
+    }
+  }, wacht);
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  ['pointerdown', 'keydown', 'scroll', 'focus'].forEach((naam) => {
+    window.addEventListener(naam, driveMarkeerActiviteit, { passive: true, capture: true });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    driveMarkeerActiviteit();
+    // Terug in beeld: staat het token op omvallen, dan nú vernieuwen in plaats
+    // van straks midden in een bewerking.
+    if (accessToken && tokenExpiresAt && tokenExpiresAt - Date.now() < TOKEN_VOORUIT_MS) {
+      ensureToken().catch(() => {});
+    }
+  });
+}
 
 async function ensureToken() {
   if (accessToken && tokenExpiresAt > Date.now() + 30000) {
@@ -1572,6 +1646,39 @@ async function driveDeleteCoverFile(fileId) {
     // Al weg of onbereikbaar: geen probleem, en zeker geen reden om de
     // verwijdering van de titel te laten stranden.
   }
+}
+
+/**
+ * Draait driveDeleteCoverFile terug: haalt het `wees-`-voorvoegsel er weer af
+ * (FASE 41). Nodig voor "ongedaan maken" na het verwijderen van een titel —
+ * anders zou de titel terugkomen zonder zijn foto's.
+ */
+async function driveHerstelCoverFile(fileId) {
+  if (!fileId) return;
+  try {
+    const resp = await driveApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=name`);
+    const { name } = await resp.json();
+    if (name && name.startsWith(COVER_ORPHAN_PREFIX)) {
+      await driveRenameFile(fileId, name.slice(COVER_ORPHAN_PREFIX.length));
+    }
+  } catch {
+    // De foto is er niet meer of onbereikbaar: de titel zelf komt wél terug.
+  }
+}
+
+/** Alle hoesfoto's van één titel weer als 'in gebruik' markeren. */
+async function driveHerstelCoversOfMovie(movie) {
+  if (!movie) return;
+  const ids = [];
+  const uit = (e) => {
+    if (e.custom_front_cover_id) ids.push(e.custom_front_cover_id);
+    if (e.custom_back_cover_id) ids.push(e.custom_back_cover_id);
+  };
+  (movie.editions || []).forEach(uit);
+  (movie.seasons || []).forEach((s) => (s.editions || []).forEach(uit));
+  if (movie.custom_front_cover_id) ids.push(movie.custom_front_cover_id);
+  if (movie.custom_back_cover_id) ids.push(movie.custom_back_cover_id);
+  for (const id of ids) await driveHerstelCoverFile(id);
 }
 
 /**

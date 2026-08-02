@@ -572,6 +572,11 @@ Breaking Bad | 2008 | bluray | tv"></textarea>
     }
     document.getElementById('settings-btn').addEventListener('click', openSettings);
     document.getElementById('open-settings-link').addEventListener('click', openSettings);
+    // FASE 41 — de collectiepagina verwijst naar beheer.html#instellingen als
+    // je TMDb-sleutel ontbreekt. Dat anker bestond niet: je kwam op een pagina
+    // terecht die niets deed, terwijl je net verteld was dat je hier moest
+    // zijn. Nu gaat het scherm meteen open.
+    if (location.hash === '#instellingen') openSettings();
     document.getElementById('close-settings-btn').addEventListener('click', () => modal.classList.add('hidden'));
 
     document.getElementById('save-settings-btn').addEventListener('click', async () => {

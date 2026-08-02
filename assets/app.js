@@ -240,6 +240,8 @@ function initCollectionApp(config) {
     bulkEditModal: document.getElementById('bulk-edit-modal'),
     viewChips: document.getElementById('view-chips'),
     filterToggle: document.getElementById('filter-toggle'),
+    wishlistToggle: document.getElementById('wishlist-toggle'),
+    wishlistCount: document.getElementById('wishlist-count'),
     filterPanel: document.getElementById('filter-panel'),
     clearFilters: document.getElementById('clear-filters'),
     personModal: document.getElementById('person-modal'),
@@ -461,6 +463,19 @@ function initCollectionApp(config) {
     const p = document.createElement('span');
     p.textContent = tekst;
     toastEl.appendChild(p);
+    // FASE 41 — een knop ín de melding. Zo kan een handeling meteen
+    // teruggedraaid worden op de plek waar je hem net deed, in plaats van dat
+    // je moet weten dat er ergens een terugweg bestaat.
+    if (o.actie) {
+      const knop = document.createElement('button');
+      knop.type = 'button';
+      knop.textContent = o.actie.label;
+      knop.addEventListener('click', () => {
+        hideToast();
+        o.actie.fn();
+      });
+      toastEl.appendChild(knop);
+    }
     if (o.blijft) {
       const sluit = document.createElement('button');
       sluit.type = 'button';
@@ -526,7 +541,7 @@ function initCollectionApp(config) {
   // Achtergrond-opslag in volgorde (één tegelijk). De interface is dan al
   // bijgewerkt; bij een fout wordt de wijziging teruggedraaid.
   let saveChain = Promise.resolve();
-  function backgroundSave(taskFn, revertFn) {
+  function backgroundSave(taskFn, revertFn, naGelukt) {
     // Enige plek waar de collectie weggeschreven wordt vanuit de
     // collectiepagina. In leesmodus draaien we de wijziging meteen terug.
     if (!requireWrite()) {
@@ -540,6 +555,9 @@ function initCollectionApp(config) {
       try {
         await taskFn();
         setIndicator('saved');
+        // FASE 41 — pas hier, ná de melding "✓ Opgeslagen": anders overschrijft
+        // die routineboodschap meteen de knop om het terug te draaien.
+        if (naGelukt) naGelukt();
       } catch (err) {
         console.error('Achtergrond-opslag mislukt:', err);
         if (revertFn) revertFn();
@@ -566,8 +584,13 @@ function initCollectionApp(config) {
           });
     return p.then((data) => {
       state.all = data;
+      // FASE 41 — eerst je bewaarde keuzes terugzetten, dán pas de chips
+      // bouwen: die zetten zichzelf al op 'aan' op basis van de state, dus zo
+      // klopt het scherm meteen zonder extra ronde.
+      const hersteld = laadBewaardeFilters();
       buildFacetChips(data);
       applyFilters();
+      meldHersteldeFilters(hersteld);
 
       // Universums op de achtergrond laden zodat het universumfilter kan
       // verschijnen. Heb je er geen, dan gebeurt er niets. De ledenlijsten
@@ -582,9 +605,155 @@ function initCollectionApp(config) {
       // Faalt dit (geen Drive-sessie, of nog geen prijzen ververst), dan blijft
       // de collectie gewoon werken — enkel zonder prijzen.
       loadPriceIndex();
+
+      // FASE 41 — een titel die via de pagina Ontbreekt is aangeklikt.
+      opendeTitelUitAdres();
     });
   }
   window.__collectionReload = reload;
+
+  /* ---------- Filters onthouden (FASE 41) ----------
+   *
+   * Filters, sortering en groeperen overleefden geen paginawissel. Ging je
+   * even naar Statistieken en terug, dan stond alles weer op nul — precies bij
+   * het soort werk waarbij je hetzelfde filter tien keer nodig hebt.
+   *
+   * Wat bewaard wordt gaat in localStorage, dus het overleeft ook het sluiten
+   * van je browser. Om te voorkomen dat je je een week later afvraagt waar je
+   * films gebleven zijn, meldt de app het als er filters teruggezet zijn — mét
+   * een knop om ze weg te doen.
+   */
+  const FILTER_KEY = 'mediacollectie_filters';
+  const FILTER_SETS = [
+    ['formats', 'activeFormats'], ['types', 'activeTypes'], ['genres', 'activeGenres'],
+    ['status', 'activeStatus'], ['saga', 'activeSaga'], ['watched', 'activeWatched'],
+    ['loaned', 'activeLoaned'], ['decades', 'activeDecades'], ['certs', 'activeCerts'],
+    ['variants', 'activeVariants'], ['boxsets', 'activeBoxsets'],
+    ['locations', 'activeLocations'], ['universes', 'activeUniverses'],
+  ];
+
+  function bewaarFilters() {
+    try {
+      const uit = { sort: state.sort, view: state.view, groep: !!state.groupSagas, letter: state.activeLetter || '' };
+      FILTER_SETS.forEach(([naam, sleutel]) => {
+        const v = [...state[sleutel]];
+        if (v.length) uit[naam] = v;
+      });
+      localStorage.setItem(FILTER_KEY, JSON.stringify(uit));
+    } catch {
+      // Niets kunnen bewaren is niet erg; dan begin je gewoon opnieuw.
+    }
+  }
+
+  function laadBewaardeFilters() {
+    let opgeslagen = null;
+    try {
+      opgeslagen = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null');
+    } catch {}
+    if (!opgeslagen) return 0;
+
+    let aantal = 0;
+    FILTER_SETS.forEach(([naam, sleutel]) => {
+      (opgeslagen[naam] || []).forEach((v) => { state[sleutel].add(v); aantal++; });
+    });
+    if (opgeslagen.letter) { state.activeLetter = opgeslagen.letter; aantal++; }
+    if (opgeslagen.sort) state.sort = opgeslagen.sort;
+    if (opgeslagen.view) state.view = opgeslagen.view;
+    state.groupSagas = !!opgeslagen.groep;
+
+    // De knoppen laten zien wat er aanstaat, anders klopt het scherm niet met
+    // de werkelijkheid. De chiprijen die uit de collectie opgebouwd worden doen
+    // dat zelf al; de vaste rijen hieronder niet.
+    if (els.sort) els.sort.value = state.sort;
+    if (els.groupToggle) els.groupToggle.classList.toggle('chip-active', state.groupSagas);
+    if (els.viewChips) {
+      els.viewChips.querySelectorAll('[data-view]').forEach((c) =>
+        c.classList.toggle('chip-active', c.dataset.view === state.view)
+      );
+    }
+    markeerActieveChips();
+    return aantal;
+  }
+
+  /* ---------- De verlanglijst zichtbaar (FASE 41) ----------
+   *
+   * De verlanglijst had geen enkele ingang in de kop: hij zat drie klikken
+   * diep in een dichtgeklapt paneel, en wat je erop zette verdween meteen uit
+   * beeld — de collectie toont standaard alleen wat je bezit. Dat je hem zelf
+   * niet terugvond was dus geen vergissing van jou.
+   *
+   * Deze knop is precies hetzelfde filter, maar dan waar je hem ziet, met
+   * hoeveel titels erop staan.
+   */
+  function werkVerlanglijstKnopBij() {
+    if (!els.wishlistToggle) return;
+    const aan = state.activeStatus.has('wishlist') && !state.activeStatus.has('owned');
+    els.wishlistToggle.classList.toggle('chip-active', aan);
+    els.wishlistToggle.setAttribute('aria-pressed', aan ? 'true' : 'false');
+    if (els.wishlistCount) {
+      const n = state.all.filter((m) => m.wishlist).length;
+      els.wishlistCount.textContent = n ? `(${n})` : '';
+    }
+  }
+
+  function wisselVerlanglijst() {
+    const aan = state.activeStatus.has('wishlist') && !state.activeStatus.has('owned');
+    state.activeStatus.clear();
+    if (!aan) state.activeStatus.add('wishlist');
+    markeerActieveChips();
+    applyFilters();
+  }
+
+  function meldHersteldeFilters(aantal) {
+    if (!aantal) return;
+    showToast(`Je filters van vorige keer staan nog aan (${aantal})`, 'ok', {
+      duur: 7000,
+      actie: { label: 'Wissen', fn: () => { if (els.clearFilters) els.clearFilters.click(); } },
+    });
+  }
+
+  /** De vaste chiprijen gelijkzetten met wat er in state staat. */
+  function markeerActieveChips() {
+    const paren = [
+      ['[data-type]', 'type', state.activeTypes],
+      ['[data-status]', 'status', state.activeStatus],
+      ['[data-saga-filter]', 'sagaFilter', state.activeSaga],
+      ['[data-watched]', 'watched', state.activeWatched],
+      ['[data-loaned]', 'loaned', state.activeLoaned],
+    ];
+    paren.forEach(([kiezer, attr, set]) => {
+      document.querySelectorAll(kiezer).forEach((c) => {
+        c.classList.toggle('chip-active', set.has(c.dataset[attr]));
+      });
+    });
+  }
+
+  /**
+   * De pagina Ontbreekt linkt naar `index.html#<id>` (FASE 41). Dat anker deed
+   * niets: je kwam op de collectie terecht zonder te weten waar de titel stond,
+   * en als er nog een filter aanstond zag je hem helemaal niet.
+   */
+  function opendeTitelUitAdres() {
+    const id = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    if (!id) return;
+    const item = state.all.find((m) => m.id === id);
+    if (!item) return;
+    // Staat hij achter een filter, dan eerst alles wissen — anders opent er een
+    // detailscherm van iets dat er volgens het raster niet is.
+    if (!state.filtered.some((m) => m.id === id)) {
+      if (els.clearFilters) els.clearFilters.click();
+      else applyFilters();
+    }
+    openModal(id);
+    // Het anker weer weghalen, zodat opnieuw laden niet ongevraagd hetzelfde
+    // scherm opent.
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+
+  // Sta je al op de collectiepagina, dan is index.html#<id> voor de browser
+  // géén nieuwe pagina: er wordt niets opnieuw geladen. Zonder deze luisteraar
+  // deed zo'n link vanuit je geschiedenis of een ander tabblad alsnog niets.
+  window.addEventListener('hashchange', opendeTitelUitAdres);
 
   // Klik-, toets- en sfeerlichtafhandeling één keer op het raster zetten, vóór
   // de eerste keer tekenen. Daarna hoeft geen enkele herteken-beurt nog
@@ -1058,6 +1227,9 @@ function initCollectionApp(config) {
 
     list = sortList(list, state.sort);
     state.filtered = list;
+    // FASE 41 — je keuzes onthouden, zodat ze een paginawissel overleven.
+    bewaarFilters();
+    werkVerlanglijstKnopBij();
 
     // Terug naar de eerste pagina hoort alleen te gebeuren als je de selectie
     // wijzigt — een filter, de zoekterm, de sortering of de weergave. Bewerk je
@@ -1656,11 +1828,38 @@ function initCollectionApp(config) {
 
   // ---------- Acties (optimistic) ----------
 
+  /* ---------- Ongedaan maken (FASE 41) ----------
+   *
+   * De terugdraaikant bestond al: backgroundSave() zet een mislukte opslag
+   * netjes terug. Alleen was er geen knop — een verkeerde klik van jou was
+   * definitief, terwijl een fout van de server dat niet was.
+   *
+   * Hier staat één helper. Elke handeling die iets weghaalt of omzet, meldt
+   * wat er gebeurde en biedt meteen de weg terug aan.
+   */
+  function meldMetOngedaan(tekst, herstel) {
+    showToast(tekst, 'ok', {
+      duur: 9000,
+      actie: {
+        label: 'Ongedaan maken',
+        fn: () => {
+          try {
+            herstel();
+          } catch (err) {
+            showToast('✗ Terugdraaien mislukt: ' + err.message, 'fout', { blijft: true });
+          }
+        },
+      },
+    });
+  }
+
   function handleDeleteTitle(id, title) {
     if (!requireWrite()) return;
-    if (!confirm(`Weet je zeker dat je "${title}" volledig wilt verwijderen uit je collectie? Dit kan niet ongedaan gemaakt worden.`)) {
-      return;
-    }
+    // FASE 41 — "Dit kan niet ongedaan gemaakt worden" klopt niet meer: er
+    // staat nu negen seconden lang een knop om het terug te halen, en de
+    // hoesfoto's worden sinds FASE 39 bewaard in plaats van gewist.
+    if (!confirm(`"${title}" volledig uit je collectie verwijderen?`)) return;
+
     const removed = state.all.find((m) => m.id === id);
     const idx = state.all.indexOf(removed);
     state.all = state.all.filter((m) => m.id !== id);
@@ -1677,7 +1876,26 @@ function initCollectionApp(config) {
             await driveDeleteCoversOfMovie(removed);
           }
         }),
-      () => { if (removed) state.all.splice(Math.min(idx, state.all.length), 0, removed); }
+      () => { if (removed) state.all.splice(Math.min(idx, state.all.length), 0, removed); },
+      () => {
+        if (removed) meldMetOngedaan(`"${title}" verwijderd`, () => herstelTitel(removed, idx));
+      }
+    );
+  }
+
+  /** Een verwijderde titel terugzetten, mét zijn hoesfoto's. */
+  function herstelTitel(titel, idx) {
+    if (!requireWrite()) return;
+    state.all.splice(Math.min(idx, state.all.length), 0, titel);
+    buildFacetChips(state.all);
+    applyFilters();
+    backgroundSave(
+      async () => {
+        if (typeof driveHerstelCoversOfMovie === 'function') await driveHerstelCoversOfMovie(titel);
+        await upsertMovieInDrive(titel);
+        showToast(`"${titel.title}" is terug`, 'ok');
+      },
+      () => { state.all = state.all.filter((m) => m !== titel); }
     );
   }
 
@@ -4432,6 +4650,21 @@ function initCollectionApp(config) {
     applyFilters();
     openModal(item.id);
 
+    // FASE 41 — een exemplaar weghalen is nu terug te draaien; de hoesfoto's
+    // van dat exemplaar worden sinds FASE 39 bewaard, dus die komen mee terug.
+    const herstelExemplaar = () => {
+      item.editions = JSON.parse(JSON.stringify(snapshot));
+      syncLegacyFieldsFromEditions(item);
+      vergeetEigenTekst(item);
+      buildFacetChips(state.all);
+      applyFilters();
+      openModal(item.id);
+      backgroundSave(async () => {
+        if (typeof driveHerstelCoversOfMovie === 'function') await driveHerstelCoversOfMovie(item);
+        await upsertMovieInDrive(item);
+      });
+    };
+
     backgroundSave(
       // Ook hier: de foto's van dit exemplaar pas weg als het wegschrijven
       // gelukt is, anders blijven ze bestaan bij een terugdraaiing.
@@ -4445,7 +4678,8 @@ function initCollectionApp(config) {
         item.editions = snapshot;
         syncLegacyFieldsFromEditions(item);
         if (!els.modal.classList.contains('hidden')) openModal(item.id);
-      }
+      },
+      () => meldMetOngedaan(`Exemplaar op ${formatLabel(target.format)} verwijderd`, herstelExemplaar)
     );
   }
 
@@ -5645,6 +5879,10 @@ function initCollectionApp(config) {
       title_locked: item.title_locked,
       custom_title: item.custom_title,
       editions: JSON.parse(JSON.stringify(item.editions || [])),
+      // FASE 40 — de toevoegdatum is aanpasbaar, dus die hoort ook bij het
+      // terugdraaien.
+      date_added: item.date_added,
+      added_at: item.added_at,
     };
 
     try {
@@ -5764,8 +6002,22 @@ function initCollectionApp(config) {
         () => {
           Object.assign(item, previous);
           syncLegacyFieldsFromEditions(item);
+          vergeetEigenTekst(item);
           if (!els.modal.classList.contains('hidden')) openModal(item.id);
-        }
+        },
+        // FASE 41 — een bewerking is nu terug te draaien. De momentopname
+        // bestond al voor het geval de opslag mislukt; hier krijgt ze een knop.
+        // Hoesfoto's vallen erbuiten: die zijn op dit punt al geüpload.
+        () =>
+          meldMetOngedaan('Wijzigingen opgeslagen', () => {
+            Object.assign(item, JSON.parse(JSON.stringify(previous)));
+            syncLegacyFieldsFromEditions(item);
+            vergeetEigenTekst(item);
+            buildFacetChips(state.all);
+            applyFilters();
+            if (!els.modal.classList.contains('hidden')) openModal(item.id);
+            backgroundSave(() => upsertMovieInDrive(item));
+          })
       );
     } catch (err) {
       Object.assign(item, previous);
@@ -5928,6 +6180,11 @@ function initCollectionApp(config) {
         applyFilters();
       });
     });
+  }
+
+  // FASE 41 — de verlanglijst, waar je hem ziet.
+  if (els.wishlistToggle) {
+    els.wishlistToggle.addEventListener('click', wisselVerlanglijst);
   }
 
   // FASE 40 — uitgeleend of in je kast.

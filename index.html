@@ -725,6 +725,14 @@
              Op een smal scherm wordt hij één horizontaal schuifbare rij: de
              bediening wikkelde daar over vier regels en at een kwart van het
              scherm op, terwijl de balk blijft plakken tijdens het scrollen. -->
+        <!-- FASE 41 — de verlanglijst had geen enkele ingang: hij zat drie
+             klikken diep in een dichtgeklapt paneel, en wat je erop zette
+             verdween meteen uit beeld. Deze twee knoppen staan bewust búiten
+             de schuifbare rij hieronder, zodat ze op een gsm altijd zichtbaar
+             zijn. -->
+        <button id="wishlist-toggle" type="button" class="chip shrink-0" aria-pressed="false"
+                title="Alleen je verlanglijst tonen">♡ Verlanglijst <span id="wishlist-count" class="font-mono"></span></button>
+        <button id="filter-toggle" type="button" class="chip shrink-0" aria-expanded="false" aria-controls="filter-panel">Filters ▾</button>
         <div id="bar-extra" class="flex gap-2 items-center">
         <select id="sort-select" class="bg-surface border border-white/10 rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:ring-2 focus:ring-gold/50">
           <option value="date_added_desc">Onlangs toegevoegd</option>
@@ -745,7 +753,6 @@
         </div>
         <button id="group-sagas-toggle" type="button" class="chip" title="Titels van dezelfde reeks als één kaart tonen">Reeksen groeperen</button>
         <button id="select-toggle" type="button" class="chip" aria-pressed="false" title="Meerdere titels aanvinken om ze samen te verwijderen">Selecteren</button>
-        <button id="filter-toggle" type="button" class="chip" aria-expanded="false" aria-controls="filter-panel">Filters ▾</button>
         </div><!-- /#bar-extra -->
       </div>
 
